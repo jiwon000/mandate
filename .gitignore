@@ -1,0 +1,12 @@
+node_modules/
+contracts/artifacts/
+contracts/artifacts-local/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+.env
+.env.local
+.env.*
+!.env.example
+contracts/deployments.latest.json
+.DS_Store

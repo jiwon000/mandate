@@ -1,0 +1,20 @@
+{
+  "name": "mandate-protocol",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "node contracts/tools/compile.mjs",
+    "test:contracts": "node --test contracts/test-js/*.test.mjs",
+    "deploy:monad": "node contracts/script/deploy.mjs",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^4.0.0",
+    "@openzeppelin/contracts": "5.4.0",
+    "chai": "^5.2.0",
+    "ethers": "^6.15.0",
+    "ganache": "^7.9.2",
+    "hardhat": "^3.0.0",
+    "solc": "0.8.24"
+  }
+}

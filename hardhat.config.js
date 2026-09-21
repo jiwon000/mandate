@@ -3,7 +3,7 @@ import hardhatEthers from "@nomicfoundation/hardhat-ethers";
 export default {
   plugins: [hardhatEthers],
   solidity: {
-    version: "0.8.24",
+    version: "0.8.37",
     settings: {
       optimizer: { enabled: true, runs: 200 },
       evmVersion: "prague"

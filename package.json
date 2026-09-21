@@ -13,8 +13,10 @@
     "@openzeppelin/contracts": "5.4.0",
     "chai": "^5.2.0",
     "ethers": "^6.15.0",
-    "ganache": "^7.9.2",
     "hardhat": "^3.0.0",
-    "solc": "0.8.24"
+    "solc": "0.8.37"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
   }
 }

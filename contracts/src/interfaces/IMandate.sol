@@ -61,4 +61,7 @@ interface IRiskGuard {
     ) external;
 
     function checkAfter(address vault, address adapter) external;
+
+    /// @notice Revert unless a mark taken at `markedAt` is still fresh enough to price against.
+    function requireFreshMark(address vault, uint256 markedAt) external view;
 }

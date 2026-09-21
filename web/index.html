@@ -102,7 +102,7 @@
             </div>
             <button id="allocateButton" class="button button-primary button-large">Review allocation</button>
             <button id="withdrawButton" class="button button-secondary button-large">Withdraw all shares</button>
-            <p class="fineprint">Marked NAV carries the open position; redeemable is the cash withdraw() pays out today. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator.</p>
+            <p class="fineprint">Shares are minted and redeemed at marked NAV, so the open position is priced in both directions. Redeemable is capped by the cash on hand - the rest of a claim stays as shares until the agent frees it up. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator.</p>
           </article>
           <aside class="allocation-aside">
             <div class="custody-lock"><span class="lock-icon">◇</span><p class="eyebrow">CUSTODY SEPARATION</p><h3>Your capital stays withdrawable</h3><p>Vault shares belong to your wallet. The agent holds an execute-only permission and has no transfer or withdrawal path.</p></div>

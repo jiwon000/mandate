@@ -117,7 +117,8 @@ export async function startChain() {
       const vault = await deploy("MandateVault", "MandateVault", [
         await usdc.getAddress(),
         await guard.getAddress(),
-        agentAddress
+        agentAddress,
+        await adapter.getAddress()
       ]);
       const vaultAddress = await vault.getAddress();
 

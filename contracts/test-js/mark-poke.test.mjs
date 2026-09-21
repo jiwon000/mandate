@@ -1,73 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import hre from "hardhat";
-import { BrowserProvider, ContractFactory, parseUnits, AbiCoder } from "ethers";
-import { artifact, compileContracts } from "../tools/compiler.mjs";
-
-const compiled = compileContracts();
-const coder = AbiCoder.defaultAbiCoder();
-
-const BASE_LIMITS = {
-  maxLeverageX100: 300,
-  maxDrawdownBps: 200,
-  maxMarkAgeSeconds: 3_600,
-  maxSlippageBps: 100,
-  minBlocksBetweenTrades: 0,
-  maxConsecutiveRejects: 3,
-  maxOrderNotional: parseUnits("2000", 18),
-  maxPositionNotional: parseUnits("2000", 18),
-  maxTotalNotional: parseUnits("2000", 18),
-  maxBlockNotional: parseUnits("2000", 18)
-};
-
-async function fixture(t, limitOverrides = {}) {
-  const chain = await hre.network.create();
-  t.after(() => chain.close());
-  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
-  provider.pollingInterval = 10;
-  const [owner, allocator, agent, keeper] = await Promise.all(
-    [0, 1, 2, 3].map((i) => provider.getSigner(i))
-  );
-
-  async function deploy(source, name, args = []) {
-    const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
-    const contract = await new ContractFactory(abi, bytecode, owner).deploy(...args);
-    await contract.waitForDeployment();
-    return contract;
-  }
-
-  const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
-  const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
-  const venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [
-    parseUnits("2000", 18)
-  ]);
-  const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [await venue.getAddress()]);
-  const vault = await deploy("MandateVault", "MandateVault", [
-    await usdc.getAddress(),
-    await guard.getAddress(),
-    await agent.getAddress()
-  ]);
-
-  const vaultAddress = await vault.getAddress();
-  const adapterAddress = await adapter.getAddress();
-  await (await venue.setAdapter(adapterAddress, true)).wait();
-  await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
-  await (await guard.configure(vaultAddress, { ...BASE_LIMITS, ...limitOverrides })).wait();
-
-  const deposit = parseUnits("1000", 6);
-  await (await usdc.mint(await allocator.getAddress(), deposit)).wait();
-  await (await usdc.connect(allocator).approve(vaultAddress, deposit)).wait();
-  await (await vault.connect(allocator).allocate(deposit, await allocator.getAddress())).wait();
-
-  // 0.5 ETH @ $2000 = $1000 notional against $1000 equity: exactly 1.00x.
-  const order = coder.encode(["int256", "uint256"], [parseUnits("0.5", 18), parseUnits("2100", 18)]);
-
-  return {
-    chain, provider, owner, allocator, agent, keeper,
-    usdc, guard, venue, adapter, vault,
-    vaultAddress, adapterAddress, deposit, order
-  };
-}
+import { parseUnits } from "ethers";
+import { coder, fixture } from "./fixture.mjs";
 
 test("markEquity prices the open position, so equity moves without any trade", async (t) => {
   const f = await fixture(t);
@@ -149,7 +83,12 @@ test("a frozen vault stops the agent but never traps the allocator", async (t) =
   const shares = await f.vault.balanceOf(allocatorAddress);
   await (await f.vault.connect(f.allocator).withdraw(shares, allocatorAddress)).wait();
   assert.equal(await f.vault.totalSupply(), 0n, "withdrawal still works while frozen");
-  assert.equal(await f.usdc.balanceOf(allocatorAddress), parseUnits("1009.5", 6));
+  // 0.5 ETH bought at $2000 is $100 underwater at $1800, so the vault is worth
+  // 899.5 even though 999.5 of cash is sitting in it. The allocator redeems at
+  // the marked price and the position's loss stays behind as collateral instead
+  // of walking out of the door with the last share.
+  assert.equal(await f.usdc.balanceOf(allocatorAddress), parseUnits("909.5", 6));
+  assert.equal(await f.vault.totalAssets(), parseUnits("100", 6), "the loss stays collateralised");
 });
 
 test("freezing twice is rejected, so the bounty is paid once", async (t) => {

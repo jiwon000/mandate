@@ -44,7 +44,7 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
     owner,
     "contracts/src/MandateVault.sol",
     "MandateVault",
-    [await usdc.getAddress(), await guard.getAddress(), await agent.getAddress()]
+    [await usdc.getAddress(), await guard.getAddress(), await agent.getAddress(), await adapter.getAddress()]
   );
 
   const vaultAddress = await vault.getAddress();

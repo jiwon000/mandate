@@ -464,9 +464,16 @@ function renderAllocate() {
   $("#allocateTitle").textContent = `Fund ${vault.name}`;
   $("#allocateNav").textContent = `${nav4(vault.nav)} USDC`;
   $("#allocateShares").textContent = state.wallet ? `${usdc(vault.userShares)} shares` : "—";
-  const claim =
-    vault.totalSupply === 0n ? 0n : (vault.userShares * vault.totalAssets) / vault.totalSupply;
-  $("#allocateClaim").textContent = state.wallet ? `${usdc(claim)} mUSDC` : "—";
+  // What withdraw() would actually pay right now: the stake valued at the marked
+  // price, capped by the cash on hand. A vault holding an in-the-money position
+  // is worth more than its balance, and the shares the cash cannot cover stay
+  // outstanding until the agent frees some up.
+  const fair =
+    vault.totalSupply === 0n ? 0n : (vault.userShares * vault.equity6) / vault.totalSupply;
+  const claim = fair < vault.totalAssets ? fair : vault.totalAssets;
+  $("#allocateClaim").textContent = state.wallet
+    ? `${usdc(claim)} mUSDC${claim < fair ? ` of ${usdc(fair)}` : ""}`
+    : "—";
   $("#modalAgent").textContent = vault.name;
   $("#modalGlyph").textContent = vault.initials;
   $("#modalVault").textContent = shortAddress(vault.address);
@@ -641,10 +648,13 @@ function updateAmount(value) {
   if (!vault) return;
   const amount = Math.max(0, Number(value) || 0);
   const assets = ethers.parseUnits(amount.toFixed(6), 6);
+  // allocate() mints against marked equity, not the cash balance, so the estimate
+  // has to price the open position too or it will overstate every entry into a
+  // profitable vault.
   const shares =
-    vault.totalSupply === 0n || vault.totalAssets === 0n
+    vault.totalSupply === 0n || vault.equity6 === 0n
       ? assets
-      : (assets * vault.totalSupply) / vault.totalAssets;
+      : (assets * vault.totalSupply) / vault.equity6;
   $("#estimatedShares").textContent = `${usdc(shares)} shares`;
   $("#modalAmount").textContent = `${amount.toLocaleString()} mUSDC`;
   $("#modalShares").textContent = `${usdc(shares)} shares`;

@@ -20,6 +20,8 @@ contract MandateVault is ReentrancyGuard {
     error InsufficientShares();
     error InvalidReceiver();
     error OnlyRiskGuard();
+    error AdapterMismatch();
+    error NoMarkedEquity();
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -29,6 +31,11 @@ contract MandateVault is ReentrancyGuard {
     IERC20 public immutable asset;
     IRiskGuard public immutable riskGuard;
     address public immutable agent;
+    /// @notice The venue this vault trades on and is priced against.
+    /// @dev One vault, one venue. Pricing shares off adapter A while the agent trades
+    ///      on adapter B would value a position the vault cannot see, so execute()
+    ///      refuses any other adapter rather than letting the two drift apart.
+    IVenueAdapter public immutable venueAdapter;
     AgentState public state = AgentState.Active;
 
     uint256 public totalSupply;
@@ -40,37 +47,80 @@ contract MandateVault is ReentrancyGuard {
     event SharesTransferred(address indexed from, address indexed to, uint256 shares);
     event Frozen(address indexed beneficiary, uint256 bounty);
 
-    constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_) {
+    constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_, IVenueAdapter adapter_) {
         asset = asset_;
         riskGuard = riskGuard_;
         agent = agent_;
+        venueAdapter = adapter_;
     }
 
+    /// @notice Cash sitting in the vault. This is not what a share is worth.
+    /// @dev The adapter reads this as the cash leg of markEquity(), so it cannot be
+    ///      made mark-aware itself without recursing. Use markedAssets() for value.
     function totalAssets() public view returns (uint256) {
         return asset.balanceOf(address(this));
+    }
+
+    /// @notice What the vault is worth: cash plus unrealised PnL on the open position.
+    function markedAssets() public view returns (uint256 assets, uint256 markedAt) {
+        (assets, markedAt) = venueAdapter.markEquity(address(this));
     }
 
     function allocate(uint256 assets, address receiver) external nonReentrant returns (uint256 shares) {
         if (receiver == address(0)) revert InvalidReceiver();
         if (state != AgentState.Active) revert AgentNotActive();
         if (assets == 0) revert ZeroAmount();
-        uint256 assetsBefore = totalAssets();
-        shares = totalSupply == 0 ? assets : Math.mulDiv(assets, totalSupply, assetsBefore);
+
+        uint256 supply = totalSupply;
+        if (supply == 0) {
+            shares = assets;
+        } else {
+            // Price the entry against what the vault is worth, not against the cash it
+            // happens to be holding. Minting on the cash balance alone hands a new
+            // allocator a slice of an open position's unrealised profit, or charges
+            // them for an unrealised loss they were not around for.
+            (uint256 equity, uint256 markedAt) = markedAssets();
+            riskGuard.requireFreshMark(address(this), markedAt);
+            if (equity == 0) revert NoMarkedEquity();
+            shares = Math.mulDiv(assets, supply, equity);
+        }
         if (shares == 0) revert ZeroShares();
 
         asset.safeTransferFrom(msg.sender, address(this), assets);
-        totalSupply += shares;
+        totalSupply = supply + shares;
         balanceOf[receiver] += shares;
         emit Allocated(receiver, assets, shares);
     }
 
+    /// @notice Redeem shares at marked NAV, paid out of whatever cash the vault holds.
+    /// @dev A vault with an open position is not all cash, so a full redemption can be
+    ///      worth more than the balance. Rather than revert - which would turn an
+    ///      illiquid position into a locked allocator - this pays out the cash it can
+    ///      and burns only the shares that cash bought at the marked price. NAV per
+    ///      share is unchanged for whoever stays, and the caller keeps the remainder
+    ///      of their claim as shares they can redeem once the agent frees up cash.
     function withdraw(uint256 shares, address receiver) external nonReentrant returns (uint256 assets) {
         if (receiver == address(0)) revert InvalidReceiver();
         if (shares == 0) revert ZeroShares();
         if (balanceOf[msg.sender] < shares) revert InsufficientShares();
-        assets = Math.mulDiv(shares, totalAssets(), totalSupply);
+
+        (uint256 equity, uint256 markedAt) = markedAssets();
+        riskGuard.requireFreshMark(address(this), markedAt);
+        if (equity == 0) revert NoMarkedEquity();
+
+        uint256 supply = totalSupply;
+        assets = Math.mulDiv(shares, equity, supply);
+        uint256 cash = totalAssets();
+        if (assets > cash) {
+            assets = cash;
+            // Round the burn up so a partial exit never leaves the caller holding a
+            // sliver of a share they have already been paid for.
+            shares = Math.mulDiv(cash, supply, equity, Math.Rounding.Ceil);
+        }
+        if (assets == 0) revert ZeroAmount();
+
         balanceOf[msg.sender] -= shares;
-        totalSupply -= shares;
+        totalSupply = supply - shares;
         asset.safeTransfer(receiver, assets);
         emit Withdrawn(msg.sender, assets, shares);
     }
@@ -89,6 +139,7 @@ contract MandateVault is ReentrancyGuard {
     function execute(address adapter, bytes calldata order) external nonReentrant {
         if (msg.sender != agent) revert OnlyAgent();
         if (state != AgentState.Active) revert AgentNotActive();
+        if (adapter != address(venueAdapter)) revert AdapterMismatch();
 
         TradePreview memory expected = IVenueAdapter(adapter).preview(address(this), order);
         riskGuard.checkAndConsumeBefore(address(this), adapter, expected);

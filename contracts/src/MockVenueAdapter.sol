@@ -10,6 +10,9 @@ contract MockVenueAdapter is IVenueAdapter {
     error ZeroOrder();
     error PreviewMismatch();
 
+    /// @dev Vault assets are 6dp; venue notionals are 1e18. 1e12 converts between them.
+    uint256 private constant ASSET_TO_E18 = 1e12;
+
     DeterministicMockVenue public immutable venue;
 
     constructor(DeterministicMockVenue venue_) {
@@ -25,10 +28,14 @@ contract MockVenueAdapter is IVenueAdapter {
         p.orderNotional = Math.mulDiv(_abs(sizeDeltaE18), price, 1e18);
         p.expectedPositionNotional = Math.mulDiv(_abs(resultingSize), price, 1e18);
         p.expectedTotalNotional = p.expectedPositionNotional;
-        uint256 assets = IMandateVaultView(vault).totalAssets();
-        p.expectedLeverageX100 = assets == 0
+
+        // Leverage is measured against mark equity, not the idle cash balance: an agent
+        // sitting on an underwater position must not look under-levered just because the
+        // USDC balance has not moved.
+        (uint256 equity,) = markEquity(vault);
+        p.expectedLeverageX100 = equity == 0
             ? type(uint256).max
-            : Math.mulDiv(p.expectedTotalNotional, 100, assets * 1e12);
+            : Math.mulDiv(p.expectedTotalNotional, 100, equity * ASSET_TO_E18);
         p.minAmountOut = limitPriceE18;
         p.orderHash = keccak256(abi.encode(vault, sizeDeltaE18, limitPriceE18));
     }
@@ -47,6 +54,16 @@ contract MockVenueAdapter is IVenueAdapter {
     {
         positionNotional = Math.mulDiv(_abs(venue.positionSizeE18(vault)), venue.priceE18(), 1e18);
         totalNotional = positionNotional;
+    }
+
+    /// @inheritdoc IVenueAdapter
+    function markEquity(address vault) public view returns (uint256 equity, uint256 markedAt) {
+        uint256 cash = IMandateVaultView(vault).totalAssets();
+        int256 markValueE18 = (venue.positionSizeE18(vault) * int256(venue.priceE18())) / 1e18;
+        int256 pnlE18 = markValueE18 - venue.netCostE18(vault);
+        int256 equityE18 = int256(cash * ASSET_TO_E18) + pnlE18;
+        equity = equityE18 <= 0 ? 0 : uint256(equityE18) / ASSET_TO_E18;
+        markedAt = venue.updatedAt();
     }
 
     function _abs(int256 value) private pure returns (uint256) {

@@ -42,7 +42,9 @@ limit the allocator accepted, not against each other. A vault past a limit reads
 
 **Allocate** — `approve()` then `allocate()` for real. `withdraw()` stays enabled
 while a vault is frozen, because freezing closes the agent's door, not the
-allocator's.
+allocator's. Both doors do close on a mark past its age limit: shares are priced
+off that mark in both directions, and neither screen will let you sign against a
+price the guard would reject.
 
 **Live Risk** — the control room:
 

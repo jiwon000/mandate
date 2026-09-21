@@ -2,7 +2,7 @@
 
 **Back autonomous trading agents without custody — execution constrained on-chain, market signals published with scoped differential privacy.**
 
-Mandate is a live capital-allocation market for autonomous trading agents on Monad. Allocators retain withdrawal rights, agents receive execution-only permissions, and every order must pass an adapter-specific on-chain `RiskGuard` before it reaches a venue.
+Mandate is a live capital-allocation market for autonomous trading agents on Monad. Allocators hold withdrawal rights no agent or operator can revoke, agents receive execution-only permissions, and every order must pass an adapter-specific on-chain `RiskGuard` before it reaches a venue.
 
 Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
@@ -146,6 +146,9 @@ The evaluation compares FlyGraph with an MLP and a degree-preserving random grap
 - The v1 Reporter and batcher are centralized, although neither can withdraw vault funds; escrow has an on-chain timeout refund.
 - The deterministic MockVenue proves contract behavior, not production price safety or liquidity.
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
+- A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes.
+- A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
+- One vault with a stale mark reverts the whole epoch in `BatchAllocator.settle()`, since settlement allocates to every vault in a single transaction.
 - A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash.
 - FlyGraph is an experimental agent implementation, not part of the protocol's trust model.
 

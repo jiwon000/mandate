@@ -21,9 +21,15 @@ async function fixture(t) {
   }
   const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
   const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
+  // The batch path never trades, but a vault prices its shares through its adapter,
+  // so it needs a real one even when the position is always flat.
+  const venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [10n ** 21n]);
+  const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [venue.target]);
   const vaults = [];
   for (let i = 0; i < 2; i++) {
-    vaults.push(await deploy("MandateVault", "MandateVault", [usdc.target, guard.target, agent.address]));
+    vaults.push(
+      await deploy("MandateVault", "MandateVault", [usdc.target, guard.target, agent.address, adapter.target])
+    );
   }
   vaults.sort((a, b) => BigInt(a.target) < BigInt(b.target) ? -1 : 1);
   const batch = await deploy("BatchAllocator", "BatchAllocator", [usdc.target, owner.address, 1000, 500]);

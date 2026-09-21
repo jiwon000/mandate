@@ -102,11 +102,11 @@
             </div>
             <button id="allocateButton" class="button button-primary button-large">Review allocation</button>
             <button id="withdrawButton" class="button button-secondary button-large">Withdraw all shares</button>
-            <p class="fineprint">Marked NAV carries the open position; redeemable is the cash withdraw() pays out today. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator.</p>
+            <p class="fineprint">Shares are minted and redeemed at marked NAV, so the open position is priced in both directions. Redeemable is capped by the cash on hand - the rest of a claim stays as shares until the agent frees it up. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator.</p>
           </article>
           <aside class="allocation-aside">
             <div class="custody-lock"><span class="lock-icon">◇</span><p class="eyebrow">CUSTODY SEPARATION</p><h3>Your capital stays withdrawable</h3><p>Vault shares belong to your wallet. The agent holds an execute-only permission and has no transfer or withdrawal path.</p></div>
-            <div class="flow-list"><div><b>01</b><span>approve() the vault</span><em>ERC20</em></div><div><b>02</b><span>allocate() mints shares</span><em>ONCHAIN</em></div><div><b>03</b><span>withdraw() any time</span><em>UNCONDITIONAL</em></div></div>
+            <div class="flow-list"><div><b>01</b><span>approve() the vault</span><em>ERC20</em></div><div><b>02</b><span>allocate() mints shares</span><em>ONCHAIN</em></div><div><b>03</b><span>withdraw() at the marked price</span><em>NO AGENT CONSENT</em></div></div>
           </aside>
         </div>
       </section>

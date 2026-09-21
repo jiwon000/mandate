@@ -45,7 +45,7 @@ const vault = await deploy(
   deployer,
   "MandateVault.sol",
   "MandateVault",
-  [await usdc.getAddress(), await guard.getAddress(), AGENT_ADDRESS]
+  [await usdc.getAddress(), await guard.getAddress(), AGENT_ADDRESS, await adapter.getAddress()]
 );
 
 const vaultAddress = await vault.getAddress();

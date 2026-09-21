@@ -464,9 +464,16 @@ function renderAllocate() {
   $("#allocateTitle").textContent = `Fund ${vault.name}`;
   $("#allocateNav").textContent = `${nav4(vault.nav)} USDC`;
   $("#allocateShares").textContent = state.wallet ? `${usdc(vault.userShares)} shares` : "—";
-  const claim =
-    vault.totalSupply === 0n ? 0n : (vault.userShares * vault.totalAssets) / vault.totalSupply;
-  $("#allocateClaim").textContent = state.wallet ? `${usdc(claim)} mUSDC` : "—";
+  // What withdraw() would actually pay right now: the stake valued at the marked
+  // price, capped by the cash on hand. A vault holding an in-the-money position
+  // is worth more than its balance, and the shares the cash cannot cover stay
+  // outstanding until the agent frees some up.
+  const fair =
+    vault.totalSupply === 0n ? 0n : (vault.userShares * vault.equity6) / vault.totalSupply;
+  const claim = fair < vault.totalAssets ? fair : vault.totalAssets;
+  $("#allocateClaim").textContent = state.wallet
+    ? `${usdc(claim)} mUSDC${claim < fair ? ` of ${usdc(fair)}` : ""}`
+    : "—";
   $("#modalAgent").textContent = vault.name;
   $("#modalGlyph").textContent = vault.initials;
   $("#modalVault").textContent = shortAddress(vault.address);
@@ -475,10 +482,26 @@ function renderAllocate() {
   // AgentNotActive. Say so on the button instead of letting the allocator
   // find out from a failed transaction.
   const frozen = vault.agentState !== 0;
+  // Both doors are priced off the mark, so a mark past its limit closes both.
+  // This is the one condition that can hold a withdrawal, and it is worth
+  // saying out loud rather than letting the wallet report MarkTooOld.
+  const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
   const allocateButton = $("#allocateButton");
-  allocateButton.disabled = frozen;
-  allocateButton.textContent = frozen ? "Frozen — allocate() is closed" : "Review allocation";
-  $("#withdrawButton").textContent = frozen ? "Withdraw all shares (still open)" : "Withdraw all shares";
+  allocateButton.disabled = frozen || stale;
+  allocateButton.textContent = stale
+    ? `Mark is ${vault.markAge}s old — nothing prices until it refreshes`
+    : frozen
+      ? "Frozen — allocate() is closed"
+      : "Review allocation";
+  const withdrawButton = $("#withdrawButton");
+  if (!withdrawButton.dataset.busy) {
+    withdrawButton.disabled = stale;
+    withdrawButton.textContent = stale
+      ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
+      : frozen
+        ? "Withdraw all shares (still open)"
+        : "Withdraw all shares";
+  }
 
   updateAmount($("#allocationAmount").value);
 }
@@ -579,6 +602,10 @@ route(location.hash.slice(1) || "market");
 async function withButton(button, label, action) {
   const original = button.textContent;
   button.disabled = true;
+  // A refresh tick lands every 900ms and the render functions own these labels.
+  // Claim the button for as long as the transaction is in flight so a tick
+  // cannot re-enable it underneath a pending withdraw().
+  button.dataset.busy = "1";
   button.textContent = label;
   try {
     // The action gets the button because `event.currentTarget` is null once the
@@ -598,6 +625,7 @@ async function withButton(button, label, action) {
       kind: "breach"
     });
   } finally {
+    delete button.dataset.busy;
     button.disabled = false;
     button.textContent = original;
     await refresh().catch(reportError);
@@ -641,10 +669,13 @@ function updateAmount(value) {
   if (!vault) return;
   const amount = Math.max(0, Number(value) || 0);
   const assets = ethers.parseUnits(amount.toFixed(6), 6);
+  // allocate() mints against marked equity, not the cash balance, so the estimate
+  // has to price the open position too or it will overstate every entry into a
+  // profitable vault.
   const shares =
-    vault.totalSupply === 0n || vault.totalAssets === 0n
+    vault.totalSupply === 0n || vault.equity6 === 0n
       ? assets
-      : (assets * vault.totalSupply) / vault.totalAssets;
+      : (assets * vault.totalSupply) / vault.equity6;
   $("#estimatedShares").textContent = `${usdc(shares)} shares`;
   $("#modalAmount").textContent = `${amount.toLocaleString()} mUSDC`;
   $("#modalShares").textContent = `${usdc(shares)} shares`;
@@ -699,10 +730,16 @@ $("#withdrawButton").addEventListener("click", (event) =>
     const signer = await state.provider.getSigner(state.wallet);
     const vaultContract = state.contracts.vaults[state.selected].connect(signer);
     await (await vaultContract.withdraw(vault.userShares, state.wallet)).wait();
+    // The vault pays at the marked price out of the cash it holds, so a stake
+    // backed by an open position can come out in parts. Report what is left
+    // instead of calling a partial exit "withdrawn".
+    const left = await vaultContract.balanceOf(state.wallet);
     showToast(
-      vault.agentState === 0
-        ? "Withdrawn"
-        : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
+      left > 0n
+        ? `Paid out to the cash on hand — ${usdc(left)} shares stay until the agent frees up more`
+        : vault.agentState === 0
+          ? "Withdrawn"
+          : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
     );
     $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
   })

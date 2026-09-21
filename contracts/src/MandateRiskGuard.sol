@@ -127,6 +127,17 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         _markAndCheck(vault, adapter, address(0));
     }
 
+    /// @inheritdoc IRiskGuard
+    /// @dev The vault prices allocate() and withdraw() off the same mark this guard
+    ///      enforces on trades, so "too old to trade against" and "too old to price
+    ///      against" stay one definition instead of drifting into two.
+    function requireFreshMark(address vault, uint256 markedAt) external view {
+        uint32 maxAge = limitsOf[vault].maxMarkAgeSeconds;
+        if (maxAge != 0 && block.timestamp > markedAt + maxAge) {
+            revert MarkTooOld(markedAt, maxAge);
+        }
+    }
+
     /// @notice Current NAV per share and drawdown without writing state.
     function quote(address vault, address adapter)
         external

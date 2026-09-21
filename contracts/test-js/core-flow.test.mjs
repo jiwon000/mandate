@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import ganache from "ganache";
+import hre from "hardhat";
 import { BrowserProvider, ContractFactory, parseUnits, AbiCoder } from "ethers";
 import { artifact, compileContracts } from "../tools/compiler.mjs";
 
@@ -18,10 +18,10 @@ async function deploy(signer, source, name, args = []) {
 }
 
 test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t) => {
-  const chain = ganache.provider({ logging: { quiet: true }, chain: { chainId: 31337 } });
-  const provider = new BrowserProvider(chain);
+  const chain = await hre.network.create();
+  const provider = new BrowserProvider(chain.provider);
   provider.pollingInterval = 10;
-  t.after(() => chain.disconnect());
+  t.after(() => chain.close());
   const owner = await provider.getSigner(0);
   const allocator = await provider.getSigner(1);
   const agent = await provider.getSigner(2);

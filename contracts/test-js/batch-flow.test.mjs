@@ -1,19 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import ganache from "ganache";
-import { BrowserProvider, ContractFactory, Wallet, ZeroHash } from "ethers";
+import hre from "hardhat";
+import { BrowserProvider, ContractFactory, ZeroHash } from "ethers";
 import { artifact, compileContracts } from "../tools/compiler.mjs";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../tools/batch.mjs";
 
 const compiled = compileContracts();
 
 async function fixture(t) {
-  const chain = ganache.provider({ logging: { quiet: true }, chain: { chainId: 31337 } });
-  t.after(() => chain.disconnect());
-  const provider = new BrowserProvider(chain, undefined, { cacheTimeout: -1 });
+  const chain = await hre.network.create();
+  t.after(() => chain.close());
+  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10;
   const [owner, alice, bob, agent] = await Promise.all([0, 1, 2, 3].map((i) => provider.getSigner(i)));
-  const keys = chain.getInitialAccounts();
   async function deploy(source, name, args = []) {
     const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
     const contract = await new ContractFactory(abi, bytecode, owner).deploy(...args);
@@ -42,8 +41,7 @@ async function fixture(t) {
       allocator: user.address, vault: vaults[0].target, amount: 100n,
       minShares: 1n, epoch: 0n, nonce: 0n, deadline, ...overrides,
     };
-    const wallet = new Wallet(keys[user.address.toLowerCase()].secretKey);
-    return { intent, signature: await wallet.signTypedData(domainOverride, intentTypes, intent) };
+    return { intent, signature: await user.signTypedData(domainOverride, intentTypes, intent) };
   }
   function build(entries) {
     const nets = [];
@@ -55,8 +53,8 @@ async function fixture(t) {
     return { nets, intents, ...buildIntentTree(domain, intents) };
   }
   async function at(timestamp) {
-    await chain.request({ method: "evm_setTime", params: [Number(timestamp) * 1000] });
-    await chain.request({ method: "evm_mine", params: [] });
+    await chain.provider.request({ method: "evm_setNextBlockTimestamp", params: [Number(timestamp)] });
+    await chain.provider.request({ method: "evm_mine", params: [] });
   }
   async function settle(data) {
     return (await batch.settleEpoch(0, data.root, data.nets, { gasLimit: 8_000_000 })).wait();

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import solc from "solc";
 import { compileContracts } from "./compiler.mjs";
 
 const contracts = compileContracts();
@@ -22,4 +23,4 @@ for (const [source, entries] of Object.entries(contracts)) {
   }
 }
 
-console.log(`Compiled ${count} Mandate contracts with solc ${process.env.npm_package_devDependencies_solc ?? "0.8.24"}.`);
+console.log(`Compiled ${count} Mandate contracts with solc ${solc.version()}.`);

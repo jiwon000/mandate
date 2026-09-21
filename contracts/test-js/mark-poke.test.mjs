@@ -1,0 +1,213 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import hre from "hardhat";
+import { BrowserProvider, ContractFactory, parseUnits, AbiCoder } from "ethers";
+import { artifact, compileContracts } from "../tools/compiler.mjs";
+
+const compiled = compileContracts();
+const coder = AbiCoder.defaultAbiCoder();
+
+const BASE_LIMITS = {
+  maxLeverageX100: 300,
+  maxDrawdownBps: 200,
+  maxMarkAgeSeconds: 3_600,
+  maxSlippageBps: 100,
+  minBlocksBetweenTrades: 0,
+  maxConsecutiveRejects: 3,
+  maxOrderNotional: parseUnits("2000", 18),
+  maxPositionNotional: parseUnits("2000", 18),
+  maxTotalNotional: parseUnits("2000", 18),
+  maxBlockNotional: parseUnits("2000", 18)
+};
+
+async function fixture(t, limitOverrides = {}) {
+  const chain = await hre.network.create();
+  t.after(() => chain.close());
+  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
+  provider.pollingInterval = 10;
+  const [owner, allocator, agent, keeper] = await Promise.all(
+    [0, 1, 2, 3].map((i) => provider.getSigner(i))
+  );
+
+  async function deploy(source, name, args = []) {
+    const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
+    const contract = await new ContractFactory(abi, bytecode, owner).deploy(...args);
+    await contract.waitForDeployment();
+    return contract;
+  }
+
+  const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
+  const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
+  const venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [
+    parseUnits("2000", 18)
+  ]);
+  const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [await venue.getAddress()]);
+  const vault = await deploy("MandateVault", "MandateVault", [
+    await usdc.getAddress(),
+    await guard.getAddress(),
+    await agent.getAddress()
+  ]);
+
+  const vaultAddress = await vault.getAddress();
+  const adapterAddress = await adapter.getAddress();
+  await (await venue.setAdapter(adapterAddress, true)).wait();
+  await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
+  await (await guard.configure(vaultAddress, { ...BASE_LIMITS, ...limitOverrides })).wait();
+
+  const deposit = parseUnits("1000", 6);
+  await (await usdc.mint(await allocator.getAddress(), deposit)).wait();
+  await (await usdc.connect(allocator).approve(vaultAddress, deposit)).wait();
+  await (await vault.connect(allocator).allocate(deposit, await allocator.getAddress())).wait();
+
+  // 0.5 ETH @ $2000 = $1000 notional against $1000 equity: exactly 1.00x.
+  const order = coder.encode(["int256", "uint256"], [parseUnits("0.5", 18), parseUnits("2100", 18)]);
+
+  return {
+    chain, provider, owner, allocator, agent, keeper,
+    usdc, guard, venue, adapter, vault,
+    vaultAddress, adapterAddress, deposit, order
+  };
+}
+
+test("markEquity prices the open position, so equity moves without any trade", async (t) => {
+  const f = await fixture(t);
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+
+  let [equity] = await f.adapter.markEquity(f.vaultAddress);
+  assert.equal(equity, f.deposit, "no PnL at the entry price");
+
+  // Price falls 10%. The agent does nothing; the USDC balance does not move.
+  await (await f.venue.setPrice(parseUnits("1800", 18))).wait();
+  assert.equal(await f.vault.totalAssets(), f.deposit, "cash balance is unchanged");
+
+  [equity] = await f.adapter.markEquity(f.vaultAddress);
+  assert.equal(equity, parseUnits("900", 6), "0.5 ETH x -$200 = -$100 of equity");
+
+  const [nav, hwm, ddBps] = await f.guard.quote(f.vaultAddress, f.adapterAddress);
+  assert.equal(nav, parseUnits("0.9", 18));
+  assert.equal(hwm, parseUnits("1", 18));
+  assert.equal(ddBps, 1000n, "10% drawdown");
+});
+
+test("poke is permissionless, freezes a breached vault, and pays the caller", async (t) => {
+  const f = await fixture(t);
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+  await (await f.venue.setPrice(parseUnits("1800", 18))).wait();
+
+  assert.equal(await f.vault.state(), 0n, "Active before the poke");
+  const keeperAddress = await f.keeper.getAddress();
+  assert.equal(await f.usdc.balanceOf(keeperAddress), 0n);
+
+  // A stranger with no role in the vault re-marks it.
+  const receipt = await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+
+  assert.equal(await f.vault.state(), 1n, "Frozen");
+  const expectedBounty = (parseUnits("1000", 6) * 5n) / 10_000n;
+  assert.equal(await f.usdc.balanceOf(keeperAddress), expectedBounty, "0.05% keeper bounty");
+
+  const breach = receipt.logs
+    .map((l) => { try { return f.guard.interface.parseLog(l); } catch { return null; } })
+    .find((l) => l?.name === "DrawdownBreach");
+  assert.ok(breach, "DrawdownBreach emitted");
+  assert.equal(breach.args.caller, keeperAddress);
+  assert.equal(breach.args.drawdownBps, 1000n);
+});
+
+test("a within-limit move re-marks without freezing", async (t) => {
+  const f = await fixture(t);
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+  await (await f.venue.setPrice(parseUnits("1980", 18))).wait(); // -1.0% of NAV
+
+  const frozen = await f.guard.poke.staticCall(f.vaultAddress, f.adapterAddress);
+  await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+
+  assert.equal(frozen, false);
+  assert.equal(await f.vault.state(), 0n, "still Active");
+  const [, , ddBps] = await f.guard.quote(f.vaultAddress, f.adapterAddress);
+  assert.equal(ddBps, 100n, "1% drawdown, under the 2% limit");
+});
+
+test("a frozen vault stops the agent but never traps the allocator", async (t) => {
+  const f = await fixture(t);
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+  await (await f.venue.setPrice(parseUnits("1800", 18))).wait();
+  await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+
+  await assert.rejects(
+    f.vault.connect(f.agent).execute(f.adapterAddress, f.order),
+    "agent cannot trade once frozen"
+  );
+  const more = parseUnits("10", 6);
+  await (await f.usdc.mint(await f.allocator.getAddress(), more)).wait();
+  await (await f.usdc.connect(f.allocator).approve(f.vaultAddress, more)).wait();
+  await assert.rejects(
+    f.vault.connect(f.allocator).allocate(more, await f.allocator.getAddress()),
+    "no new money into a frozen vault"
+  );
+
+  const allocatorAddress = await f.allocator.getAddress();
+  const shares = await f.vault.balanceOf(allocatorAddress);
+  await (await f.vault.connect(f.allocator).withdraw(shares, allocatorAddress)).wait();
+  assert.equal(await f.vault.totalSupply(), 0n, "withdrawal still works while frozen");
+  assert.equal(await f.usdc.balanceOf(allocatorAddress), parseUnits("1009.5", 6));
+});
+
+test("freezing twice is rejected, so the bounty is paid once", async (t) => {
+  const f = await fixture(t);
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+  await (await f.venue.setPrice(parseUnits("1800", 18))).wait();
+  await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+
+  const balance = await f.usdc.balanceOf(await f.keeper.getAddress());
+  await assert.rejects(f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress));
+  assert.equal(await f.usdc.balanceOf(await f.keeper.getAddress()), balance);
+});
+
+test("a mark older than the limit is refused instead of trusted", async (t) => {
+  const f = await fixture(t, { maxMarkAgeSeconds: 10 });
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+
+  const markedAt = await f.venue.updatedAt();
+  await f.chain.provider.request({
+    method: "evm_setNextBlockTimestamp",
+    params: [Number(markedAt) + 600]
+  });
+  await f.chain.provider.request({ method: "evm_mine", params: [] });
+
+  await assert.rejects(
+    f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress),
+    /MarkTooOld|revert/,
+    "a 10-second freshness limit must not be satisfiable by a 600-second-old mark"
+  );
+  // The same limit blocks trading, not just poking.
+  await assert.rejects(f.vault.connect(f.agent).execute(f.adapterAddress, f.order));
+
+  await (await f.venue.setPrice(parseUnits("2000", 18))).wait();
+  await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+  assert.equal(await f.vault.state(), 0n, "a fresh mark restores normal operation");
+});
+
+test("leverage is measured against mark equity, not the idle cash balance", async (t) => {
+  const f = await fixture(t, { maxLeverageX100: 120, maxDrawdownBps: 0 });
+  await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+
+  // Equity falls to $700 while the USDC balance still reads $1000.
+  await (await f.venue.setPrice(parseUnits("1400", 18))).wait();
+  const [equity] = await f.adapter.markEquity(f.vaultAddress);
+  assert.equal(equity, parseUnits("700", 6));
+  assert.equal(await f.vault.totalAssets(), parseUnits("1000", 6));
+
+  // Adding 0.2 ETH takes the book to 0.7 ETH = $980 of notional.
+  const addOn = coder.encode(["int256", "uint256"], [parseUnits("0.2", 18), parseUnits("1500", 18)]);
+  const preview = await f.adapter.preview(f.vaultAddress, addOn);
+  assert.equal(preview.expectedTotalNotional, parseUnits("980", 18));
+  assert.equal(preview.expectedLeverageX100, 140n, "$980 / $700 equity = 1.40x");
+
+  const cashBasedLeverage = (parseUnits("980", 18) * 100n) / parseUnits("1000", 18);
+  assert.equal(cashBasedLeverage, 98n, "the old cash denominator would have read 0.98x");
+
+  await assert.rejects(
+    f.vault.connect(f.agent).execute(f.adapterAddress, addOn),
+    "1.40x breaches the 1.20x limit; the cash denominator would have waved it through"
+  );
+});

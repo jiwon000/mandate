@@ -12,7 +12,7 @@ The sections below describe the target v1 product. The current repository implem
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no DP Reporter or private Intent API yet.
 
-Registry/ε anchors, operational freeze, fee/PnL/NAV accounting, frontend, FlyGraph and Monad deployment are pending. MockVenue updates positions without economic PnL settlement; an open-position withdrawal test is not evidence of production market accounting. Foundry fuzzing and an external security review are also pending.
+Registry/ε anchors, operational freeze, fee/PnL/NAV accounting, live frontend integration, FlyGraph and Monad deployment are pending. The five-screen frontend in `web/` runs as an interactive demo. MockVenue updates positions without economic PnL settlement; an open-position withdrawal test is not evidence of production market accounting. Foundry fuzzing and an external security review are also pending.
 
 ## Build status
 
@@ -179,9 +179,12 @@ Solidity ^0.8.24 · Foundry · OpenZeppelin · TypeScript/Node · Next.js · wag
 npm ci
 npm run compile
 npm run test:contracts
+npm run web
 ```
 
-Use Node 22.14 or newer. The repository keeps a Foundry-compatible layout and `foundry.toml`. After dependency installation, the local `solc` 0.8.24 runner and in-process Ganache tests work without network access. Dependencies and the compiler binary are not vendored in the repository.
+Open `http://localhost:3000` for the interactive demo. Allocation and trade actions are simulated until Monad testnet contracts are configured. See [web/README.md](web/README.md) for the screen list and demo interactions.
+
+Use Node 22.14 or newer. The repository keeps a Foundry-compatible layout and `foundry.toml`. After dependency installation, the local `solc` 0.8.37 runner and in-process Hardhat tests work without network access. Dependencies and the compiler binary are not vendored in the repository.
 
 For Monad deployment, use Foundry 1.8 or newer with the Monad execution network enabled. Network values are intentionally supplied through environment variables instead of being hardcoded because the testnet may be reset.
 

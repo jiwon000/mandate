@@ -19,6 +19,12 @@ contract MandateVault is ReentrancyGuard {
     error ResultMismatch();
     error InsufficientShares();
     error InvalidReceiver();
+    error OnlyRiskGuard();
+
+    /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
+    /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
+    ///      not rely on the team running a bot for the guarantee to hold.
+    uint16 public constant POKE_BOUNTY_BPS = 5;
 
     IERC20 public immutable asset;
     IRiskGuard public immutable riskGuard;
@@ -32,6 +38,7 @@ contract MandateVault is ReentrancyGuard {
     event Withdrawn(address indexed allocator, uint256 assets, uint256 shares);
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
     event SharesTransferred(address indexed from, address indexed to, uint256 shares);
+    event Frozen(address indexed beneficiary, uint256 bounty);
 
     constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_) {
         asset = asset_;
@@ -95,5 +102,28 @@ contract MandateVault is ReentrancyGuard {
         ) revert ResultMismatch();
 
         emit Executed(adapter, expected.orderHash, realizedPnl);
+
+        // Re-mark after the fill. Without this the vault is only ever valued at the
+        // moment the agent chooses to trade.
+        riskGuard.checkAfter(address(this), adapter);
+    }
+
+    /// @notice Stop the agent and pay the caller who proved the breach.
+    /// @dev Only the RiskGuard may call. Withdrawals stay open while Frozen so
+    ///      allocators keep their exit; only allocate() and execute() are closed.
+    ///      Deliberately not `nonReentrant`: it is reached from inside execute()'s
+    ///      guarded frame. State is written before the single ERC20 transfer.
+    function freeze(address beneficiary) external returns (uint256 bounty) {
+        if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
+        if (state != AgentState.Active) revert AgentNotActive();
+        state = AgentState.Frozen;
+
+        bounty = (totalAssets() * POKE_BOUNTY_BPS) / 10_000;
+        if (bounty > 0 && beneficiary != address(0)) {
+            asset.safeTransfer(beneficiary, bounty);
+        } else {
+            bounty = 0;
+        }
+        emit Frozen(beneficiary, bounty);
     }
 }

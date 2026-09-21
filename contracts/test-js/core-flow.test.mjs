@@ -53,7 +53,8 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
   await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
   await (await guard.configure(vaultAddress, {
     maxLeverageX100: 100,
-    maxRealizedDrawdownBps: 2_000,
+    maxDrawdownBps: 2_000,
+    maxMarkAgeSeconds: 3_600,
     maxSlippageBps: 100,
     minBlocksBetweenTrades: 0,
     maxConsecutiveRejects: 3,

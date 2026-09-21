@@ -54,7 +54,8 @@ await (await venue.setAdapter(adapterAddress, true)).wait();
 await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
 await (await guard.configure(vaultAddress, {
   maxLeverageX100: 300,
-  maxRealizedDrawdownBps: 2_000,
+  maxDrawdownBps: 200,
+  maxMarkAgeSeconds: 30,
   maxSlippageBps: 100,
   minBlocksBetweenTrades: 0,
   maxConsecutiveRejects: 3,

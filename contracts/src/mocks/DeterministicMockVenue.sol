@@ -14,6 +14,11 @@ contract DeterministicMockVenue is Ownable {
     mapping(address => bool) public isAdapter;
     mapping(address => int256) public positionSizeE18;
 
+    /// @notice Signed cumulative cash paid into the position, in 1e18 USD.
+    /// @dev Cash-flow basis: unrealised PnL = positionValue - netCostE18, which stays
+    ///      exact across partial closes and side flips without tracking an entry price.
+    mapping(address => int256) public netCostE18;
+
     event PriceSet(uint256 priceE18, uint256 timestamp);
     event AdapterSet(address indexed adapter, bool allowed);
     event Traded(address indexed vault, int256 sizeDeltaE18, int256 resultingSizeE18, uint256 priceE18);
@@ -43,7 +48,14 @@ contract DeterministicMockVenue is Ownable {
         if (sizeDeltaE18 < 0 && currentPrice < limitPriceE18) revert LimitPriceExceeded();
 
         positionSizeE18[vault] += sizeDeltaE18;
+        netCostE18[vault] += (sizeDeltaE18 * int256(currentPrice)) / 1e18;
         emit Traded(vault, sizeDeltaE18, positionSizeE18[vault], currentPrice);
         return currentPrice;
+    }
+
+    /// @notice Unrealised PnL of `vault`'s open position at the current mark, in 1e18 USD.
+    function unrealizedPnlE18(address vault) external view returns (int256) {
+        int256 markValue = (positionSizeE18[vault] * int256(priceE18)) / 1e18;
+        return markValue - netCostE18[vault];
     }
 }

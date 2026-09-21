@@ -22,11 +22,10 @@
         <button data-route="agent">Agent</button>
         <button data-route="allocate">Allocate</button>
         <button data-route="risk">Live Risk</button>
-        <button data-route="privacy">Privacy</button>
       </nav>
       <div class="header-actions">
-        <span class="network"><i></i> Monad Testnet</span>
-        <button id="walletButton" class="button button-secondary">Connect wallet</button>
+        <span class="network"><i></i> <span id="chainLabel">connecting…</span></span>
+        <button id="walletButton" class="button button-secondary">Connect allocator</button>
       </div>
     </header>
 
@@ -35,125 +34,142 @@
         <div class="hero">
           <div>
             <p class="eyebrow">AUTONOMOUS CAPITAL · ONCHAIN RISK</p>
-            <h1>Back the agent.<br /><span>Keep custody.</span></h1>
-            <p class="hero-copy">에이전트는 거래만 실행합니다. 자금 인출 권한은 배분자에게 남고, 모든 주문은 온체인 RiskGuard를 통과합니다.</p>
+            <h1>Back the mandate.<br /><span>Not the track record.</span></h1>
+            <p class="hero-copy">Agents execute; they never hold. Withdrawal stays with the allocator and every order clears an onchain RiskGuard first. Every number below is read from contract state on this chain.</p>
           </div>
           <div class="hero-stat">
-            <div><span>MARKET AUM</span><strong>$2.48M</strong><small>+12.8% this epoch</small></div>
-            <div><span>ACTIVE AGENTS</span><strong>06</strong><small>4 trading now</small></div>
-            <div><span>RISK REJECTIONS</span><strong>18</strong><small>capital protected</small></div>
+            <div><span>MARKET AUM</span><strong id="statAum">—</strong><small id="statAumSub">reading chain…</small></div>
+            <div><span>LIVE MANDATES</span><strong id="statMandates">—</strong><small id="statMandatesSub">&nbsp;</small></div>
+            <div><span>ETH MARK</span><strong id="statPrice">—</strong><small id="statPriceSub">&nbsp;</small></div>
           </div>
         </div>
 
         <div class="section-heading">
-          <div><p class="eyebrow">LIVE MARKET</p><h2>Agent leaderboard</h2></div>
-          <div class="legend"><span><i class="dot green"></i>Active</span><span><i class="dot amber"></i>Guarded</span></div>
+          <div><p class="eyebrow">LIVE MARKET</p><h2>Mandate book</h2></div>
+          <div class="legend"><span><i class="dot green"></i>Active</span><span><i class="dot red"></i>Over limit</span><span><i class="dot amber"></i>Frozen</span></div>
         </div>
         <div class="agent-table" id="leaderboard"></div>
-        <p class="disclosure">Performance intervals are privacy-aware statistics. Public onchain trades remain observable.</p>
+        <p class="disclosure">Sorted by the terms an allocator is asked to accept, not by return. Every cell is a contract read against the chain this page is served from.</p>
       </section>
 
       <section class="view" data-view="agent">
         <div class="agent-hero">
           <div class="agent-ident">
-            <div class="agent-glyph fly">FG</div>
-            <div><p class="eyebrow">AGENT 01 · ACTIVE</p><h1>FlyGraph Alpha</h1><p>Connectome-inspired graph policy · ETH/USDC</p></div>
+            <div class="agent-glyph fly" id="agentGlyph">—</div>
+            <div><p class="eyebrow" id="agentEyebrow">MANDATE</p><h1 id="agentName">—</h1><p id="agentThesis">—</p></div>
           </div>
           <div class="agent-actions"><button class="button button-secondary" data-route="risk">Watch live</button><button class="button button-primary" data-route="allocate">Allocate USDC</button></div>
         </div>
         <div class="metric-strip">
-          <div><span>30D RETURN</span><strong class="positive">+14.2%</strong><small>CI +10.8% — +17.6%</small></div>
-          <div><span>SHARPE</span><strong>1.84</strong><small>DP estimate</small></div>
-          <div><span>MAX DRAWDOWN</span><strong>−6.8%</strong><small>limit −20%</small></div>
-          <div><span>VAULT AUM</span><strong>$842K</strong><small>312 allocators</small></div>
+          <div><span>NAV / SHARE</span><strong id="agentNav">—</strong><small id="agentNavSub">high-water —</small></div>
+          <div><span>DRAWDOWN</span><strong id="agentDd">—</strong><small id="agentDdSub">limit —</small></div>
+          <div><span>LEVERAGE</span><strong id="agentLev">—</strong><small id="agentLevSub">limit —</small></div>
+          <div><span>VAULT AUM</span><strong id="agentAum">—</strong><small id="agentAumSub">&nbsp;</small></div>
         </div>
         <div class="two-col">
           <article class="panel chart-panel">
-            <div class="panel-title"><div><p class="eyebrow">PERFORMANCE</p><h3>Equity curve</h3></div><span class="mono muted">30 DAYS</span></div>
-            <svg class="equity-chart" viewBox="0 0 720 260" role="img" aria-label="FlyGraph equity curve">
+            <div class="panel-title"><div><p class="eyebrow">MARK HISTORY</p><h3>NAV per share</h3></div><span class="mono muted" id="chartRange">—</span></div>
+            <svg class="equity-chart" viewBox="0 0 720 260" role="img" aria-label="NAV per share, reconstructed from Marked events">
               <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#347dff" stop-opacity=".35"/><stop offset="1" stop-color="#347dff" stop-opacity="0"/></linearGradient></defs>
               <g class="grid-lines"><path d="M0 35H720M0 95H720M0 155H720M0 215H720"/></g>
-              <path class="area" d="M0 205 C70 210,90 175,145 184 S230 128,286 142 S365 112,422 120 S510 72,560 88 S655 39,720 48 L720 260 L0 260Z"/>
-              <path class="curve" d="M0 205 C70 210,90 175,145 184 S230 128,286 142 S365 112,422 120 S510 72,560 88 S655 39,720 48"/>
-              <path class="ci ci-top" d="M0 190 C70 195,90 160,145 169 S230 113,286 127 S365 97,422 105 S510 57,560 73 S655 24,720 33"/>
-              <path class="ci ci-bottom" d="M0 220 C70 225,90 190,145 199 S230 143,286 157 S365 127,422 135 S510 87,560 103 S655 54,720 63"/>
+              <path class="area" id="navArea" d="" />
+              <path class="curve" id="navCurve" d="" />
+              <path class="hwm-line" id="navHwm" d="" />
             </svg>
-            <div class="chart-axis"><span>AUG 22</span><span>SEP 05</span><span>SEP 21</span></div>
+            <div class="chart-axis"><span id="chartStart">—</span><span>every Marked event</span><span id="chartEnd">now</span></div>
           </article>
           <article class="panel risk-profile">
-            <div class="panel-title"><div><p class="eyebrow">ONCHAIN MANDATE</p><h3>Risk limits</h3></div><span class="verified">VERIFIED</span></div>
-            <div class="risk-row"><div><span>Leverage</span><b>1.42× / 3.00×</b></div><div class="bar"><i style="width:47%"></i></div></div>
-            <div class="risk-row"><div><span>Position notional</span><b>$712K / $1.50M</b></div><div class="bar"><i style="width:48%"></i></div></div>
-            <div class="risk-row"><div><span>Drawdown</span><b>6.8% / 20.0%</b></div><div class="bar"><i style="width:34%"></i></div></div>
-            <div class="risk-row"><div><span>Block notional</span><b>$205K / $750K</b></div><div class="bar"><i style="width:27%"></i></div></div>
-            <div class="hash"><span>MODEL HASH</span><code>0x8f31...e92c</code></div>
+            <div class="panel-title"><div><p class="eyebrow">ONCHAIN MANDATE</p><h3>Risk limits</h3></div><span class="verified">FROM STORAGE</span></div>
+            <div id="agentLimits"></div>
+            <div class="hash"><span>VAULT</span><code id="agentAddress">0x…</code></div>
+            <div class="hash"><span>AGENT KEY</span><code id="agentKey">0x…</code></div>
           </article>
         </div>
       </section>
 
       <section class="view" data-view="allocate">
-        <div class="narrow-head"><p class="eyebrow">ALLOCATE CAPITAL</p><h1>Fund FlyGraph Alpha</h1><p>USDC는 MandateVault로 직접 이동합니다. 에이전트는 거래할 수 있지만 인출할 수 없습니다.</p></div>
+        <div class="narrow-head"><p class="eyebrow">ALLOCATE CAPITAL</p><h1 id="allocateTitle">Fund a mandate</h1><p>USDC moves straight into the MandateVault. The agent can trade it and cannot withdraw it.</p></div>
         <div class="allocate-layout">
           <article class="panel allocation-card">
-            <div class="field-label"><span>Amount</span><span id="walletBalance">Balance 10,000 USDC</span></div>
+            <div class="field-label"><span>Amount</span><span id="walletBalance">Connect allocator to read balance</span></div>
             <div class="amount-input"><input id="allocationAmount" inputmode="decimal" value="2500" aria-label="USDC amount" /><span>USDC</span></div>
-            <div class="quick-amounts"><button data-amount="1000">1,000</button><button data-amount="2500" class="active">2,500</button><button data-amount="5000">5,000</button><button data-amount="10000">MAX</button></div>
+            <div class="quick-amounts"><button data-amount="1000">1,000</button><button data-amount="2500" class="active">2,500</button><button data-amount="5000">5,000</button><button data-amount="10000">10,000</button></div>
             <div class="allocation-summary">
-              <div><span>Estimated shares</span><b id="estimatedShares">2,438.77 mSHARE</b></div>
-              <div><span>Current NAV</span><b>1.0251 USDC</b></div>
-              <div><span>Epoch settlement</span><b>~ 04:18</b></div>
-              <div><span>Performance fee</span><b>20% above HWM</b></div>
+              <div><span>Estimated shares</span><b id="estimatedShares">—</b></div>
+              <div><span>NAV / share, marked</span><b id="allocateNav">—</b></div>
+              <div><span>Your shares</span><b id="allocateShares">—</b></div>
+              <div><span>Redeemable now</span><b id="allocateClaim">—</b></div>
             </div>
             <button id="allocateButton" class="button button-primary button-large">Review allocation</button>
-            <p class="fineprint">Demo mode uses simulated USDC. No real asset moves until testnet addresses are configured.</p>
+            <button id="withdrawButton" class="button button-secondary button-large">Withdraw all shares</button>
+            <p class="fineprint">Marked NAV carries the open position; redeemable is the cash withdraw() pays out today. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator.</p>
           </article>
           <aside class="allocation-aside">
-            <div class="custody-lock"><span class="lock-icon">◇</span><p class="eyebrow">CUSTODY SEPARATION</p><h3>Your capital stays withdrawable</h3><p>Vault shares belong to your wallet. The agent has no transfer or withdrawal path.</p></div>
-            <div class="flow-list"><div><b>01</b><span>Sign allocation intent</span><em>OFFCHAIN</em></div><div><b>02</b><span>Epoch nets demand</span><em>BATCH</em></div><div><b>03</b><span>Receive vault shares</span><em>ONCHAIN</em></div></div>
+            <div class="custody-lock"><span class="lock-icon">◇</span><p class="eyebrow">CUSTODY SEPARATION</p><h3>Your capital stays withdrawable</h3><p>Vault shares belong to your wallet. The agent holds an execute-only permission and has no transfer or withdrawal path.</p></div>
+            <div class="flow-list"><div><b>01</b><span>approve() the vault</span><em>ERC20</em></div><div><b>02</b><span>allocate() mints shares</span><em>ONCHAIN</em></div><div><b>03</b><span>withdraw() any time</span><em>UNCONDITIONAL</em></div></div>
           </aside>
         </div>
       </section>
 
       <section class="view" data-view="risk">
-        <div class="live-head"><div><p class="eyebrow"><i class="live-dot"></i> LIVE EXECUTION</p><h1>RiskGuard control room</h1></div><button id="runViolation" class="button button-danger">Run over-limit order</button></div>
-        <div class="risk-dashboard">
-          <article class="panel execution-feed"><div class="panel-title"><h3>Execution feed</h3><span class="mono muted">BLOCK 12,884,201</span></div><div id="eventFeed"></div></article>
-          <article class="panel guard-state"><div class="guard-orbit"><div><span>RISK</span><strong>47</strong><small>/ 100</small></div></div><h3>Agent active</h3><p>All monitored limits are inside the mandate.</p><div class="state-pills"><span>Adapter allowed</span><span>Atomic venue</span><span>Withdraw isolated</span></div></article>
+        <div class="live-head">
+          <div><p class="eyebrow"><i class="live-dot"></i> LIVE EXECUTION</p><h1>RiskGuard control room</h1></div>
+          <div class="blocktime-toggle" role="group" aria-label="Block time">
+            <button data-blocktime="1" class="active">Monad · 1s blocks</button>
+            <button data-blocktime="12">Ethereum · 12s blocks</button>
+          </div>
         </div>
-        <div class="limit-grid">
-          <article><span>LEVERAGE</span><strong>1.42×</strong><div class="bar"><i style="width:47%"></i></div><small>Limit 3.00×</small></article>
-          <article><span>POSITION</span><strong>$712K</strong><div class="bar"><i style="width:48%"></i></div><small>Limit $1.50M</small></article>
-          <article><span>BLOCK NOTIONAL</span><strong>$205K</strong><div class="bar"><i style="width:27%"></i></div><small>Limit $750K</small></article>
-          <article><span>REJECTIONS</span><strong id="rejectCount">2 / 3</strong><div class="bar danger"><i id="rejectBar" style="width:66%"></i></div><small>Freeze threshold</small></article>
-        </div>
-      </section>
 
-      <section class="view" data-view="privacy">
-        <div class="narrow-head"><p class="eyebrow">PRIVACY-AWARE ANALYTICS</p><h1>Published ε and simulator</h1><p>실제 릴리즈와 합성 데이터 시뮬레이션을 분리합니다. 슬라이더 조작은 프라이버시 예산을 소비하지 않습니다.</p></div>
-        <div class="privacy-layout">
-          <article class="panel published-card">
-            <div class="panel-title"><div><p class="eyebrow">ONCHAIN ANCHOR</p><h3>Epoch 042</h3></div><span class="verified">IMMUTABLE</span></div>
-            <div class="epsilon"><span>PUBLISHED ε</span><strong>0.80</strong></div>
-            <dl><div><dt>Pinned block</dt><dd>12,883,840</dd></div><div><dt>Performance ε</dt><dd>0.50</dd></div><div><dt>Intent ε</dt><dd>0.30</dd></div><div><dt>Cumulative ε</dt><dd>4.80 / 8.00</dd></div></dl>
-            <div class="digest"><span>STATS DIGEST</span><code>0x6a12c4...9e08f1</code><button id="copyDigest">Copy</button></div>
+        <div class="chain-controls panel">
+          <div class="control-group">
+            <span class="eyebrow">MARKET</span>
+            <button class="button button-secondary" data-shock="-200">−2% shock</button>
+            <button class="button button-secondary" data-shock="-500">−5% shock</button>
+            <button class="button button-secondary" data-shock="300">+3%</button>
+            <button class="button button-secondary" id="restorePrice">Restore $2000</button>
+          </div>
+          <div class="control-group">
+            <span class="eyebrow">AGENT <b id="controlAgentName">—</b></span>
+            <button class="button button-secondary" id="compliantOrder">Send order inside mandate</button>
+            <button class="button button-danger" id="runViolation">Send over-limit order</button>
+          </div>
+          <div class="control-group">
+            <span class="eyebrow">ANYONE</span>
+            <button class="button button-primary" id="pokeButton">poke() — prove the breach, take the bounty</button>
+            <button class="button button-secondary" id="redeployButton">Reset demo</button>
+          </div>
+        </div>
+
+        <div class="risk-dashboard">
+          <article class="panel execution-feed">
+            <div class="panel-title"><h3>Execution feed</h3><span class="mono muted" id="feedBlock">BLOCK —</span></div>
+            <div id="eventFeed"></div>
           </article>
-          <article class="panel simulator-card">
-            <div class="panel-title"><div><p class="eyebrow">SYNTHETIC DATA</p><h3>Privacy simulator</h3></div><span class="simulation">NO BUDGET USED</span></div>
-            <div class="slider-label"><span>More privacy</span><b>ε = <output id="epsilonValue">0.80</output></b><span>More precision</span></div>
-            <input id="epsilonSlider" type="range" min="0.2" max="3" step="0.1" value="0.8" aria-label="Epsilon simulator" />
-            <div class="ci-visual"><div class="ci-track"><i id="ciBand"></i><b>MEAN<br/><span>+14.2%</span></b></div><div class="ci-values"><span id="ciLow">+10.8%</span><span id="ciHigh">+17.6%</span></div></div>
-            <p id="privacyCopy">식별력보다 프라이버시를 우선하는 설정입니다. 신뢰구간이 넓어집니다.</p>
+          <article class="panel guard-state">
+            <div class="guard-orbit"><div><span>DRAWDOWN</span><strong id="guardDd">—</strong><small id="guardDdLimit">/ —</small></div></div>
+            <h3 id="guardHeadline">—</h3>
+            <p id="guardCopy">reading chain…</p>
+            <div class="state-pills"><span id="pillMark">mark —</span><span>execute-only agent</span><span>withdraw isolated</span></div>
           </article>
         </div>
-        <div class="privacy-note"><b>What DP protects</b><span>비공개 watchlist와 settlement 전 allocation intent의 집계</span><b>What remains public</b><span>Vault 상태, batch settlement, 거래 이벤트</span></div>
+
+        <div class="limit-grid">
+          <article><span>LEVERAGE</span><strong id="tileLev">—</strong><div class="bar"><i id="barLev" style="width:0%"></i></div><small id="tileLevLimit">Limit —</small></article>
+          <article><span>POSITION NOTIONAL</span><strong id="tilePos">—</strong><div class="bar"><i id="barPos" style="width:0%"></i></div><small id="tilePosLimit">Limit —</small></article>
+          <article><span>DRAWDOWN</span><strong id="tileDd">—</strong><div class="bar"><i id="barDd" style="width:0%"></i></div><small id="tileDdLimit">Limit —</small></article>
+          <article><span>MARK AGE</span><strong id="tileAge">—</strong><div class="bar"><i id="barAge" style="width:0%"></i></div><small id="tileAgeLimit">Limit —</small></article>
+        </div>
+
+        <p class="disclosure" id="blocktimeNote"></p>
       </section>
     </main>
 
     <div id="modal" class="modal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal></div>
-      <div class="modal-card"><button class="modal-close" data-close-modal>×</button><p class="eyebrow">ALLOCATION INTENT</p><h2>Review allocation</h2><div class="modal-agent"><div class="agent-glyph fly">FG</div><div><b>FlyGraph Alpha</b><span>MandateVault · Epoch 043</span></div></div><div class="modal-row"><span>You allocate</span><b id="modalAmount">2,500 USDC</b></div><div class="modal-row"><span>Minimum shares</span><b id="modalShares">2,414.38 mSHARE</b></div><div class="modal-row"><span>Agent permissions</span><b class="positive">Execute only</b></div><button id="signIntent" class="button button-primary button-large">Sign intent</button></div>
+      <div class="modal-card"><button class="modal-close" data-close-modal>×</button><p class="eyebrow">ALLOCATION</p><h2>Review allocation</h2><div class="modal-agent"><div class="agent-glyph fly" id="modalGlyph">—</div><div><b id="modalAgent">—</b><span id="modalVault">MandateVault</span></div></div><div class="modal-row"><span>You allocate</span><b id="modalAmount">—</b></div><div class="modal-row"><span>Estimated shares</span><b id="modalShares">—</b></div><div class="modal-row"><span>Agent permissions</span><b class="positive">Execute only</b></div><button id="signIntent" class="button button-primary button-large">approve() + allocate()</button></div>
     </div>
     <div id="toast" class="toast"></div>
+    <script src="/vendor/ethers.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

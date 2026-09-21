@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "web": "node web/server.mjs",
     "compile": "node contracts/tools/compile.mjs",
     "test:contracts": "node --test contracts/test-js/*.test.mjs",
     "deploy:monad": "node contracts/script/deploy.mjs",

@@ -1,10 +1,14 @@
+# Kept so Foundry tooling (forge build, forge fmt, slither) can be pointed at the
+# sources. The test suite runs on Hardhat 3 / node:test (contracts/test-js), not
+# forge, and there is no contracts/test directory yet.
 [profile.default]
 src = "contracts/src"
 test = "contracts/test"
 script = "contracts/script"
 out = "contracts/out"
 libs = ["node_modules", "contracts/lib"]
-solc_version = "0.8.24"
+solc_version = "0.8.37"
+evm_version = "prague"
 optimizer = true
 optimizer_runs = 200
 

@@ -7,6 +7,11 @@ import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../tools
 
 const compiled = compileContracts();
 
+// Every vault gets a first deposit from the owner, so the batch path is never the
+// first depositor: MandateVault locks MIN_SHARES out of that deposit, and these
+// tests count shares one unit at a time.
+const SEED = 3_000_000n;
+
 async function fixture(t) {
   const chain = await hre.network.create();
   t.after(() => chain.close());
@@ -32,6 +37,11 @@ async function fixture(t) {
     );
   }
   vaults.sort((a, b) => BigInt(a.target) < BigInt(b.target) ? -1 : 1);
+  for (const vault of vaults) {
+    await (await usdc.mint(owner.address, SEED)).wait();
+    await (await usdc.approve(vault.target, SEED)).wait();
+    await (await vault.allocate(SEED, owner.address)).wait();
+  }
   const batch = await deploy("BatchAllocator", "BatchAllocator", [usdc.target, owner.address, 1000, 500]);
   for (const vault of vaults) await (await batch.setVaultAllowed(vault.target, true)).wait();
   for (const user of [alice, bob]) {
@@ -73,7 +83,7 @@ async function fixture(t) {
     assert.equal(await batch.settled(0), false);
     assert.equal(await batch.intentRootOf(0), ZeroHash);
     for (const vault of vaults) {
-      assert.equal(await vault.totalSupply(), 0n);
+      assert.equal(await vault.totalSupply(), SEED);
       assert.equal(await usdc.allowance(batch.target, vault.target), 0n);
     }
   }
@@ -101,8 +111,8 @@ test("multi-user, multi-vault netting; public proofs; permissionless claims; wit
   assert.equal(await usdc.balanceOf(batch.target), 1599n);
   assert.equal(await batch.escrowOf(alice.address), 802n);
   assert.equal(await batch.escrowOf(bob.address), 797n);
-  assert.equal(await vaults[0].totalSupply(), 304n);
-  assert.equal(await vaults[1].totalSupply(), 97n);
+  assert.equal(await vaults[0].totalSupply(), SEED + 304n);
+  assert.equal(await vaults[1].totalSupply(), SEED + 97n);
   assert.equal(await batch.intentRootOf(0), data.root);
   await assert.rejects(f.settle(data));
   await assert.rejects(batch.claimShares.staticCall(data.intents[0], [ZeroHash]));
@@ -184,17 +194,15 @@ test("cancellation, escrow withdrawal and hard epoch deadline need no batcher co
 test("rounding assigns every minted share; disabling a vault does not block claims", async (t) => {
   const f = await fixture(t);
   const vault = f.vaults[0];
-  await (await f.usdc.mint(f.owner.address, 7n)).wait();
-  await (await f.usdc.approve(vault.target, 3n)).wait();
-  await (await vault.allocate(3n, f.owner.address)).wait();
-  await (await f.usdc.transfer(vault.target, 4n)).wait(); // Supply=3, assets=7.
+  await (await f.usdc.mint(f.owner.address, 4_000_000n)).wait();
+  await (await f.usdc.transfer(vault.target, 4_000_000n)).wait(); // Supply=3e6, assets=7e6.
   const data = f.build([
     await f.signed(f.alice, { amount: 4n }),
     await f.signed(f.bob, { amount: 4n }),
     await f.signed(f.alice, { amount: 5n, nonce: 1n }),
   ]);
   await f.at(f.end);
-  await f.settle(data); // floor(13 * 3 / 7) = 5 shares, entitlements 1, 2, 2.
+  await f.settle(data); // floor(13 * 3e6 / 7e6) = 5 shares, entitlements 1, 2, 2.
   assert.equal(await vault.balanceOf(f.batch.target), 5n);
   assert.equal(await f.batch.outstandingShares(vault.target), 5n);
   const expected = [1n, 2n, 2n];
@@ -206,7 +214,7 @@ test("rounding assigns every minted share; disabling a vault does not block clai
   assert.equal(await vault.balanceOf(f.batch.target), 0n);
   assert.equal(await vault.balanceOf(f.alice.address), 3n);
   assert.equal(await vault.balanceOf(f.bob.address), 2n);
-  assert.equal(await vault.totalSupply(), 8n);
+  assert.equal(await vault.totalSupply(), SEED + 5n);
 });
 
 test("batch shape, allowlist and caller checks reject malformed settlement", async (t) => {

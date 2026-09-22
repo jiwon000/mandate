@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ContractFactory, JsonRpcProvider, Wallet, parseUnits } from "ethers";
+import { ContractFactory, JsonRpcProvider, NonceManager, Wallet, parseUnits } from "ethers";
 
 const root = path.resolve(import.meta.dirname, "../..");
 
@@ -17,15 +17,25 @@ async function deploy(signer, relativePath, name, args = []) {
   return contract;
 }
 
-const { MONAD_RPC_URL, DEPLOYER_PRIVATE_KEY, AGENT_ADDRESS } = process.env;
+const {
+  MONAD_RPC_URL,
+  DEPLOYER_PRIVATE_KEY,
+  AGENT_ADDRESS,
+  BATCH_EPOCH_SECONDS = "3600",
+  BATCH_SETTLEMENT_WINDOW_SECONDS = "1800"
+} = process.env;
 if (!MONAD_RPC_URL || !DEPLOYER_PRIVATE_KEY || !AGENT_ADDRESS) {
   throw new Error("Set MONAD_RPC_URL, DEPLOYER_PRIVATE_KEY, and AGENT_ADDRESS");
 }
 
 const provider = new JsonRpcProvider(MONAD_RPC_URL);
-const deployer = new Wallet(DEPLOYER_PRIVATE_KEY, provider);
+const wallet = new Wallet(DEPLOYER_PRIVATE_KEY, provider);
+// Track nonces locally. A public RPC behind a load balancer can answer
+// eth_getTransactionCount from a node that has not seen the previous transaction
+// yet, and this script sends a dozen back to back.
+const deployer = new NonceManager(wallet);
 const network = await provider.getNetwork();
-console.log(`Deploying from ${deployer.address} to chain ${network.chainId}`);
+console.log(`Deploying from ${wallet.address} to chain ${network.chainId}`);
 
 const usdc = await deploy(deployer, "mocks/MockUSDC.sol", "MockUSDC");
 const guard = await deploy(deployer, "MandateRiskGuard.sol", "MandateRiskGuard");
@@ -48,17 +58,29 @@ const vault = await deploy(
   [await usdc.getAddress(), await guard.getAddress(), AGENT_ADDRESS, await adapter.getAddress()]
 );
 
+// The batcher is the deployer for now: settleEpoch() is the one privileged call on
+// the batch path, and escrow withdrawal never depends on it.
+const batch = await deploy(
+  deployer,
+  "BatchAllocator.sol",
+  "BatchAllocator",
+  [await usdc.getAddress(), wallet.address, BATCH_EPOCH_SECONDS, BATCH_SETTLEMENT_WINDOW_SECONDS]
+);
+
 const vaultAddress = await vault.getAddress();
 const adapterAddress = await adapter.getAddress();
 await (await venue.setAdapter(adapterAddress, true)).wait();
 await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
+await (await batch.setVaultAllowed(vaultAddress, true)).wait();
+// maxMarkAgeSeconds is only honoured if something keeps the venue's mark fresh.
+// DeterministicMockVenue.updatedAt moves on setPrice() alone, so run
+// `npm run keeper:monad` against this deployment or every allocate/withdraw/
+// execute/poke reverts with MarkTooOld thirty seconds after the last push.
 await (await guard.configure(vaultAddress, {
   maxLeverageX100: 300,
   maxDrawdownBps: 200,
   maxMarkAgeSeconds: 30,
-  maxSlippageBps: 100,
   minBlocksBetweenTrades: 0,
-  maxConsecutiveRejects: 3,
   maxOrderNotional: parseUnits("500", 18),
   maxPositionNotional: parseUnits("1500", 18),
   maxTotalNotional: parseUnits("1500", 18),
@@ -67,12 +89,13 @@ await (await guard.configure(vaultAddress, {
 
 const addresses = {
   chainId: network.chainId.toString(),
-  deployer: deployer.address,
+  deployer: wallet.address,
   MockUSDC: await usdc.getAddress(),
   MandateRiskGuard: await guard.getAddress(),
   DeterministicMockVenue: await venue.getAddress(),
   MockVenueAdapter: adapterAddress,
-  MandateVault: vaultAddress
+  MandateVault: vaultAddress,
+  BatchAllocator: await batch.getAddress()
 };
 fs.writeFileSync(
   path.join(root, "contracts/deployments.latest.json"),

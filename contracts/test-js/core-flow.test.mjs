@@ -55,9 +55,7 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
     maxLeverageX100: 100,
     maxDrawdownBps: 2_000,
     maxMarkAgeSeconds: 3_600,
-    maxSlippageBps: 100,
     minBlocksBetweenTrades: 0,
-    maxConsecutiveRejects: 3,
     maxOrderNotional: parseUnits("500", 18),
     maxPositionNotional: parseUnits("800", 18),
     maxTotalNotional: parseUnits("800", 18),
@@ -68,8 +66,14 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
   await (await usdc.mint(await allocator.getAddress(), deposit)).wait();
   await (await usdc.connect(allocator).approve(vaultAddress, deposit)).wait();
   await (await vault.connect(allocator).allocate(deposit, await allocator.getAddress())).wait();
+  const minShares = await vault.MIN_SHARES();
   assert.equal(await vault.totalAssets(), deposit);
-  assert.equal(await vault.balanceOf(await allocator.getAddress()), deposit);
+  assert.equal(await vault.totalSupply(), deposit, "shares are minted 1:1 against the first deposit");
+  assert.equal(
+    await vault.balanceOf(await allocator.getAddress()),
+    deposit - minShares,
+    "a sliver of the first deposit stays locked against share-price inflation"
+  );
 
   const coder = AbiCoder.defaultAbiCoder();
   const validOrder = coder.encode(
@@ -90,7 +94,7 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
     "reverted order must not mutate venue position"
   );
 
-  await (await vault.connect(allocator).withdraw(deposit, await allocator.getAddress())).wait();
-  assert.equal(await usdc.balanceOf(await allocator.getAddress()), deposit);
-  assert.equal(await vault.totalSupply(), 0n);
+  await (await vault.connect(allocator).withdraw(deposit - minShares, await allocator.getAddress())).wait();
+  assert.equal(await usdc.balanceOf(await allocator.getAddress()), deposit - minShares);
+  assert.equal(await vault.totalSupply(), minShares, "only the locked shares remain");
 });

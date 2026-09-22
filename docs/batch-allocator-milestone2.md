@@ -1,12 +1,12 @@
 # BatchAllocator — milestone 2
 
-This milestone adds deposit-only batch allocation to the existing mock core. Registry, Reporter, automatic freeze, economic PnL settlement and a live Monad deployment remain pending.
+This milestone adds deposit-only batch allocation to the existing mock core. Registry, Reporter, fee accounting and a published Monad deployment remain pending. Update 2026-09-22: marked-NAV share pricing and the `poke()` drawdown freeze landed after this note was written; statements below that changed carry an update.
 
 ## Authorization and escrow
 
 `BatchAllocator(asset, batcher, epochDuration, settlementWindow)` fixes the token, batcher and schedule at deployment. The deployer manages the supported-vault allowlist but has no escrow withdrawal, share withdrawal, arbitrary call or sweep function. Use only reviewed, non-upgradeable Mandate vaults with the same asset. A signature binds the exact vault address; allowlisting a new vault does not authorize spending into it.
 
-Users call `depositEscrow(assets)` and sign EIP-712 `AllocationIntent` values off-chain. Domain: `MandateBatchAllocator`, version `1`, current chain ID, and the batch contract address. This milestone supports EOA signatures through OpenZeppelin ECDSA; ERC-1271 smart-wallet signatures are not implemented. All amounts and minimum shares use token/share base units; mUSDC has six decimals. ECDSA keeps the existing solc 0.8.24/Shanghai local test target; the installed OpenZeppelin SignatureChecker requires Cancun `MCOPY` support.
+Users call `depositEscrow(assets)` and sign EIP-712 `AllocationIntent` values off-chain. Domain: `MandateBatchAllocator`, version `1`, current chain ID, and the batch contract address. This milestone supports EOA signatures through OpenZeppelin ECDSA; ERC-1271 smart-wallet signatures are not implemented. All amounts and minimum shares use token/share base units; mUSDC has six decimals.
 
 Nonces are allocator-scoped across every epoch and vault. Settlement consumes them; `cancelIntent(nonce)` permanently invalidates them. Multiple outstanding signatures must use different nonces unless the user deliberately wants mutually exclusive alternatives.
 
@@ -23,7 +23,7 @@ end      = genesis + (e + 1) * epochDuration
 deadline = end + settlementWindow
 ```
 
-Settlement is accepted at timestamps in the inclusive interval `[end, deadline]`. Each signed intent must also be unexpired. An epoch can settle at most once; missing an earlier epoch does not block later epochs. Omitted intents remain unspent and their escrow is refundable. This implementation nets deposits only, not signed withdrawal or rebalance intents.
+Settlement is accepted at timestamps in the inclusive interval `[end, deadline]`. Each signed intent must also be unexpired. An epoch can settle at most once; missing an earlier epoch does not block later epochs. Omitted intents remain unspent and their escrow is refundable. This implementation nets deposits only, not signed withdrawal or rebalance intents. A vault whose `allocate` reverts (stale mark, `Frozen`) reverts the whole epoch, so the batcher must leave it out of the batch.
 
 `settleEpoch(epoch, intentRoot, nets)` accepts vault groups strictly sorted by ascending numeric address, each containing signed intents. A transaction supports at most 128 intents. The limit is a validation bound, not a benchmarked Monad gas guarantee; use small batches until measured. The contract verifies all signatures, amounts, nonces, escrow balances, epochs and deadlines, and performs exactly one `allocate` call per vault. A failure in any group rolls back every debit, nonce, vault deposit and approval.
 
@@ -50,7 +50,7 @@ Settlement recomputes this root. A root alone never grants spending rights. Chan
 
 The v0.2 sketch `claimShares(epoch, proof)` does not identify which of a user's potentially multiple vault/nonce entitlements is being claimed. The concrete ABI is therefore `claimShares(AllocationIntent intent, bytes32[] proof)`. The contract verifies membership and transfers the stored share entitlement to **intent.allocator**, regardless of the caller. Claims have no expiry and do not depend on the batcher or the current allowlist. Each entitlement can be claimed only once.
 
-`MandateVault.transferShares(receiver, shares)` transfers only the caller's own shares. It introduces no approval mechanism or ability to spend another account's shares. It has no active-state gate, so the future freeze milestone can preserve claims and withdrawals.
+`MandateVault.transferShares(receiver, shares)` transfers only the caller's own shares. It introduces no approval mechanism or ability to spend another account's shares. It has no active-state gate, so a frozen vault still honours claims and withdrawals.
 
 Proofs can be rebuilt from public settlement calldata, without a batcher-hosted proof API. The helper is a library for future API/UI integration; a chain indexer and automatic proof-retrieval service are not included here.
 
@@ -64,12 +64,12 @@ No DP release is implemented by this contract. DP budget accounting and eventual
 
 ## Validation and remaining work
 
-Run `npm ci`, `npm run compile`, and `npm run test:contracts` with Node 22.14+; `solc` is pinned to 0.8.24 and OpenZeppelin Contracts to 5.4.0. The incoming archive resolved OpenZeppelin 5.6.1, whose EIP-712 dependency path imports Cancun-only code; the exact 5.4.0 pin preserves the existing Shanghai local test target. After dependencies are installed, compile and tests use the local compiler and in-process Ganache without RPC or remote compiler downloads.
+Run `npm ci`, `npm run compile`, and `npm run test:contracts` with Node 22.14+; `solc` is pinned to 0.8.37 (EVM `prague`) and OpenZeppelin Contracts to 5.4.0. After dependencies are installed, compile and tests use the local compiler and an in-process Hardhat 3 (EDR) chain without RPC or remote compiler downloads.
 
-Dependency installation reported 35 npm audit findings (including 5 critical) across the development dependency tree. Dependency remediation and an audit of exploitability are not part of this milestone; no blanket `npm audit fix --force` was applied. The dependency lock changes only the OpenZeppelin package and its root requirement. Ganache uses its JavaScript fallback when the native µWS binary is unavailable on Node 22.
+Dependency remediation and an audit of exploitability are not part of this milestone; no blanket `npm audit fix --force` has been applied.
 
 Tests exercise multi-user/multi-vault deposits, odd-leaf proofs, one net deposit per vault, claim relay, duplicate claims, root immutability, signature field/domain tampering, duplicate nonces, cancellation, deadlines, insufficient escrow, minimum shares, cross-vault rollback and rounding conservation. They are integration/regression tests, not a completed security audit or Foundry fuzz campaign.
 
-The inherited MockVenue keeps positions but does not transfer trade proceeds, realize PnL, mark NAV, or liquidate positions at withdrawal. Drawdown/slippage fee terms and operational freeze are not fully implemented. Do not interpret the passing deposit/trade/withdrawal demo as production derivatives accounting. Next milestones must resolve those boundaries before any real-money use.
+Update 2026-09-22: the adapter now marks vault equity (cash plus unrealised PnL) to the venue price, shares are priced at that mark, and a drawdown breach freezes the vault through `poke()`. The mock venue still does not liquidate positions or charge funding, and fee terms are not implemented. Do not interpret the passing deposit/trade/withdrawal demo as production derivatives accounting. Those boundaries must be resolved before any real-money use.
 
-The existing `deploy:monad` script still deploys the milestone-1 core only. No contract has been deployed by this milestone. Batch testnet deployment, execution-state confirmation and address publication remain separate work.
+`deploy:monad` now deploys `BatchAllocator` alongside the core, allowlists the vault and writes the addresses to `contracts/deployments.latest.json`. No Monad testnet addresses have been published yet; execution-state confirmation and address publication remain separate work.

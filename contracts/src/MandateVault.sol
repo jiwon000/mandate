@@ -22,11 +22,23 @@ contract MandateVault is ReentrancyGuard {
     error OnlyRiskGuard();
     error AdapterMismatch();
     error NoMarkedEquity();
+    error DepositTooSmall(uint256 minimum);
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
     ///      not rely on the team running a bot for the guarantee to hold.
     uint16 public constant POKE_BOUNTY_BPS = 5;
+
+    /// @notice Shares locked forever out of the first deposit.
+    /// @dev Same defence as Uniswap V2's MINIMUM_LIQUIDITY. Without it the first
+    ///      depositor can mint one share, transfer cash straight to the vault to push
+    ///      the price of that share sky-high, and have every later deposit round down
+    ///      to nothing. With MIN_SHARES outstanding that trick costs the attacker
+    ///      MIN_SHARES times more than the victim can lose. The locked shares are
+    ///      counted in totalSupply, so after the first deposit NAV per share is still
+    ///      exactly 1e18, the par the risk guard seeds its high-water mark at.
+    uint256 public constant MIN_SHARES = 1e3;
+    address public constant LOCKED_SHARES_HOLDER = address(0xdead);
 
     IERC20 public immutable asset;
     IRiskGuard public immutable riskGuard;
@@ -72,8 +84,12 @@ contract MandateVault is ReentrancyGuard {
         if (assets == 0) revert ZeroAmount();
 
         uint256 supply = totalSupply;
+        uint256 locked;
         if (supply == 0) {
-            shares = assets;
+            if (assets <= MIN_SHARES) revert DepositTooSmall(MIN_SHARES);
+            locked = MIN_SHARES;
+            shares = assets - locked;
+            balanceOf[LOCKED_SHARES_HOLDER] = locked;
         } else {
             // Price the entry against what the vault is worth, not against the cash it
             // happens to be holding. Minting on the cash balance alone hands a new
@@ -87,7 +103,7 @@ contract MandateVault is ReentrancyGuard {
         if (shares == 0) revert ZeroShares();
 
         asset.safeTransferFrom(msg.sender, address(this), assets);
-        totalSupply = supply + shares;
+        totalSupply = supply + shares + locked;
         balanceOf[receiver] += shares;
         emit Allocated(receiver, assets, shares);
     }

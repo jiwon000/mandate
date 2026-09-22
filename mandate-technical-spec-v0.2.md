@@ -2,6 +2,8 @@
 
 버전 0.2 · Monad Metropolis Track 1 · v1 구현 기준
 
+2026-09-22 정정: 구현과 달라진 절에는 `[구현 기준 2026-09-22]` 표기를 달았다. 문서와 코드가 다르면 코드가 우선한다.
+
 ## 1. 제품 정의
 
 Mandate는 자율 트레이딩 에이전트에게 인출 권한 없이 제한된 실행 권한만 부여하고, 배분자가 에이전트의 검증 가능한 성과와 리스크 상태를 보고 자본을 배분하는 라이브 온체인 시장이다.
@@ -39,7 +41,7 @@ Agent ──execution request──> MandateVault ──> VenueAdapter ──> M
 ### 신뢰 경계
 
 - 자금, 지분, 권한, 주문 한도 및 상태 전이는 온체인에서 강제한다.
-- 배분 원본 intent와 watchlist는 공개 체인에 올리지 않고 Reporter 입력으로만 사용한다.
+- watchlist와 정산 전 intent는 Reporter 입력으로만 쓴다. 단 정산에 포함된 intent와 서명은 settlement calldata로 공개된다 (3.6, `docs/batch-allocator-milestone2.md`).
 - `BatchAllocator`는 공개된 개별 전송을 완전히 익명화하지 않는다. 동일 에폭의 요청을 합쳐 에이전트별 순액을 정산해 직접적인 `allocator → agent vault` 연결을 줄이는 역할이다.
 - 체인 분석으로 드러나는 입출금 정보를 DP가 숨긴다고 주장하지 않는다.
 - Reporter 침해는 표시 통계와 비공개 intent 정보에 영향을 주지만 Vault 자금 이동 권한을 주지 않는다.
@@ -53,10 +55,9 @@ enum AgentState { Active, Frozen, Closed }
 
 struct RiskLimits {
     uint16 maxLeverageX100;
-    uint16 maxRealizedDrawdownBps;
-    uint16 maxSlippageBps;
+    uint16 maxDrawdownBps;        // mark-to-market, 고점 NAV/share 대비 bps
     uint32 minBlocksBetweenTrades;
-    uint8 maxConsecutiveRejects;
+    uint32 maxMarkAgeSeconds;     // 이보다 오래된 mark로는 거래·예치·인출 불가. 0 = 비활성
     uint256 maxOrderNotional;
     uint256 maxPositionNotional;
     uint256 maxTotalNotional;
@@ -68,6 +69,8 @@ struct FeeTerms {
     uint16 protocolFeeBps;
 }
 ```
+
+[구현 기준 2026-09-22] `maxRealizedDrawdownBps`·`maxSlippageBps`·`maxConsecutiveRejects`는 제거했다. drawdown은 3.5의 mark 가격 기준 mark-to-market으로 검사하고, 거부 횟수 기반 동결은 3.4의 `poke()`로 대체했다. `FeeTerms`는 아직 구현되지 않았다.
 
 ### 3.2 MandateVault
 
@@ -111,6 +114,10 @@ interface IVenueAdapter {
 
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional);
+
+    /// 현금 + 미실현 손익을 venue 가격으로 평가한 지분 가치. markedAt은 venue의 가격 시각.
+    function markEquity(address vault)
+        external view returns (uint256 equity, uint256 markedAt);
 }
 ```
 
@@ -129,38 +136,45 @@ Adapter 승인 조건:
 ```text
 execute request
   → adapter.preview(order)
-  → RiskGuard.checkBefore(vault, adapter, preview)
+  → RiskGuard.checkAndConsumeBefore(vault, adapter, preview)
       ├─ violation: revert (외부 거래 없음)
       └─ pass: adapter.execute(...)
-                   → validate amountOut/slippage/resulting state
+                   → validate amountOut / resulting state
                        ├─ mismatch: whole transaction reverts atomically
-                       └─ valid: accounting update and event
+                       └─ valid: RiskGuard.checkAfter(vault, adapter)
+                                   → adapter.markEquity 로 NAV/share 재평가
+                                   → 고점(high-water) 갱신, drawdown·mark age 검사
+                                       ├─ 한도 초과: vault.freeze() + 이벤트
+                                       └─ 정상: accounting update and event
 ```
 
-`revert`된 트랜잭션 안에서 `Frozen` 상태를 영구 기록할 수 없으므로 두 경로를 분리한다.
+`revert`된 트랜잭션 안에서는 `Frozen` 상태를 기록할 수 없다. 그래서 거부된 주문은 동결의 근거가 아니다. 동결은 mark 가격 기준 상태 검사로만 일어난다.
 
-1. 단일 정상 한도 위반: 거래만 revert한다.
-2. 반복 위반: Relay/keeper가 실패 영수증 또는 서명된 주문 증거를 제출하는 별도 트랜잭션 `recordRejectedOrder`로 카운트한다.
-3. `maxConsecutiveRejects` 도달: 별도 트랜잭션에서 Agent를 `Frozen`으로 전환한다.
-4. 즉시 동결이 필요한 관리·침해 상황: guardian의 `freezeAgent`를 사용하고 사유를 이벤트로 남긴다.
-5. Frozen 상태: 신규 execute/allocate는 차단하고 allocator withdrawal은 유지한다.
+1. 단일 한도 위반: 거래만 revert한다. 카운트하지 않는다.
+2. 거래 후 검사: 성공한 모든 거래 뒤에 `checkAfter`가 NAV/share를 재평가하고 drawdown을 검사한다.
+3. 거래 사이의 검사: 누구나 `MandateRiskGuard.poke(vault, adapter)`를 호출할 수 있다. NAV/share가 고점 대비 `maxDrawdownBps`보다 더 떨어져 있으면 vault를 `Frozen`으로 전환하고, vault가 호출자에게 자산의 `POKE_BOUNTY_BPS`(0.05%)를 바운티로 지급한다. 신뢰된 keeper가 필요 없다.
+4. mark age: `block.timestamp > markedAt + maxMarkAgeSeconds`이면 execute·allocate·withdraw·poke 모두 `MarkTooOld`로 revert한다. mark가 갱신되면 풀린다.
+5. Frozen 상태: 신규 execute/allocate는 차단하고 allocator withdrawal과 `transferShares`는 유지한다.
 
-거부 카운트 증거가 복잡해지는 것을 막기 위해 v1 데모에서는 신뢰된 `ExecutionRelay`가 EIP-712 주문과 트랜잭션 영수증을 제출한다. 이 경로는 자금 안전 불변식이 아니라 운영상 자동 동결을 위한 보조 통제다.
+[구현 기준 2026-09-22] v0.2의 `recordRejectedOrder`·`maxConsecutiveRejects`·guardian `freezeAgent`·`ExecutionRelay` 경로는 폐기했다. 거부 횟수는 온체인 상태가 아니라 증거 제출 문제를 만들었고, mark-to-market 검사가 같은 목적을 온체인 상태만으로 달성한다.
 
 ### 3.5 가격 및 Drawdown 정의
 
 v1 MockVenue는 결정론적 온체인 가격을 제공한다. 데모의 레버리지와 mark-to-market 위험 지표는 이 가격에만 의존한다.
 
 ```solidity
-interface IPriceSource {
-    function priceE18(address asset) external view returns (uint256);
-    function updatedAt(address asset) external view returns (uint256);
-}
+// DeterministicMockVenue (v1 구현). 가격과 가격 시각을 함께 공개한다.
+uint256 public priceE18;
+uint256 public updatedAt;
+function setPrice(uint256 newPriceE18) external onlyOwner;
+
+// IVenueAdapter.markEquity: equity = 현금 + 미실현 손익, markedAt = venue.updatedAt
 ```
 
-- v1: `DeterministicMockPriceSource`; 시나리오별 가격 변화가 온체인 트랜잭션으로 기록된다.
-- production 확장: TWAP 또는 검증된 oracle, staleness/deviation guard 추가.
-- 가격피드 없이 강제할 수 있는 값은 `realizedDrawdown`으로만 부르며 mark-to-market DD와 혼용하지 않는다.
+- v1: `DeterministicMockVenue`; 시나리오별 가격 변화가 `setPrice` 트랜잭션으로 기록된다. 데모에서는 서버가, 테스트넷에서는 `contracts/script/keeper.mjs`가 가격을 밀어 넣는다.
+- `markedAt`은 `block.timestamp`가 아니라 venue의 가격 시각이다. 빠른 체인이 오래된 피드를 새것처럼 보이게 할 수 없다.
+- production 확장: TWAP 또는 검증된 oracle, deviation guard 추가. staleness guard는 `maxMarkAgeSeconds`로 이미 온체인에 있다.
+- [구현 기준 2026-09-22] drawdown은 항상 mark-to-market이다. mark 없이 강제하는 `realizedDrawdown` 지표는 없다.
 
 정확한 보안 문구:
 
@@ -189,14 +203,15 @@ interface IBatchAllocator {
         bytes32 intentRoot,
         BatchNetAllocation[] calldata nets
     ) external;
-    function claimShares(uint256 epoch, bytes32[] calldata proof) external;
+    function withdrawEscrow(uint256 assets) external;
+    function claimShares(AllocationIntent calldata intent, bytes32[] calldata proof) external;
 }
 ```
 
 에폭 흐름:
 
 1. 사용자가 USDC를 escrow에 예치한다.
-2. UI에서 EIP-712 `AllocationIntent`에 서명한다. 원본 intent는 API에 저장되고 즉시 온체인 게시하지 않는다.
+2. UI에서 EIP-712 `AllocationIntent`에 서명한다. 서명 시점에는 온체인에 올라가지 않지만, 정산에 포함된 intent와 서명은 settlement calldata로 공개된다.
 3. 에폭 종료 시 batcher가 intent Merkle root와 에이전트별 순배분액을 게시한다.
 4. `BatchAllocator`가 각 Vault에 순액을 한 번 예치한다.
 5. 사용자는 proof로 자신의 지분을 claim한다.
@@ -303,7 +318,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 | RiskGuard utilization | inhibitory control | limit utilization |
 | signed exposure | body state | `[-1,1]` |
 
-출력은 `LONG / FLAT / SHORT`와 `0% / 10% / 25%` 크기로 양자화한다. Relay는 NaN, 무한대, 범위 밖 값, checkpoint 불일치 및 cooldown 위반을 거부한다.
+출력은 `LONG / FLAT / SHORT`와 `0% / 10% / 25%` 크기로 양자화한다. 에이전트 러너는 NaN, 무한대, 범위 밖 값, checkpoint 불일치 및 cooldown 위반을 제출 전에 거부한다.
 
 ### 등록 및 검증
 

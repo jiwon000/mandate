@@ -36,10 +36,11 @@ test("a late allocator cannot buy into someone else's unrealised profit", async 
   const holder = await f.allocator.getAddress();
   const [after] = await f.vault.markedAssets();
   const supply = await f.vault.totalSupply();
+  const locked = await f.vault.balanceOf(await f.vault.LOCKED_SHARES_HOLDER());
   assert.equal(
-    (await f.vault.balanceOf(holder)) * after / supply,
+    ((await f.vault.balanceOf(holder)) + locked) * after / supply,
     usd("1200"),
-    "the first allocator keeps all $200 of the gain"
+    "the first deposit, locked sliver included, keeps all $200 of the gain"
   );
 });
 
@@ -69,6 +70,7 @@ test("a redemption the cash cannot cover pays out and leaves the rest as shares"
 
   const holder = await f.allocator.getAddress();
   const shares = await f.vault.balanceOf(holder);
+  const supply = await f.vault.totalSupply();
   const before = await navPerShare(f);
 
   // The stake is worth 1,200 but only 1,000 of cash is in the vault: the other 200
@@ -80,7 +82,7 @@ test("a redemption the cash cannot cover pays out and leaves the rest as shares"
 
   const left = await f.vault.balanceOf(holder);
   assert.ok(left > 0n, "the unpaid claim stays with the allocator as shares");
-  assert.equal(left, shares - usd("1000") * shares / usd("1200") - 1n, "the burn rounds up, by one unit");
+  assert.equal(left, shares - (usd("1000") * supply / usd("1200") + 1n), "the burn rounds up, by one unit");
   assert.ok(
     (await navPerShare(f)) >= before,
     "a partial exit must not dilute whoever stays; rounding breaks toward the vault"

@@ -58,9 +58,7 @@ const MANDATES = [
 // Generous notional caps across the board so leverage and drawdown are what
 // actually bind. A cap that never binds teaches nobody anything.
 const NOTIONAL_LIMITS = {
-  maxSlippageBps: 100,
   minBlocksBetweenTrades: 0,
-  maxConsecutiveRejects: 3,
   maxOrderNotional: E18(25_000),
   maxPositionNotional: E18(40_000),
   maxTotalNotional: E18(40_000),

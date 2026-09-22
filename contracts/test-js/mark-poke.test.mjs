@@ -82,13 +82,14 @@ test("a frozen vault stops the agent but never traps the allocator", async (t) =
   const allocatorAddress = await f.allocator.getAddress();
   const shares = await f.vault.balanceOf(allocatorAddress);
   await (await f.vault.connect(f.allocator).withdraw(shares, allocatorAddress)).wait();
-  assert.equal(await f.vault.totalSupply(), 0n, "withdrawal still works while frozen");
+  assert.equal(await f.vault.totalSupply(), await f.vault.MIN_SHARES(), "withdrawal still works while frozen");
   // 0.5 ETH bought at $2000 is $100 underwater at $1800, so the vault is worth
   // 899.5 even though 999.5 of cash is sitting in it. The allocator redeems at
   // the marked price and the position's loss stays behind as collateral instead
-  // of walking out of the door with the last share.
-  assert.equal(await f.usdc.balanceOf(allocatorAddress), parseUnits("909.5", 6));
-  assert.equal(await f.vault.totalAssets(), parseUnits("100", 6), "the loss stays collateralised");
+  // of walking out of the door with the last share. The 10 USDC minted above
+  // never got in, and 0.0009 of the equity belongs to the locked MIN_SHARES.
+  assert.equal(await f.usdc.balanceOf(allocatorAddress), parseUnits("909.4991", 6));
+  assert.equal(await f.vault.totalAssets(), parseUnits("100.0009", 6), "the loss stays collateralised");
 });
 
 test("freezing twice is rejected, so the bounty is paid once", async (t) => {

@@ -35,8 +35,6 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     struct MarkState {
         uint128 highWaterNavPerShare;
-        uint64 lastMarkedAt;
-        bool breached;
     }
 
     mapping(address => RiskLimits) public limitsOf;
@@ -172,8 +170,6 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (navPerShare > mark.highWaterNavPerShare) {
             mark.highWaterNavPerShare = uint128(navPerShare);
         }
-        mark.lastMarkedAt = uint64(block.timestamp);
-
         uint256 drawdownBps = _drawdownBps(navPerShare, mark.highWaterNavPerShare);
         emit Marked(vault, navPerShare, mark.highWaterNavPerShare, drawdownBps);
 
@@ -181,7 +177,6 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             return false;
         }
 
-        mark.breached = true;
         uint256 bounty = IMandateVaultFreeze(vault).freeze(beneficiary);
         emit DrawdownBreach(vault, beneficiary, navPerShare, drawdownBps, bounty);
         return true;

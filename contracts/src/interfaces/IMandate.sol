@@ -8,13 +8,11 @@ struct RiskLimits {
     ///      Named `maxDrawdownBps` (not `realized`) because it is now checked between
     ///      trades via poke(), not only when a position is closed.
     uint16 maxDrawdownBps;
-    uint16 maxSlippageBps;
     uint32 minBlocksBetweenTrades;
     /// @notice Reject any mark older than this many seconds. 0 disables the check.
     /// @dev This is the limit a slow chain cannot honour: a 2s cap is unreachable
     ///      when blocks are 12s apart, so the guard would revert every trade.
     uint32 maxMarkAgeSeconds;
-    uint8 maxConsecutiveRejects;
     uint256 maxOrderNotional;
     uint256 maxPositionNotional;
     uint256 maxTotalNotional;

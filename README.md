@@ -1,5 +1,86 @@
 # Mandate
 
+**수탁 권한 없이 자율 트레이딩 에이전트를 지원합니다. 실행 권한은 온체인에서 제한하고, 시장 신호는 범위를 명시한 차등 프라이버시로 공개합니다.**
+
+Mandate는 Monad에서 자율 트레이딩 에이전트에 자본을 배분하는 온체인 시장입니다. 배분자는 출금 권한을 유지하고, 에이전트는 거래 실행 권한만 받습니다. 모든 주문은 거래 venue에 도달하기 전에 전용 Adapter와 온체인 `RiskGuard` 검사를 통과해야 합니다.
+
+Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되었습니다.
+
+## 구현 현황
+
+현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다.
+
+현재 프라이버시 경계는 명확합니다. 정산에 포함된 allocation intent와 서명은 정산 calldata에서 공개됩니다. 배치 순정산은 직접 연결을 줄이지만 완전한 익명성을 제공하지 않습니다. 원본 intent가 체인에 전혀 올라가지 않는다는 더 강한 v0.2 문구는 아직 구현되지 않았고, DP Reporter와 비공개 Intent API도 예정 사항입니다.
+
+`web/` 데모는 서버 시작 시 in-process chain을 배포하고 네 개의 테스트 Vault를 실행합니다. MockVenue는 온체인 가격으로 현금과 미실현 손익을 반영한 equity를 계산하고 그 가격으로 지분을 발행·상환합니다. 청산이나 funding 비용은 구현하지 않았으므로 실제 파생상품 회계의 증거로 사용할 수 없습니다.
+
+## 현재 동작하는 기능
+
+- marked NAV 기준 Mock USDC 예치와 Vault 지분 발행
+- 에이전트의 실행 전용 권한과 출금 권한 차단
+- 결정론적 MockVenue와 온체인 가격
+- Adapter 기반 주문 해석 및 외부 호출 전 사전 노셔널 계산
+- 주문·포지션·총노셔널·레버리지·블록당 노셔널·cooldown 검사
+- 한도 초과 주문의 사전 revert와 원자적 결과 검증
+- 가격 mark가 오래되면 거래·예치·출금을 막는 `maxMarkAgeSeconds`
+- high-water mark 대비 marked drawdown 검사와 permissionless `poke()`
+- drawdown 초과 시 Vault 동결 및 호출자 bounty 지급
+- 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
+- EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불
+
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 19개가 통과합니다.
+
+## 동작 흐름
+
+1. 운영자가 하나의 `VenueAdapter`에 연결된 Vault를 배포하고 `MandateRiskGuard`에 한도를 설정합니다.
+2. 배분자가 USDC를 escrow에 예치하고 EIP-712 allocation intent에 서명합니다.
+3. `BatchAllocator`가 에폭 종료 후 Vault별 순액을 한 번 예치하고 사용자가 Merkle proof로 지분을 claim합니다.
+4. 에이전트가 Adapter를 통해 주문을 제출하면 Adapter가 노셔널과 예상 포지션을 계산합니다.
+5. RiskGuard가 외부 호출 전에 한도를 확인합니다. 위반 주문은 venue 상태를 바꾸지 않고 revert됩니다.
+6. 체결 후 가격 mark와 drawdown을 다시 검사합니다. 한도 초과 Vault는 동결되지만 배분자의 출금과 지분 이전은 유지됩니다.
+7. 누구나 `poke()`를 호출해 최신 mark 기준 drawdown을 확인할 수 있습니다.
+
+## 보안 및 프라이버시 한계
+
+Mandate는 임의의 `(venue, selector)` 호출을 허용하지 않습니다. 지원 venue마다 주문 해석, 사전 상태 계산, 원자적 외부 호출을 보장하는 Adapter가 필요합니다. 시장가치 위험 한도는 설정된 가격 소스에 의존하며, 데모는 결정론적 MockVenue를 사용합니다. 실서비스에서는 TWAP 또는 검증된 oracle과 stale/deviation guard가 필요합니다.
+
+DP는 공개 블록체인 거래를 숨기지 않습니다. 비공개 watchlist와 정산 전 demand 집계만 DP 대상이며, 거래·Vault 상태·escrow·정산 금액은 공개될 수 있습니다. 현재 웹 데모의 수치는 서버가 시작할 때 배포한 로컬 체인의 contract read와 transaction을 사용합니다.
+
+## 데모 실행
+
+```bash
+npm ci
+npm run compile
+npm run test:contracts
+npm run web
+```
+
+브라우저에서 `http://localhost:3000`을 엽니다. 포트가 사용 중이면 `PORT=3001 npm run web`처럼 다른 포트를 지정할 수 있습니다.
+
+데모 화면은 Market, Agent, Allocate, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·동결 후 출금 흐름을 확인할 수 있습니다. 배치 intent 정산은 계약 테스트로 검증되며 현재 웹 화면에는 연결되지 않았습니다.
+
+## 저장소 구조
+
+```text
+contracts/src/          Vault, RiskGuard, Adapter, BatchAllocator, interface, mock
+contracts/test-js/      in-process Hardhat EVM 계약 테스트
+contracts/script/       deploy.mjs와 keeper.mjs
+contracts/tools/        로컬 solc 컴파일러와 EIP-712/Merkle helper
+web/                    Market, Agent, Allocate, Live Risk 화면과 데모 서버
+docs/                   마일스톤 설계 문서
+mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
+```
+
+## 다음 작업
+
+Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline/FlyGraph 에이전트, invariant·fuzz 테스트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+
+자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
+
+---
+
+# Mandate (English)
+
 **Back autonomous trading agents without custody — execution constrained on-chain, market signals published with scoped differential privacy.**
 
 Mandate is a live capital-allocation market for autonomous trading agents on Monad. Allocators hold withdrawal rights no agent or operator can revoke, agents receive execution-only permissions, and every order must pass an adapter-specific on-chain `RiskGuard` before it reaches a venue.

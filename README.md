@@ -8,11 +8,11 @@ Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
 ## Implementation status
 
-The sections below describe the target v1 product. The current repository implements the mock Vault/Adapter/RiskGuard core and milestone-2 `BatchAllocator`: escrow, EIP-712 authorization, per-vault epoch deposits, Merkle claims, cancellation and refunds of unspent escrow. See [the milestone-2 design and ABI](docs/batch-allocator-milestone2.md).
+The sections below describe the target v1 product. The current repository implements the Vault/Adapter/RiskGuard core with mark-to-market drawdown enforcement, and the milestone-2 `BatchAllocator`: escrow, EIP-712 authorization, per-vault epoch deposits, Merkle claims, cancellation and refunds of unspent escrow. See [the milestone-2 design and ABI](docs/batch-allocator-milestone2.md).
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no DP Reporter or private Intent API yet.
 
-Registry/ε anchors, operational freeze, fee/PnL/NAV accounting, live frontend integration, FlyGraph and Monad deployment are pending. The five-screen frontend in `web/` runs as an interactive demo. MockVenue updates positions without economic PnL settlement; an open-position withdrawal test is not evidence of production market accounting. Foundry fuzzing and an external security review are also pending.
+Registry/ε anchors, fee accounting, FlyGraph and a published Monad testnet deployment are pending. The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
 
 ## Build status
 
@@ -25,8 +25,12 @@ The first executable contract milestone is complete:
 - order, position, total, leverage and block-notional checks
 - atomic revert before an over-limit order can mutate venue state
 - allocator withdrawal after agent activity
+- mark-age limit: a vault whose venue price is older than `maxMarkAgeSeconds` cannot trade, allocate or withdraw until the price is refreshed
+- mark-to-market drawdown against a high-water mark, checked after every trade and by anyone through `poke()`; a breach freezes the vault and pays the caller a bounty
+- first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
+- epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds
 
-The local E2E test deploys the full contract path to an in-memory EVM and verifies all of the above.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above.
 
 ## Why Mandate
 
@@ -40,33 +44,35 @@ Mandate separates those concerns. Vault custody and execution constraints are en
 
 ## How it works
 
-1. An operator registers an agent, its model hash, a supported `VenueAdapter`, fee terms and risk limits.
+1. An operator deploys a vault bound to one `VenueAdapter` and configures its risk limits in `MandateRiskGuard`. (Planned: a registry with model hashes and fee terms.)
 2. Allocators escrow USDC and sign EIP-712 allocation intents. A `BatchAllocator` settles each epoch as net allocations to agent vaults.
 3. The agent submits an order through its dedicated Adapter. The Adapter previews the resulting exposure and `RiskGuard` checks it before any external call.
-4. Valid orders execute atomically. Limit violations revert before trading. Unexpected results revert the entire transaction.
-5. A DP Reporter publishes performance confidence intervals and private demand aggregates with a signed digest and cumulative ε anchored on-chain.
+4. Valid orders execute atomically. Limit violations revert before trading. Unexpected results revert the entire transaction. After the trade the guard re-marks the vault and checks drawdown.
+5. Anyone can call `poke()` between trades. If the marked drawdown exceeds the mandate, the vault freezes and the caller is paid a small bounty out of the vault.
 6. Allocators claim shares and can withdraw at the marked price, position included. Agents never receive withdrawal authority.
+7. (Planned) A DP Reporter publishes performance confidence intervals and private demand aggregates with a signed digest and cumulative ε anchored on-chain.
 
 ## Architecture
 
 ```text
-Allocator → signed intent → Intent API → BatchAllocator → net allocation → MandateVault
-                              │                                  │
-                              └─ DP private-demand aggregates    └─ shares / withdrawal
+Allocator → signed intent → Intent API (planned) → BatchAllocator → net allocation → MandateVault
+                              │                                            │
+                              └─ DP private-demand aggregates (planned)    └─ shares / withdrawal
 
-Agent → MandateVault → VenueAdapter → RiskGuard pre-check → MockVenue
+Agent → MandateVault → MockVenueAdapter → MandateRiskGuard pre-check → DeterministicMockVenue
+                                          └─ post-trade mark / poke() → freeze + bounty
 
-DP Reporter → signed stats digest + published ε → MandateRegistry
+DP Reporter → signed stats digest + published ε → MandateRegistry            (planned)
 ```
 
 ### Core contracts
 
-- `MandateVault` — USDC custody, share accounting and execution-only agent role.
-- `VenueAdapter` — venue-specific order decoding, exposure preview and atomic execution.
-- `RiskGuard` — order, position, leverage, slippage and per-block limits.
+- `MandateVault` — USDC custody, share accounting at marked NAV, execution-only agent role, freeze that keeps withdrawals open.
+- `MockVenueAdapter` (`IVenueAdapter`) — order decoding, exposure preview, atomic execution and `markEquity()` for the guard.
+- `MandateRiskGuard` — order, position, total, leverage, per-block and cooldown limits before a trade; mark age and mark-to-market drawdown after it and on `poke()`.
 - `BatchAllocator` — escrow, signed intents, epoch netting, settlement and share claims.
-- `MandateRegistry` — agent metadata, model hashes and immutable DP release anchors.
-- `DeterministicMockVenue` — reproducible testnet execution and on-chain demo pricing.
+- `DeterministicMockVenue` — reproducible execution and on-chain demo pricing.
+- `MandateRegistry` (planned) — agent metadata, model hashes and immutable DP release anchors.
 
 ## Privacy model
 
@@ -106,16 +112,16 @@ preview order
       → pass: execute through Adapter
           → validate output and resulting state
               → mismatch: atomically revert everything
-              → valid: commit accounting
+              → valid: re-mark equity, update the high-water mark, check drawdown and mark age
 ```
 
-A revert cannot also preserve a `Frozen` state change. Repeated rejected orders are therefore recorded through a separate evidence transaction; reaching the rejection threshold freezes the agent. Frozen agents cannot trade or accept new allocation, while allocator withdrawals remain available.
+A revert cannot also preserve a `Frozen` state change, so a rejected order never freezes anything by itself. Instead the guard re-marks the vault after every successful trade, and anyone can call `MandateRiskGuard.poke(vault, adapter)` between trades. If NAV per share sits more than `maxDrawdownBps` below its high-water mark, the guard freezes the vault and the vault pays the caller `POKE_BOUNTY_BPS` (0.05%) of its assets. Frozen vaults cannot trade or accept new allocation; withdrawals and share transfers stay open.
 
-Custody and execution permissions are enforced on-chain. Market-value risk limits depend on the configured venue price source; the demo uses a deterministic on-chain mock venue. Production deployments would require a guarded TWAP or validated oracle. Metrics calculated without a mark price are labeled `realized drawdown`, not mark-to-market drawdown.
+Custody and execution permissions are enforced on-chain. Market-value risk limits depend on the configured venue price source; the demo uses a deterministic on-chain mock venue. Production deployments would require a guarded TWAP or validated oracle. Drawdown is mark-to-market against that price source, and `markedAt` is the venue's own price timestamp rather than `block.timestamp`, so a fast chain cannot make a stale feed look fresh.
 
 ## FlyGraph demo agent
 
-FlyGraph is an optional connectome-topology-inspired graph policy used to demonstrate that Mandate can constrain unusual autonomous models.
+FlyGraph is an optional connectome-topology-inspired graph policy used to demonstrate that Mandate can constrain unusual autonomous models. It is not implemented yet; the demo agents are scripted.
 
 It is **not** presented as a literal biological brain simulation and is **not** assumed to be naturally risk-averse. A fixed fly-derived graph provides the policy topology; normalized market and vault features are mapped to graph input channels, and outputs are restricted to:
 
@@ -124,20 +130,24 @@ Direction: LONG | FLAT | SHORT
 Size:      0% | 10% | 25%
 ```
 
-The model's graph, feature schema and checkpoint hashes are registered. NaN, infinite, out-of-range, stale-checkpoint and cooldown-violating outputs are rejected by the relay. Every valid proposal still passes through the same Adapter and RiskGuard as any other agent.
+The model's graph, feature schema and checkpoint hashes are registered. NaN, infinite, out-of-range, stale-checkpoint and cooldown-violating outputs are rejected by the agent runner before submission. Every valid proposal still passes through the same Adapter and RiskGuard as any other agent.
 
 The evaluation compares FlyGraph with an MLP and a degree-preserving random graph on out-of-sample return, drawdown, turnover, RiskGuard rejection count and seed variance. The purpose is a reproducible experiment, not a claim of biological superiority.
 
 ## Demo flow
 
-1. Compare agent performance intervals, risk limits and immutable model hashes.
-2. Escrow test USDC and sign an allocation intent.
-3. Settle an epoch and claim vault shares.
-4. Watch FlyGraph propose a valid order and execute it on Monad testnet.
-5. Submit an over-limit order and see `RiskGuard` revert before venue execution.
-6. Record repeated rejection evidence in a separate transaction and freeze the agent.
-7. Inspect the published ε and stats digest anchor.
-8. Withdraw at marked NAV while the position is still open.
+The demo in `web/` has four screens: Market, Agent, Allocate and Live Risk.
+
+1. Compare the four mandates on Market: drawdown, leverage and mark age are each shown against the limit the allocator accepted.
+2. Open one on Agent: NAV per share against its high-water mark, and every limit as a bar against what is used.
+3. Approve and allocate test USDC on Allocate; shares are minted at the marked NAV.
+4. Send an order inside the mandate on Live Risk and watch it pass the guard.
+5. Send an over-limit order and see the guard's own custom error decoded from the revert data, before any venue state changes.
+6. Push a price shock, then call `poke()` from an account that is neither allocator nor agent: the vault past its drawdown limit freezes and the caller is paid the bounty.
+7. Switch the node to 12-second blocks: the mandate that asks for a 4-second mark can no longer be enforced and starts reverting with `MarkTooOld`.
+8. Withdraw from the frozen vault at marked NAV while its position is still open.
+
+The batch flow (escrow, signed intents, settlement, claims) is covered by contracts and tests, not by the demo UI. DP releases and the ε anchor are planned.
 
 ## Honest limitations
 
@@ -148,34 +158,43 @@ The evaluation compares FlyGraph with an MLP and a degree-preserving random grap
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
 - A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes.
 - A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
-- One vault with a stale mark reverts the whole epoch in `BatchAllocator.settle()`, since settlement allocates to every vault in a single transaction.
+- One vault with a stale mark or in `Frozen` state reverts the whole epoch in `BatchAllocator.settleEpoch()`, since settlement allocates to every vault in a single transaction. The batcher has to leave such vaults out of the batch.
+- The first deposit into a vault permanently locks `MIN_SHARES` (1e3 share units) to a dead address so a first depositor cannot inflate the share price against later allocators. The first depositor pays that dust.
+- `poke()` pays its bounty out of the vault, so a breach costs allocators 0.05% on top of the drawdown. That is the price of not needing a trusted keeper.
+- On a testnet deployment the venue price comes from the deployer's keeper script, so the mark is only as honest as that keeper. A production venue would supply its own price.
 - A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash.
 - FlyGraph is an experimental agent implementation, not part of the protocol's trust model.
 
 ## Repository layout
 
 ```text
-contracts/   Vault, Registry, RiskGuard, BatchAllocator, Adapters, MockVenue, tests
-reporter/    DP releases, HMAC seed derivation, ε accountant, signed digests
-intent-api/  Private watchlists and signed allocation-intent ingestion
-agent/       Baseline agents and optional FlyGraph policy
-web/         Market, allocation, live risk, published release and simulator screens
-docs/        Protocol and threat-model specifications
+contracts/src/          MandateVault, MandateRiskGuard, MockVenueAdapter, BatchAllocator, interfaces, mocks
+contracts/test-js/      node:test suites against an in-process Hardhat 3 (EDR) chain
+contracts/script/       deploy.mjs and keeper.mjs for a live RPC
+contracts/tools/        solc compile runner and the EIP-712 / Merkle helper (batch.mjs)
+web/                    Market, Agent, Allocate and Live Risk screens, demo server and chain
+docs/                   Milestone design notes
+mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
 
-## Suggested build order
+## Roadmap
+
+Done:
 
 1. Vault + deterministic MockVenue + one strict Adapter
-2. RiskGuard pre-checks and atomic result validation
-3. BatchAllocator escrow, settlement, claims and timeout refunds
-4. Registry release anchor and Reporter
-5. Five-screen frontend and synthetic Privacy Simulator
+2. RiskGuard pre-checks, atomic result validation, mark-to-market drawdown and `poke()` freeze
+3. BatchAllocator escrow, settlement, claims and refunds
+
+Next:
+
+4. Registry release anchor and DP Reporter
+5. Published-release and Privacy Simulator screens; batch flow in the UI
 6. Baseline bot, then FlyGraph as an optional differentiated agent
-7. Invariant/fuzz tests, Slither review and Monad testnet E2E
+7. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
 
 ## Stack
 
-Solidity ^0.8.24 · Foundry · OpenZeppelin · TypeScript/Node · Next.js · wagmi/viem · Tailwind · Privy · Monad testnet.
+Solidity 0.8.37 (EVM `prague`) · Hardhat 3 (EDR) · OpenZeppelin 5.4 · ethers 6 · Node 22+ · dependency-free HTML/JS frontend · Monad testnet.
 
 ## Local development
 
@@ -186,22 +205,27 @@ npm run test:contracts
 npm run web
 ```
 
-Open `http://localhost:3000` for the interactive demo. Allocation and trade actions are simulated until Monad testnet contracts are configured. See [web/README.md](web/README.md) for the screen list and demo interactions.
+Open `http://localhost:3000` for the interactive demo. Every number on screen is a contract read and every button is a transaction against the in-process chain the server deploys on boot. See [web/README.md](web/README.md) for the screen list and demo interactions.
 
-Use Node 22.14 or newer. The repository keeps a Foundry-compatible layout and `foundry.toml`. After dependency installation, the local `solc` 0.8.37 runner and in-process Hardhat tests work without network access. Dependencies and the compiler binary are not vendored in the repository.
+Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the in-process Hardhat tests work without network access. `foundry.toml` mirrors the layout for anyone who wants to point Foundry tooling at the sources; the test suite itself does not use Foundry. CI (`.github/workflows/ci.yml`) runs compile and tests on every push and pull request.
 
-For Monad deployment, use Foundry 1.8 or newer with the Monad execution network enabled. Network values are intentionally supplied through environment variables instead of being hardcoded because the testnet may be reset.
+## Deploying to a live RPC
+
+Network values are supplied through environment variables instead of being hardcoded because the testnet may be reset.
 
 ```bash
-cp .env.example .env
+cp .env.example .env                                # MONAD_RPC_URL, DEPLOYER_PRIVATE_KEY, AGENT_ADDRESS
 npm run compile
-node --env-file=.env contracts/script/deploy.mjs
+node --env-file=.env contracts/script/deploy.mjs    # writes contracts/deployments.latest.json
+node --env-file=.env contracts/script/keeper.mjs    # keeps the venue price fresh and calls poke()
 ```
 
-Never commit the deployer private key.
+`npm run deploy:monad` and `npm run keeper:monad` run the same scripts with the variables taken from the shell environment.
 
-See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements.
+The deployed vault is configured with `maxMarkAgeSeconds = 30`, so without the keeper every `execute`, `allocate` and `withdraw` starts reverting with `MarkTooOld` thirty seconds after deployment. The keeper walks the mock price inside a band and calls `poke()` each tick; a drawdown breach freezes the vault and the keeper collects the bounty. Never commit the deployer private key.
+
+See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

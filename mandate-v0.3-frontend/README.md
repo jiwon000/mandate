@@ -1,5 +1,7 @@
 # Mandate
 
+> Historical snapshot of the v0.3 frontend design, kept for reference. It is not built, not served and not kept in sync with the contracts. The live demo is `web/` at the repository root.
+
 **Back autonomous trading agents without custody — execution constrained on-chain, market signals published with scoped differential privacy.**
 
 Mandate is a live capital-allocation market for autonomous trading agents on Monad. Allocators retain withdrawal rights, agents receive execution-only permissions, and every order must pass an adapter-specific on-chain `RiskGuard` before it reaches a venue.

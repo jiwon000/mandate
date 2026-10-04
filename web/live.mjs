@@ -13,7 +13,7 @@ import { loadArtifact } from "../contracts/script/artifacts.mjs";
 import { CONTRACT_SOURCES, START_PRICE, deployDemoSystem } from "./mandates.mjs";
 import { demoWallets } from "./accounts.mjs";
 import { authorise, buildPolicy } from "./live-policy.mjs";
-import { rpcFailure, rpcResult, toRpcError } from "./rpc.mjs";
+import { ReadCache, rpcFailure, rpcResult, toRpcError } from "./rpc.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -114,7 +114,8 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     maxGasPerTx: number("MAX_GAS_PER_TX", 1_500_000),
     sendPerMinute: number("SEND_TX_PER_MINUTE", 40),
     controlPerMinute: number("CONTROL_PER_MINUTE", 12),
-    logLookbackBlocks: number("LOG_LOOKBACK_BLOCKS", 90)
+    logLookbackBlocks: number("LOG_LOOKBACK_BLOCKS", 90),
+    readCacheMs: number("READ_CACHE_MS", 2000)
   };
 
   const provider = new JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
@@ -133,6 +134,8 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
   const abis = loadAbis();
   const sendBucket = new TokenBucket(config.sendPerMinute);
   const controlBucket = new TokenBucket(config.controlPerMinute);
+  const reads = new ReadCache(config.readCacheMs);
+  let forwarded = 0;
 
   let deployment = null;
   let policy = null;
@@ -205,6 +208,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
         if (isNonceError(error)) signers.keeper.reset();
       }
     }
+    reads.clear();
     lastObserveAt = Date.now();
   }
 
@@ -222,6 +226,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     const wobbleBps = Math.round(8 * Math.sin(ticks / 9));
     const priceE18 = (basePriceE18 * BigInt(10_000 + wobbleBps)) / 10_000n;
     await send(venue.setPrice(priceE18));
+    reads.clear();
     pushes += 1;
     lastPushAt = Date.now();
     return shocked;
@@ -276,6 +281,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       provider, wallets, signers, file, perAccountMon: config.gasPerAccountMon, log: (line) => log(`[deploy:${by}] ${line}`)
     });
     adopt(stored);
+    reads.clear();
     // The cooldown counts from the end of a reset, not its start.
     lastResetAt = Date.now();
     return deployment;
@@ -304,7 +310,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       const gas = await provider.estimateGas({ ...request, from: tx.from });
       if (gas > BigInt(config.maxGasPerTx)) return rpcFailure(id, -32000, `refused: gas ${gas} is above the demo cap`);
       const response = await signer.sendTransaction({ ...request, gasLimit: gas });
-      response.wait().then((receipt) => spend(response, receipt)).catch(() => signer.reset());
+      response.wait().then((receipt) => { spend(response, receipt); reads.clear(); }).catch(() => signer.reset());
       touch();
       log(`[sign] ${verdict.role} ${verdict.name} -> ${response.hash}`);
       return rpcResult(id, response.hash);
@@ -330,17 +336,23 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     const results = new Array(calls.length);
     const forward = [];
     for (const [index, call] of calls.entries()) {
-      const handled = await handleOne(call);
+      const handled = (await handleOne(call)) ?? reads.get(call);
       if (handled) results[index] = handled;
       else forward.push(index);
     }
     if (forward.length) {
+      forwarded += forward.length;
       try {
         const answers = await upstream(forward.map((index) => calls[index]));
         const byId = new Map((Array.isArray(answers) ? answers : [answers]).map((a) => [a.id, a]));
         for (const index of forward) {
           results[index] = byId.get(calls[index].id) ?? rpcFailure(calls[index].id ?? null, -32603, "no answer from upstream");
         }
+        // A mined receipt passing through means the state the cache holds is
+        // from before that transaction; the browser that sent it is about to
+        // re-read everything and must not get the old answers.
+        if (forward.some((index) => calls[index].method === "eth_getTransactionReceipt" && results[index].result)) reads.clear();
+        for (const index of forward) reads.put(calls[index], results[index]);
       } catch (error) {
         for (const index of forward) results[index] = rpcFailure(calls[index].id ?? null, -32603, error.message);
       }
@@ -373,6 +385,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
           lastError
         },
         deployer: { address: wallets.owner.address, balanceMon: formatEther(balance) },
+        proxy: { forwarded, cached: reads.hits, cacheMs: config.readCacheMs },
         reset: { admin: Boolean(adminToken), auto: config.autoReset, lastResetAt }
       };
     },

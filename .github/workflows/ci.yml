@@ -17,6 +17,7 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - run: npm run test:contracts
+      - run: npm run test:web
       - uses: foundry-rs/foundry-toolchain@v1
       - run: forge install
       - run: npm run test:invariant

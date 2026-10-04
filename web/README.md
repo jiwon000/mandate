@@ -2,7 +2,9 @@
 
 The demo runs against a real chain. `npm run web` compiles the contracts, starts an
 in-process EDR node, deploys the whole system, funds four mandates, and serves the
-page in front of it. Every number on screen is a contract read; every button is a
+page in front of it. `npm run web:live` serves the same page in front of a deployment
+on a live RPC (Monad testnet) and signs the visitor's clicks with demo keys the server
+holds. Either way every number on screen is a contract read; every button is a
 transaction. Nothing is mocked in the browser.
 
 ## Run
@@ -20,6 +22,14 @@ The page talks to the node over `/rpc`, which the server proxies to the in-proce
 chain, so no wallet extension and no testnet funds are needed. The header's
 "Connect allocator" button adopts one of the node's funded accounts.
 
+For the live mode, fill `.env` (`MONAD_RPC_URL`, `DEMO_MNEMONIC`, `DEMO_ADMIN_TOKEN`),
+run `npm run deploy:demo` once, then `npm run web:live`. The server boots from
+`web/deployments/<chainId>.json`, runs the oracle itself and answers `/rpc` as a
+signing proxy: `eth_accounts` lists the six demo accounts, `eth_sendTransaction` is
+checked against a per-role allowlist and signed server-side, reads go upstream.
+The full description, the env table and the hosting unit are in the root README
+under "Live testnet demo".
+
 ## What is deployed
 
 | Contract | Role |
@@ -32,7 +42,9 @@ chain, so no wallet extension and no testnet funds are needed. The header's
 
 The four mandates carry deliberately different terms — Tight Mandate accepts a 3%
 drawdown and a 4-second mark age, Momentum Vector accepts 20% and 30 seconds — so a
-single market move produces four different outcomes.
+single market move produces four different outcomes. On a live chain the oracle is a
+paid transaction every 5 seconds, so the live profile widens Tight Mandate's mark age
+to 10 seconds; everything else is identical (`web/mandates.mjs` is the one definition).
 
 ## The four screens
 
@@ -62,8 +74,17 @@ price the guard would reject.
   account that is neither the allocator nor the agent.
 - The block-cadence toggle switches the node between 1s and 12s blocks. At 12s, a
   mandate that asks for a mark no older than 4s can no longer be enforced —
-  `poke()` and `execute()` start reverting with `MarkTooOld`.
-- `Reset demo` redeploys everything.
+  `poke()` and `execute()` start reverting with `MarkTooOld`. (Local mode only; a
+  live chain's cadence is its own, so the toggle is hidden there.)
+- `Reset demo` redeploys everything. In live mode it is the operator's button: it
+  only appears when the page is opened with `?admin=<DEMO_ADMIN_TOKEN>`, and the
+  server also resets by itself once a visitor has left two or more vaults frozen.
+
+In live mode the note under the control room replaces the cadence note: it names the
+network, says that the server is signing with demo keys, and reports the oracle's
+current cadence (every 5s while someone is watching, every 5 minutes otherwise), the
+number of marks pushed and the gas spent so far. Each feed entry's block label links
+to the transaction on the explorer.
 
 ## A note on the block cadence
 

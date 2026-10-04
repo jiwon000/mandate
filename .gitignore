@@ -14,3 +14,5 @@ contracts/broadcast/
 !.env.example
 contracts/deployments.latest.json
 .DS_Store
+# rehearsal deployments against a local node; real networks are committed
+web/deployments/31337.json

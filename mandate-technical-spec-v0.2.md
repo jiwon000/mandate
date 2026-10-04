@@ -324,42 +324,13 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 메커니즘: 거래별 return을 `[-c,c]`로 clip하고, mean/Sharpe/marked max drawdown을 report-noisy-mean 민감도(`scale = 2c/(N·ε)`)를 쓰는 Laplace 메커니즘으로 noise 처리한다(ε만 추적하고 δ는 없으므로 pure-DP Laplace를 택했다 — 가우시안은 아니다). `reporter/epsilon.mjs`의 `EpsilonLedger`가 `MandateRegistry`와 **완전히 동일한** 단조 증가·가산 누적 검사를 먼저 통과시키므로, 빌드된 release는 온체인에서 거부될 수 없다(통합 테스트로 검증: `contracts/test-js/reporter.test.mjs`가 실제 `MandateRegistry.postLeaderboard()`에 서명된 release를 제출해서 받아들여지는 것까지 확인). `reporter/simulator.mjs`는 같은 `laplaceScaleForMean` 공식을 재사용하되 `EpsilonLedger`나 `reporterSecret`을 전혀 import하지 않는 별도 파일 — 4.4의 Simulator 분리를 "규칙"이 아니라 "구조"로 강제한다.
 
-`statsVersion` 필드는 아직 UI/온체인에 노출되지 않았고(§6 불변식 9 참고), Published ε·Privacy Simulator 웹 화면도 아직 없다 — 둘 다 백엔드 모듈과 테스트만 존재한다.
+`statsVersion` 필드는 아직 UI/온체인에 노출되지 않았고(§6 불변식 9 참고), Published ε/Privacy Simulator 웹 화면은 2026-10-04에 `web/`의 Privacy 탭으로 연결됐다 — README "Privacy 화면 연결" 참고.
 
-## 5. FlyGraph 데모 에이전트
+## 5. 데모 에이전트
 
-[2026-10-04: 범위 제외] baseline/FlyGraph 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다. 아래는 설계 시점 문안으로 남겨둔다.
+[2026-10-04: 범위 제외] baseline/FlyGraph 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다.
 
-초파리 커넥톰은 Mandate의 보안 근거가 아니라 범용적인 실행 제한을 보여주는 선택적 실험 에이전트다.
-
-정확한 설명:
-
-> FlyGraph is a connectome-topology-inspired graph policy agent. It uses a fixed fly-derived graph as an inductive bias; it is not a biological brain simulation and is not assumed to be inherently risk-averse.
-
-### 입력 및 출력
-
-| 시장/볼트 입력 | 그래프 입력 채널 | 정규화 |
-|---|---|---|
-| 단기 수익률 | direction | `clip(return / sigma, -1, 1)` |
-| 거래량 변화 | stimulus intensity | rolling z-score |
-| bid-ask spread | market friction | `[0,1]` |
-| 실현 변동성 | threat intensity | rolling volatility |
-| vault drawdown | internal stress | `drawdown / limit` |
-| RiskGuard utilization | inhibitory control | limit utilization |
-| signed exposure | body state | `[-1,1]` |
-
-출력은 `LONG / FLAT / SHORT`와 `0% / 10% / 25%` 크기로 양자화한다. 에이전트 러너는 NaN, 무한대, 범위 밖 값, checkpoint 불일치 및 cooldown 위반을 제출 전에 거부한다.
-
-### 등록 및 검증
-
-- 고정 graph topology hash
-- feature schema hash
-- trained checkpoint hash
-- build/version hash
-- MLP 및 degree-preserving random graph baseline과 out-of-sample 비교
-- 지표: net return, max drawdown, turnover, RiskGuard rejection count, seed variance
-
-모델은 주문을 제안할 뿐이며 안전을 결정하지 않는다. 모든 주문은 동일한 Adapter/RiskGuard 경로를 통과한다.
+데모의 에이전트는 스크립트된 주문 시퀀스다. 어떤 에이전트든 같은 Adapter와 RiskGuard를 거치며, 에이전트 정책 자체는 프로토콜의 보안 근거가 아니다. 학습 기반 정책은 이 스펙의 범위 밖이다.
 
 ## 6. 핵심 불변식
 
@@ -402,7 +373,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 ### E2E 데모
 
-1. Agent/FlyGraph 등록
+1. Agent 등록
 2. 여러 allocator가 escrow 예치 및 intent 서명
 3. watchlist/intent DP 집계 게시
 4. 에폭 batch settlement 및 shares claim

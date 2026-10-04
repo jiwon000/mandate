@@ -49,3 +49,10 @@
 #simEpsilonSlider{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:var(--line);outline:0;cursor:pointer}
 #simEpsilonSlider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:var(--blue);border:2px solid var(--bg);box-shadow:0 0 0 1px var(--blue)}
 #simEpsilonSlider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--blue);border:2px solid var(--bg);box-shadow:0 0 0 1px var(--blue)}
+
+/* live mode: the chain sets its own block time and only the operator resets */
+.live-only{display:none;font-size:10px;letter-spacing:.04em;align-self:center}
+body.live .blocktime-toggle{display:none}
+body.live:not(.admin) #redeployButton{display:none}
+body.live .live-only{display:inline}
+.feed-item time a{color:inherit;text-decoration:underline dotted}

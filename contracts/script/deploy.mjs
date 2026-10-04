@@ -1,13 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ContractFactory, JsonRpcProvider, NonceManager, Wallet, parseUnits } from "ethers";
+import { loadArtifact } from "./artifacts.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
-
-function loadArtifact(relativePath, name) {
-  const file = path.join(root, "contracts/artifacts-local", relativePath, `${name}.json`);
-  return JSON.parse(fs.readFileSync(file, "utf8"));
-}
 
 async function deploy(signer, relativePath, name, args = []) {
   const artifact = loadArtifact(relativePath, name);

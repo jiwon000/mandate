@@ -3,19 +3,14 @@
 //
 // This is the demo's chain. Nothing here is mocked at the UI layer: the browser
 // talks to these contracts over JSON-RPC and every number it renders is read back
-// from contract state.
+// from contract state. The mandates themselves, and the routine that deploys and
+// seeds them, live in ./mandates.mjs and are shared with the live-RPC deploy.
 import hre from "hardhat";
-import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits, getAddress, verifyTypedData, ZeroHash } from "ethers";
+import { BrowserProvider, Contract, ContractFactory, formatUnits, getAddress, verifyTypedData, ZeroHash } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
+import { START_PRICE, deployDemoSystem } from "./mandates.mjs";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 import { DPReporter } from "../reporter/reporter.mjs";
-import { returnsFromNavSeries } from "../reporter/stats.mjs";
-
-const coder = AbiCoder.defaultAbiCoder();
-const E18 = (n) => parseUnits(String(n), 18);
-const USDC = (n) => parseUnits(String(n), 6);
-
-const START_PRICE = E18(2000);
 
 // Short enough that a live demo sees an epoch end and settle inside one
 // session; the privileged settleEpoch() call still only nets signed intents,
@@ -36,81 +31,6 @@ const REPORT_EPSILON_CAP = 50_000_000n; // 50.0 cumulative epsilon, generous for
 // is accepted. See reporter/noise.mjs.
 const REPORT_SECRET = "mandate-demo-reporter-secret";
 
-// Four vaults, one venue, one adapter. They differ only in the mandate their
-// allocators signed - that is the entire point of the screen.
-const MANDATES = [
-  {
-    key: "steady",
-    name: "Steady Basis",
-    initials: "SB",
-    thesis: "Low-leverage basis carry",
-    deposit: USDC(12_000),
-    openSizeE18: E18(3),
-    limits: {
-      maxLeverageX100: 150, maxDrawdownBps: 800, maxMarkAgeSeconds: 60,
-      volWindowSeconds: 300, stressHorizonSeconds: 300, stressSigmasX10: 30
-    }
-  },
-  {
-    key: "range",
-    name: "Range Carry",
-    initials: "RC",
-    thesis: "Mean-reversion inside a band",
-    deposit: USDC(8_000),
-    openSizeE18: E18(6),
-    limits: {
-      maxLeverageX100: 300, maxDrawdownBps: 1200, maxMarkAgeSeconds: 30,
-      volWindowSeconds: 120, stressHorizonSeconds: 120, stressSigmasX10: 30
-    }
-  },
-  {
-    key: "momentum",
-    name: "Momentum Vector",
-    initials: "MV",
-    thesis: "Levered trend following",
-    deposit: USDC(5_000),
-    openSizeE18: E18(10),
-    limits: {
-      maxLeverageX100: 500, maxDrawdownBps: 2000, maxMarkAgeSeconds: 30,
-      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 20
-    }
-  },
-  {
-    key: "tight",
-    name: "Tight Mandate",
-    initials: "TM",
-    thesis: "3% drawdown, 4s mark age",
-    deposit: USDC(6_000),
-    openSizeE18: E18(6),
-    limits: {
-      maxLeverageX100: 300, maxDrawdownBps: 300, maxMarkAgeSeconds: 4,
-      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 30
-    }
-  }
-];
-// The last three terms are the volatility clause (roadmap item 10): a realised
-// volatility estimate over `volWindowSeconds` of marks, and any order that adds
-// exposure must survive a `stressSigmasX10/10`-sigma move over
-// `stressHorizonSeconds` without breaching maxDrawdownBps. Zero window = no clause.
-
-// Generous notional caps across the board so leverage and drawdown are what
-// actually bind. A cap that never binds teaches nobody anything.
-const NOTIONAL_LIMITS = {
-  minBlocksBetweenTrades: 0,
-  maxOrderNotional: E18(25_000),
-  maxPositionNotional: E18(40_000),
-  maxTotalNotional: E18(40_000),
-  maxBlockNotional: E18(25_000)
-};
-
-// JSON has no BigInt, and the notional caps are 1e18-scaled. Ship them as decimal
-// strings so the browser can BigInt() them back without losing precision.
-function serialiseLimits(limits) {
-  return Object.fromEntries(
-    Object.entries(limits).map(([key, value]) => [key, typeof value === "bigint" ? value.toString() : value])
-  );
-}
-
 export async function startChain() {
   const compiled = compileContracts();
   // EDR stamps every block at least one second after the previous one. The demo
@@ -124,7 +44,7 @@ export async function startChain() {
   const owner = await provider.getSigner(0);
   const allocator = await provider.getSigner(1);
   const keeper = await provider.getSigner(9);
-  const agents = await Promise.all(MANDATES.map((_, i) => provider.getSigner(2 + i)));
+  const agents = await Promise.all([2, 3, 4, 5].map((i) => provider.getSigner(i)));
 
   const deploy = async (source, name, args = []) => {
     const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
@@ -137,7 +57,6 @@ export async function startChain() {
   let deployment = null;
   let venue = null;
   let guard = null;
-  let adapterAddress = null;
   let batchAllocator = null;
   let batchDomain = null;
   let batchGenesis = 0;
@@ -163,69 +82,24 @@ export async function startChain() {
   let lastNavByVault = new Map();
 
   async function setup() {
-    // The vaults' own allocation and opening trades are the first entries the
-    // execution feed shows, so the browser needs to know where to start reading.
-    const startBlock = await provider.getBlockNumber();
-    const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
-    guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
-    venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [basePriceE18]);
-    const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [await venue.getAddress()]);
-    adapterAddress = await adapter.getAddress();
-    await (await venue.setAdapter(adapterAddress, true)).wait();
+    deployment = await deployDemoSystem({
+      deploy, abiOf, provider, owner, allocator, agents, keeper, basePriceE18
+    });
+    venue = new Contract(deployment.addresses.venue, deployment.abis.venue, owner);
+    guard = new Contract(deployment.addresses.guard, deployment.abis.guard, keeper);
 
-    const allocatorAddress = await allocator.getAddress();
-    const totalDeposits = MANDATES.reduce((sum, m) => sum + m.deposit, 0n);
-    await (await usdc.mint(allocatorAddress, totalDeposits + USDC(20_000))).wait();
-
-    const vaults = [];
-    for (const [index, mandate] of MANDATES.entries()) {
-      const agentAddress = await agents[index].getAddress();
-      const vault = await deploy("MandateVault", "MandateVault", [
-        await usdc.getAddress(),
-        await guard.getAddress(),
-        agentAddress,
-        await adapter.getAddress()
-      ]);
-      const vaultAddress = await vault.getAddress();
-
-      await (await guard.setAdapter(vaultAddress, await adapter.getAddress(), true)).wait();
-      await (await guard.configure(vaultAddress, { ...NOTIONAL_LIMITS, ...mandate.limits })).wait();
-      // Terms are final before the first deposit; the vault would refuse it otherwise.
-      await (await guard.lockTerms(vaultAddress)).wait();
-
-      // Seed the vault, then let its agent open the position its mandate allows.
-      await (await usdc.connect(allocator).approve(vaultAddress, mandate.deposit)).wait();
-      await (await vault.connect(allocator).allocate(mandate.deposit, allocatorAddress)).wait();
-      // Deploying and configuring burns blocks, and every block burns chain time.
-      // Re-stamp the mark first or a tight maxMarkAgeSeconds rejects the opening
-      // trade - which is the guard working, just not what we want at seed time.
-      await (await venue.setPrice(basePriceE18)).wait();
-      const order = coder.encode(["int256", "uint256"], [mandate.openSizeE18, basePriceE18 * 2n]);
-      await (await vault.connect(agents[index]).execute(await adapter.getAddress(), order)).wait();
-
-      vaults.push({
-        ...mandate,
-        address: vaultAddress,
-        agent: agentAddress,
-        termsHash: await guard.termsHash(vaultAddress),
-        deposit: mandate.deposit.toString(),
-        openSizeE18: mandate.openSizeE18.toString(),
-        limits: serialiseLimits({ ...NOTIONAL_LIMITS, ...mandate.limits })
-      });
-    }
-
-    const chainId = Number((await provider.getNetwork()).chainId);
+    const chainId = deployment.chainId;
 
     // The batcher is `owner`, same as deploy.mjs does for Monad: settleEpoch()
     // only nets already-verified signed intents, so there is nothing a batcher
     // key can steal by also being the deployer.
     batchAllocator = await deploy("BatchAllocator", "BatchAllocator", [
-      await usdc.getAddress(),
+      deployment.addresses.usdc,
       await owner.getAddress(),
       BATCH_EPOCH_SECONDS,
       BATCH_SETTLEMENT_WINDOW_SECONDS
     ]);
-    for (const v of vaults) {
+    for (const v of deployment.vaults) {
       await (await batchAllocator.setVaultAllowed(v.address, true)).wait();
     }
     const batchAddress = await batchAllocator.getAddress();
@@ -236,16 +110,16 @@ export async function startChain() {
 
     // MandateRegistry: `owner` is both the admin and the configured reporter,
     // same centralization-is-the-point tradeoff as the batcher above. `owner`
-    // is also `guard`'s Ownable owner (it deployed `guard` above), which is
-    // exactly who registerAgent() now requires as the caller. Each vault
-    // registers itself right after lockTerms() -- registerAgent() reads the
-    // real guard off the vault itself and checks the claimed limits against
-    // its termsHash, so this can only ever publish the truth, never something
-    // looser than what allocators actually signed up for.
+    // is also `guard`'s Ownable owner (it deployed `guard` via deployDemoSystem),
+    // which is exactly who registerAgent() now requires as the caller. Each
+    // vault registers itself right after lockTerms() -- registerAgent() reads
+    // the real guard off the vault itself and checks the claimed limits
+    // against its termsHash, so this can only ever publish the truth, never
+    // something looser than what allocators actually signed up for.
     registry = await deploy("MandateRegistry", "MandateRegistry");
     await (await registry.setReporter(await owner.getAddress())).wait();
     await (await registry.setEpsilonCap(REPORT_EPSILON_CAP)).wait();
-    for (const v of vaults) {
+    for (const v of deployment.vaults) {
       // v.limits is already the exact merged-and-locked RiskLimits (serialised
       // for JSON transport, but keccak256(abi.encode(...)) only depends on the
       // numeric value, not whether a given field arrived as a bigint or a
@@ -254,7 +128,7 @@ export async function startChain() {
       await (
         await registry.registerAgent(
           v.address,
-          adapterAddress,
+          deployment.addresses.adapter,
           v.limits,
           { performanceFeeBps: 0, managementFeeBps: 0 },
           ZeroHash
@@ -280,27 +154,8 @@ export async function startChain() {
     lastNavByVault = new Map();
 
     deployment = {
-      chainId,
-      addresses: {
-        usdc: await usdc.getAddress(),
-        guard: await guard.getAddress(),
-        venue: await venue.getAddress(),
-        adapter: await adapter.getAddress()
-      },
-      accounts: {
-        owner: await owner.getAddress(),
-        allocator: allocatorAddress,
-        keeper: await keeper.getAddress()
-      },
-      abis: {
-        vault: abiOf("MandateVault", "MandateVault"),
-        guard: abiOf("MandateRiskGuard", "MandateRiskGuard"),
-        adapter: abiOf("MockVenueAdapter", "MockVenueAdapter"),
-        venue: abiOf("mocks/DeterministicMockVenue", "DeterministicMockVenue"),
-        usdc: abiOf("mocks/MockUSDC", "MockUSDC"),
-        batch: abiOf("BatchAllocator", "BatchAllocator"),
-        registry: abiOf("MandateRegistry", "MandateRegistry")
-      },
+      ...deployment,
+      abis: { ...deployment.abis, batch: abiOf("BatchAllocator", "BatchAllocator"), registry: abiOf("MandateRegistry", "MandateRegistry") },
       batch: {
         address: batchAddress,
         genesis: batchGenesis,
@@ -311,10 +166,7 @@ export async function startChain() {
         address: registryAddress,
         clipBound: REPORT_CLIP_BOUND,
         epsilon: REPORT_EPSILON
-      },
-      vaults,
-      startBlock,
-      startedAt: Date.now()
+      }
     };
     return deployment;
   }
@@ -371,7 +223,7 @@ export async function startChain() {
       for (const vault of deployment.vaults) {
         if (Number(vault.limits.volWindowSeconds) === 0) continue;
         try {
-          await (await guard.connect(keeper).observe(vault.address, adapterAddress)).wait();
+          await (await guard.observe(vault.address, deployment.addresses.adapter)).wait();
         } catch (error) {
           console.error("[observe]", vault.key, error.shortMessage || error.message);
         }
@@ -384,7 +236,7 @@ export async function startChain() {
       const navsThisTick = [];
       for (const vault of deployment.vaults) {
         try {
-          const [navPerShare] = await guard.quote(vault.address, adapterAddress);
+          const [navPerShare] = await guard.quote(vault.address, deployment.addresses.adapter);
           const nav = Number(formatUnits(navPerShare, 18));
           navsThisTick.push(nav);
           const previous = lastNavByVault.get(vault.address);
@@ -413,6 +265,7 @@ export async function startChain() {
   const control = {
     async status() {
       return {
+        live: false,
         blockTimeSeconds,
         priceE18: (await venue.priceE18()).toString(),
         markedAt: Number(await venue.updatedAt()),
@@ -662,6 +515,7 @@ export async function startChain() {
     control,
     batch,
     reporter: reporterApi,
+    touch() {},
     async close() {
       clearInterval(timer);
       await chain.close();

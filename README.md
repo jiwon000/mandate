@@ -10,7 +10,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 
 현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다. 2026-09-23 진행 발표 피드백으로 동결 후 reduce-only `unwind()`, 일방향 조건 잠금 `lockTerms()`, 변동성 조항(`StressBreach`)이 추가되었습니다. 2026-10-04에 `MandateRegistry`가 추가되어 에이전트 카탈로그와 DP 릴리즈 앵커를 제공합니다.
 
-현재 프라이버시 경계는 명확합니다. 정산에 포함된 allocation intent와 서명은 정산 calldata에서 공개됩니다. 배치 순정산은 직접 연결을 줄이지만 완전한 익명성을 제공하지 않습니다. 원본 intent가 체인에 전혀 올라가지 않는다는 더 강한 v0.2 문구는 아직 구현되지 않았고, DP Reporter와 비공개 Intent API도 예정 사항입니다.
+현재 프라이버시 경계는 명확합니다. 정산에 포함된 allocation intent와 서명은 정산 calldata에서 공개됩니다. 배치 순정산은 직접 연결을 줄이지만 완전한 익명성을 제공하지 않습니다. 원본 intent가 체인에 전혀 올라가지 않는다는 더 강한 v0.2 문구는 아직 구현되지 않았고, 비공개 Intent API도 예정 사항입니다. `reporter/` 모듈이 2026-10-04에 추가됐지만 범위는 **공개 데이터에 한정**됩니다: 이미 공개된 정산 금액과 거래 수익률만 DP로 집계하고, 스펙이 말하는 "개별 watchlist"와 "정산 전 intent"의 private demand DP는 해당 기능 자체가 데모에 없어서 v1 범위 밖으로 명시적으로 뺐습니다.
 
 `web/` 데모는 서버 시작 시 in-process chain을 배포하고 네 개의 테스트 Vault를 실행합니다. MockVenue는 온체인 가격으로 현금과 미실현 손익을 반영한 equity를 계산하고 그 가격으로 지분을 발행·상환합니다. 청산이나 funding 비용은 구현하지 않았으므로 실제 파생상품 회계의 증거로 사용할 수 없습니다.
 
@@ -31,8 +31,9 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
 - `MandateRegistry`: `registerAgent()`는 permissionless·자기검증형 — 호출자가 제시한 `limits`가 해당 vault의 실제 locked `termsHash`와 일치하고 `adapter`가 guard의 allowlist에 있을 때만 카탈로그에 기록됨. `postLeaderboard()`는 단일 설정된 reporter 키의 EIP-712 서명만 받고, epoch·pinnedBlock 단조 증가와 누적 ε 장부(`cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6`, 설정된 상한 초과 거부)를 온체인에서 강제
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
+- `reporter/`: 공개 정산 금액과 거래 수익률(`[-c,c]` clip)의 mean/Sharpe/max drawdown을 순수 ε-DP(Laplace 메커니즘, scale = `2·clipBound/(N·ε)`)로 집계. 노이즈는 `HMAC_SHA256(reporterSecret, domainSeparator||epochId||pinnedBlock||statsVersion)` 시드로 결정론적으로 생성되고, `EpsilonLedger`가 `MandateRegistry`와 동일한 누적 ε 산식·상한을 먼저 체크해서 온체인에서 거부될 release는 애초에 서명하지 않음. Privacy Simulator(`reporter/simulator.mjs`)는 같은 scale 공식을 쓰되 ledger·secret에 전혀 접근하지 않는 별도 모듈 — 슬라이더가 실제 ε 예산을 쓸 수 없는 구조
 
-로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 44개(Hardhat/node:test, MandateRegistry 10개 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 58개(Hardhat/node:test, MandateRegistry 10개·DP Reporter 14개 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
 
 ## 동작 흐름
 
@@ -110,11 +111,11 @@ Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
 ## Implementation status
 
-The sections below describe the target v1 product. The current repository implements the Vault/Adapter/RiskGuard core with mark-to-market drawdown enforcement, and the milestone-2 `BatchAllocator`: escrow, EIP-712 authorization, per-vault epoch deposits, Merkle claims, cancellation and refunds of unspent escrow. See [the milestone-2 design and ABI](docs/batch-allocator-milestone2.md).
+The sections below describe the target v1 product. The current repository implements the Vault/Adapter/RiskGuard core with mark-to-market drawdown enforcement, the milestone-2 `BatchAllocator` (escrow, EIP-712 authorization, per-vault epoch deposits, Merkle claims, cancellation and refunds of unspent escrow), `MandateRegistry` (self-verifying agent catalog and DP release anchor), and a `reporter/` module that computes and signs real DP releases over public data. See [the milestone-2 design and ABI](docs/batch-allocator-milestone2.md).
 
-**Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no DP Reporter or private Intent API yet.
+**Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no private Intent API, and `reporter/` is scoped to public data only (2026-10-04): it DP-releases settlement amounts and trade returns, which are already on-chain, rather than the private watchlist/pre-settlement-intent signals the v0.2 spec sketches — those have no corresponding feature in this demo, so there is nothing yet to protect.
 
-Registry/ε anchors, fee accounting, FlyGraph and a published Monad testnet deployment are pending. The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
+Fee accounting, FlyGraph and a published Monad testnet deployment are pending. The five-screen frontend in `web/` runs against an in-process chain that the server deploys on boot. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. An external security review is also pending; Foundry invariant/fuzz testing is implemented (`contracts/test/`, see Build status).
 
 ## Build status
 
@@ -133,9 +134,11 @@ The first executable contract milestone is complete:
 - one-way terms lock: `lockTerms()` makes the limits and the adapter allowlist final, a vault refuses deposits until its terms are locked, and `termsHash` is the value an allocator can quote
 - volatility clause: the guard keeps a realised-volatility estimate built from the marks it sees (every trade, `poke()` and the side-effect-free `observe()` feed it), and an order that adds exposure is refused with `StressBreach` when a k-sigma move over the mandate's horizon would leave the vault past `maxDrawdownBps`; orders that reduce exposure are never stress-tested
 - first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
-- epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds
+- epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds — connected end to end in `web/`'s Batch screen (sign, queue, settle, claim), not only in the contract tests
+- `MandateRegistry`: permissionless, self-verifying `registerAgent()` (claimed `RiskLimits` must hash to the vault's own locked `termsHash`; the adapter must be on the guard's allowlist); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
+- `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (58 cases). `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 
@@ -167,7 +170,7 @@ Allocator → signed intent → Intent API (planned) → BatchAllocator → net 
 Agent → MandateVault → MockVenueAdapter → MandateRiskGuard pre-check → DeterministicMockVenue
                                           └─ post-trade mark / poke() → freeze + bounty
 
-DP Reporter → signed stats digest + published ε → MandateRegistry            (planned)
+reporter/ (DPReporter) → signed stats digest + published ε → MandateRegistry.postLeaderboard()
 ```
 
 ### Core contracts
@@ -177,7 +180,7 @@ DP Reporter → signed stats digest + published ε → MandateRegistry          
 - `MandateRiskGuard` — order, position, total, leverage, per-block and cooldown limits before a trade; mark age and mark-to-market drawdown after it and on `poke()`.
 - `BatchAllocator` — escrow, signed intents, epoch netting, settlement and share claims.
 - `DeterministicMockVenue` — reproducible execution and on-chain demo pricing.
-- `MandateRegistry` (planned) — agent metadata, model hashes and immutable DP release anchors.
+- `MandateRegistry` — self-verifying agent catalog (`registerAgent()` checks a claimed `RiskLimits` against the vault's own locked `termsHash` and adapter allowlist before accepting it) and the one place a DP release gets anchored (`postLeaderboard()`, gated by a single reporter's EIP-712 signature, not by who sends the transaction).
 
 ## Privacy model
 
@@ -185,18 +188,20 @@ Mandate deliberately distinguishes private inputs from public settlement data.
 
 | Signal | Treatment |
 |---|---|
-| Private watchlists | DP aggregate only |
-| Pre-settlement allocation intents | DP aggregate only; raw queries unavailable |
-| Batch settlement amounts | Public on-chain; optionally shown as privacy-aware analytics, not a secrecy guarantee |
+| Private watchlists | Would need DP aggregation; the feature itself does not exist in this demo, so there is nothing to protect yet — scoped out of v1 rather than faked |
+| Pre-settlement allocation intents | Same as above: no private-demand DP in v1 |
+| Batch settlement amounts | Public on-chain; shown as privacy-aware analytics (`reporter/`), not a secrecy guarantee |
 | Trades and vault state | Public on-chain |
-| Performance leaderboard | DP confidence intervals, with the public-trade side channel disclosed |
+| Performance leaderboard | Real DP confidence intervals over public trade returns (`reporter/`, Laplace mechanism), with the public-trade side channel disclosed |
 
 `BatchAllocator` reduces direct allocator-to-agent transactions by netting an epoch before vault settlement. It does not provide complete anonymity: escrow deposits and public settlement remain observable.
 
+As of 2026-10-04, `reporter/` computes and signs DP releases for the two rows above that are already public data — mean return, Sharpe and marked max drawdown, clipped to `[-c, c]` and noised with the Laplace mechanism (`scale = 2c / (N·ε)`, the standard report-noisy-mean sensitivity). The two private-signal rows have no implementation: inventing a watchlist feature just to have something to anonymize would be privacy theater, so v1 only protects data that is genuinely sensitive and genuinely collected.
+
 ### Published ε vs Privacy Simulator
 
-- **Published ε** is fixed for an epoch, consumed by a real release and anchored in `MandateRegistry`.
-- **Privacy Simulator** uses synthetic data to demonstrate how ε changes confidence-interval width. Moving the slider does not generate another release or consume privacy budget.
+- **Published ε** is fixed for an epoch, consumed by a real release and anchored in `MandateRegistry.postLeaderboard()`.
+- **Privacy Simulator** (`reporter/simulator.mjs`) uses synthetic data to demonstrate how ε changes confidence-interval width, reusing the real Reporter's own scale formula so the picture is never mathematically inconsistent with an actual release. It is a separate module that never imports the epsilon ledger or the reporter secret: moving the slider cannot generate another release or consume privacy budget, by construction, not just by convention.
 
 Reporter noise is derived internally as:
 
@@ -204,7 +209,7 @@ Reporter noise is derived internally as:
 HMAC_SHA256(reporterSecret, domainSeparator || epochId || pinnedBlock || statsVersion)
 ```
 
-The seed is not public. Users verify the signed digest, release metadata and immutable on-chain anchor—not the private noise realization. A changed `statsVersion` is treated as a new release and consumes additional ε.
+The seed is not public. Users verify the signed digest, release metadata and immutable on-chain anchor—not the private noise realization. A changed `statsVersion` is treated as a new release and consumes additional ε. `reporter/`'s `EpsilonLedger` mirrors `MandateRegistry`'s own accounting exactly (same monotonic-epoch and additive-cumulative checks) so a release it builds is guaranteed either postable or rejected before anything is ever signed — the two cannot silently drift apart.
 
 ## Risk enforcement
 
@@ -267,7 +272,7 @@ The evaluation compares FlyGraph with an MLP and a degree-preserving random grap
 
 ## Demo flow
 
-The demo in `web/` has four screens: Market, Agent, Allocate and Live Risk.
+The demo in `web/` has five screens: Market, Agent, Allocate, Batch and Live Risk.
 
 1. Compare the four mandates on Market: drawdown, leverage and mark age are each shown against the limit the allocator accepted.
 2. Open one on Agent: NAV per share against its high-water mark, and every limit as a bar against what is used.
@@ -279,13 +284,16 @@ The demo in `web/` has four screens: Market, Agent, Allocate and Live Risk.
 8. Switch the node to 12-second blocks: the mandate that asks for a 4-second mark can no longer be enforced and starts reverting with `MarkTooOld`.
 9. Withdraw from the frozen vault at marked NAV while its position is still open.
 
-The batch flow (escrow, signed intents, settlement, claims) is covered by contracts and tests, not by the demo UI. DP releases and the ε anchor are planned.
+10. On Batch, deposit to escrow, sign an `AllocationIntent` for the current epoch (off-chain, free), and once the epoch ends, settle it (the demo server plays the batcher role `deploy.mjs` gives the deployer key on Monad) and claim the resulting shares with the reconstructed Merkle proof.
+
+DP releases and the ε anchor are implemented at the `reporter/` + `MandateRegistry` layer and tested end to end (a built release is actually accepted by `postLeaderboard()`), but are not yet wired into a web screen — there is no live Published-ε or Privacy-Simulator UI yet, only the two modules and their test suites.
 
 ## Honest limitations
 
 - DP does not hide public blockchain transactions.
 - Batch netting reduces direct linkage but does not provide full allocator anonymity.
 - The v1 Reporter and batcher are centralized, although neither can withdraw vault funds; escrow has an on-chain timeout refund.
+- `reporter/`'s DP releases cover only data that was already public (settlement amounts, trade returns). The spec's "private watchlist" and "pre-settlement intent" DP aggregates are not implemented, because the demo has no watchlist feature and no private-intent signal to aggregate in the first place — building one just to anonymize it would not protect anything real.
 - The deterministic MockVenue proves contract behavior, not production price safety or liquidity. It also does not settle: closing a position through `unwind()` books the realised PnL into the venue's cost basis instead of moving tokens, so a `Closed` vault's equity is its cash plus that realised PnL while its token balance is unchanged. A real venue would settle the loss out of margin.
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
 - A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes.
@@ -306,11 +314,13 @@ The batch flow (escrow, signed intents, settlement, claims) is covered by contra
 ## Repository layout
 
 ```text
-contracts/src/          MandateVault, MandateRiskGuard, MockVenueAdapter, BatchAllocator, interfaces, mocks
+contracts/src/          MandateVault, MandateRiskGuard, MockVenueAdapter, BatchAllocator, MandateRegistry, interfaces, mocks
 contracts/test-js/      node:test suites against an in-process Hardhat 3 (EDR) chain
+contracts/test/         Foundry invariant/fuzz and reentrancy tests
 contracts/script/       deploy.mjs and keeper.mjs for a live RPC
 contracts/tools/        solc compile runner and the EIP-712 / Merkle helper (batch.mjs)
-web/                    Market, Agent, Allocate and Live Risk screens, demo server and chain
+reporter/               DP release computation: clipping, Laplace noise, epsilon ledger, EIP-712 signing, Privacy Simulator
+web/                    Market, Agent, Allocate, Batch and Live Risk screens, demo server and chain
 docs/                   Milestone design notes
 mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
@@ -325,21 +335,23 @@ Done:
 4. Reduce-only `unwind()` after a freeze (from the 2026-09-23 review): permissionless, bountied, five 20% steps with a slippage bound, `Frozen -> Closed`, `IVenueAdapter.reduce()`
 5. Locked terms (from the 2026-09-23 review): one-way `lockTerms()` over the limits and the adapter allowlist, deposits refused until locked, `termsHash` for the UI and a future registry anchor
 6. Volatility clause (from the 2026-09-23 review): three more terms in `RiskLimits`, an on-chain realised-volatility estimate fed by every mark the guard sees plus a permissionless `observe()`, and a pre-trade stress test that refuses exposure-adding orders with `StressBreach`. A volatility-scaled leverage cap (`min(maxLeverage, targetVol / sigma)`) was considered and not built: it would shrink the mandate under the agent's feet between orders, and the drawdown term already handles a position the tape has turned against. The stress refusal is the "breaker that rejects rather than freezes" from the review.
+7. Invariant/fuzz tests (2026-10-04): Foundry stateful invariant suites for the Vault/RiskGuard/Adapter path and for `MandateRegistry`'s epsilon ledger, plus malicious-ERC20 reentrancy tests. Each suite was checked against a deliberately reintroduced bug to confirm it actually fails before being trusted to pass.
+8. Batch flow wired into `web/` (2026-10-04): a Batch screen covers escrow, EIP-712 intent signing, on-demand settlement and Merkle-proof claiming end to end, instead of only being exercised by contract tests.
+9. `MandateRegistry` and a real `reporter/` module (2026-10-04): the registry anchors agent terms and signed DP releases; the reporter computes and Laplace-noises real statistics over public settlement/trade data and is proven, by an integration test, to produce releases `MandateRegistry.postLeaderboard()` actually accepts. Scoped to public data only — see Privacy model.
 
 Next:
 
-7. Registry release anchor (of `termsHash` among other things) and DP Reporter
-8. Published-release and Privacy Simulator screens; batch flow in the UI
-9. Baseline bot, then FlyGraph as an optional differentiated agent
-10. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
+10. Published-release and Privacy Simulator screens in the web UI (the `reporter/` + `MandateRegistry` backend exists; nothing renders it yet)
+11. Baseline bot, then FlyGraph as an optional differentiated agent
+12. Slither review, external audit and a published Monad testnet deployment
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
-11. Term coverage. Per-adapter instrument, direction and concentration whitelist; `FeeTerms`; a bound on how far the venue mark may deviate from a reference price. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
+13. Term coverage. Per-adapter instrument, direction and concentration whitelist; a bound on how far the venue mark may deviate from a reference price. `FeeTerms` exists as of 2026-10-04 but only as declared metadata on `MandateRegistry` — `MandateVault` has no fee-deduction mechanism to enforce it against. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
 
 ## Stack
 
-Solidity 0.8.37 (EVM `prague`) · Hardhat 3 (EDR) · OpenZeppelin 5.4 · ethers 6 · Node 22+ · dependency-free HTML/JS frontend · Monad testnet.
+Solidity 0.8.37 (EVM `prague`) · Hardhat 3 (EDR) · Foundry (invariant/fuzz) · OpenZeppelin 5.4 · ethers 6 · Node 22+ · dependency-free HTML/JS frontend · Monad testnet.
 
 ## Local development
 
@@ -350,9 +362,16 @@ npm run test:contracts
 npm run web
 ```
 
+With [Foundry](https://getfoundry.sh) installed, the invariant/fuzz suite also runs:
+
+```bash
+forge install
+npm run test:invariant
+```
+
 Open `http://localhost:3000` for the interactive demo. Every number on screen is a contract read and every button is a transaction against the in-process chain the server deploys on boot. See [web/README.md](web/README.md) for the screen list and demo interactions.
 
-Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the in-process Hardhat tests work without network access. `foundry.toml` mirrors the layout for anyone who wants to point Foundry tooling at the sources; the test suite itself does not use Foundry. CI (`.github/workflows/ci.yml`) runs compile and tests on every push and pull request.
+Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the in-process Hardhat tests work without network access. `foundry.toml` configures `contracts/test/`'s stateful invariant suites and reentrancy tests, run with `forge test` (`npm run test:invariant`); the production path is still compiled separately by `contracts/tools/compile.mjs` for Hardhat and the web demo, so Foundry's `via_ir` build flag (needed by one test handler) never affects what ships. CI (`.github/workflows/ci.yml`) runs both suites on every push and pull request.
 
 ## Deploying to a live RPC
 

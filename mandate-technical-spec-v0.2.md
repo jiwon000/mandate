@@ -320,6 +320,12 @@ noiseSeed = HMAC_SHA256(
 
 Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라벨을 표시한다.
 
+[구현 기준 2026-10-04] `reporter/`로 §4.1~4.3의 "public settlement analytics"와 성과 리더보드 통계를 구현했다. 범위는 의도적으로 좁다: 이미 공개된 정산 금액·거래 수익률만 DP 집계하고, 비공개 watchlist와 정산 전 intent의 "private demand analytics"는 범위 밖이다 — 이 데모에 watchlist 기능 자체가 없어서 보호할 대상이 없기 때문이다(날조해서 익명화하는 것은 프라이버시 연극이지 보호가 아니다).
+
+메커니즘: 거래별 return을 `[-c,c]`로 clip하고, mean/Sharpe/marked max drawdown을 report-noisy-mean 민감도(`scale = 2c/(N·ε)`)를 쓰는 Laplace 메커니즘으로 noise 처리한다(ε만 추적하고 δ는 없으므로 pure-DP Laplace를 택했다 — 가우시안은 아니다). `reporter/epsilon.mjs`의 `EpsilonLedger`가 `MandateRegistry`와 **완전히 동일한** 단조 증가·가산 누적 검사를 먼저 통과시키므로, 빌드된 release는 온체인에서 거부될 수 없다(통합 테스트로 검증: `contracts/test-js/reporter.test.mjs`가 실제 `MandateRegistry.postLeaderboard()`에 서명된 release를 제출해서 받아들여지는 것까지 확인). `reporter/simulator.mjs`는 같은 `laplaceScaleForMean` 공식을 재사용하되 `EpsilonLedger`나 `reporterSecret`을 전혀 import하지 않는 별도 파일 — 4.4의 Simulator 분리를 "규칙"이 아니라 "구조"로 강제한다.
+
+`statsVersion` 필드는 아직 UI/온체인에 노출되지 않았고(§6 불변식 9 참고), Published ε·Privacy Simulator 웹 화면도 아직 없다 — 둘 다 백엔드 모듈과 테스트만 존재한다.
+
 ## 5. FlyGraph 데모 에이전트
 
 초파리 커넥톰은 Mandate의 보안 근거가 아니라 범용적인 실행 제한을 보여주는 선택적 실험 에이전트다.
@@ -383,11 +389,14 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 ### Reporter
 
-- clipping sensitivity와 noise scale
-- 동일 domain input에 대한 내부 재현성
-- epoch 또는 statsVersion 변경 시 domain separation
-- ε composition 단조성 및 budget exhaustion
-- 실제 published release와 synthetic simulator의 데이터 경로 분리
+[구현 기준 2026-10-04] `contracts/test-js/reporter.test.mjs`로 아래 다섯 개를 전부 구현했다.
+
+- clipping sensitivity와 noise scale — `laplaceScaleForMean`이 `2c/(N·ε)` 공식과 정확히 일치하는지 검증
+- 동일 domain input에 대한 내부 재현성 — 같은 시드 인자는 항상 같은 샘플을 낸다
+- epoch 또는 statsVersion 변경 시 domain separation — 둘 중 하나만 바뀌어도 시드와 샘플이 전부 달라진다
+- ε composition 단조성 및 budget exhaustion — `EpsilonLedger`가 epoch 역행과 상한 초과를 전부 거부하고, `propose()`는 `commit()` 전까지 상태를 바꾸지 않는다
+- 실제 published release와 synthetic simulator의 데이터 경로 분리 — `reporter/simulator.mjs`는 `EpsilonLedger`/`reporterSecret`을 import하지 않는 별도 파일이라 구조적으로 분리되어 있다
+- (추가) `DPReporter`가 빌드한 release가 실제 `MandateRegistry.postLeaderboard()`에 받아들여지는지까지 in-process 체인에 대고 통합 테스트로 확인
 
 ### E2E 데모
 

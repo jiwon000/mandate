@@ -5,10 +5,9 @@ contracts/cache/
 contracts/out/
 contracts/broadcast/
 # Foundry: forge's own build cache (root-level, distinct from contracts/cache
-# above) and fetched dependencies (forge-std) -- reinstalled with `forge install`,
-# same convention as node_modules/ and npm ci.
+# above). contracts/lib/forge-std is a git submodule, not ignored -- `.gitmodules`
+# plus foundry.lock pin it, and `forge install` (no args) fetches it in CI.
 /cache/
-contracts/lib/
 .env
 .env.local
 .env.*

@@ -200,6 +200,58 @@ are the real authorization boundary and are intact), static file serving in
 `web/app.js`'s `innerHTML` sinks (only ever interpolate server-fixed config
 strings or numeric/hash values, never attacker-controllable on-chain data).
 
+## Round 2: adversarially re-checking the fix, and the same scrutiny on BatchAllocator
+
+A fresh sub-agent (no memory of writing the fix) was asked to (a) try to find
+a residual gap in the `registerAgent()` fix above, and (b) apply the exact
+same "does this check X against a Y that was also caller-supplied" scrutiny
+to `BatchAllocator.sol` — the only other contract in the repo that both
+custodies real funds (USDC escrow) and relies on an EIP-712 signature over
+caller-supplied data, the same risk shape as the bug that was just found.
+
+**Job 1 verdict: the fix is sound.** `MandateVault.riskGuard` is `immutable`,
+set once in the constructor with no setter and no delegatecall path, so a
+real vault's `riskGuard()` cannot be redirected after deployment — the
+original exploit (hijacking an existing vault's one-time registry slot) is
+fully closed. Every check in `registerAgent()` ahead of the one state write
+is a `STATICCALL` (all the interface functions involved are `view`), so there
+is no reentrancy surface in the new read chain either. Two precision notes
+came back, both low-severity and documentation-only:
+
+- A caller can still deploy their *own* fake vault-plus-fake-guard pair and
+  register it — but this only ever writes an entry keyed by an address they
+  themselves control, never one belonging to a real vault, since a real
+  vault's `riskGuard()` was fixed before the attacker could act. The doc
+  comment's claim that `vault` is proven to be "the real, reviewed
+  MandateVault" overstated this; fixed to say what is and isn't actually
+  checked (registry commit, same date).
+- `MandateRiskGuard` is multi-tenant — one guard instance is shared across
+  every vault in a deployment (confirmed in `web/chain.mjs` and
+  `batch-flow.test.mjs`). If that guard's `Ownable` ownership is transferred
+  between a vault's `lockTerms()` and its `registerAgent()` call, the *new*
+  owner — not whoever actually configured that specific vault — gets to
+  assert its `fees`/`modelHash`. This needs a specific admin-level
+  ownership-transfer timing window to matter and was scored 3/10; noted here
+  rather than changed in code, since snapshotting an owner-at-lock-time would
+  add real complexity for a narrow, already-centralized-by-design trust
+  boundary (the guard's owner is the same operator this whole document
+  already treats as trusted).
+
+**Job 2 verdict: no new findings in `BatchAllocator.sol`.** Checked
+specifically for the registerAgent-shaped bug (nothing found — `net.vault` is
+validated against the owner-curated `vaultAllowed` allowlist and against each
+intent's own signed `intent.vault` field, never against itself), EIP-712
+signature/replay correctness (`ECDSA.tryRecover` surfaces malformed/malleable
+signatures as a `RecoverError` rather than a spoofable `address(0)`, and
+nonces cannot replay across epochs or vaults), Merkle root forgeability (leaves
+are built only from already-signature-verified intents and the contract
+recomputes the root itself), `claimShares()` accounting (entitlements are
+keyed by the full signed-intent hash, which embeds the allocator, so one
+allocator's claim cannot be redirected to another), and escrow accounting
+(balance-delta checks match the documented fee-on-transfer defense, no path
+found that desyncs `escrowOf`/`totalEscrow` from real balances beyond the
+already-documented vault trust boundary).
+
 ## What this review does not substitute for
 
 This is static analysis plus one LLM-driven pass, not an audit. It has no

@@ -19,8 +19,13 @@ import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms} from "./interfaces/
 ///        vault's one-time registry slot with fabricated terms -- the exact
 ///        claim "there is nothing a caller can lie about" was false, because
 ///        `vault` itself was never consulted. Deriving `guard` from
-///        `vault.riskGuard()` makes it unspoofable: `vault` is either the
-///        real, reviewed MandateVault or the call reverts on first use.
+///        `vault.riskGuard()` closes exactly that hole: a real vault's
+///        `riskGuard()` is immutable from its own construction, so nobody can
+///        hijack `agentOf[realVault]` after the fact. It does not prove
+///        `vault` is a genuine MandateVault -- a caller can still deploy their
+///        own fake vault-plus-guard pair, but doing so only ever writes an
+///        entry keyed by an address they themselves control, never one that
+///        already belonged to someone else (round-2 review, same date).
 ///        `fees`/`modelHash` still have no on-chain ground truth to check
 ///        against, so the call is restricted to the guard's own owner -- the
 ///        same operator already trusted to configure and lock the vault's
@@ -113,17 +118,27 @@ contract MandateRegistry is Ownable, EIP712 {
         emit EpsilonCapUpdated(cap);
     }
 
-    /// @notice Catalog a mandate. `guard` is read from `vault` itself, not taken
-    ///         as a parameter, so it cannot be spoofed. Reverts unless `limits` is
-    ///         exactly what that guard has locked in for `vault` and `adapter` is
-    ///         on its allowlist, so a registry entry can never drift from the
-    ///         terms an allocator actually signed up for. Only the guard's own
-    ///         owner may call this -- `fees`/`modelHash` are declared, not
-    ///         derivable from chain state, so unlike the rest of the tuple they
-    ///         need an authorization boundary, and the operator who already
-    ///         configured and locked the vault's real terms is the natural one.
-    ///         One entry per vault, forever -- a changed mandate is a new vault,
-    ///         same rule MandateRiskGuard.lockTerms() already enforces.
+    /// @notice Catalog a mandate. `guard` is read from `vault.riskGuard()`, not
+    ///         taken as a parameter, so a real vault's entry can never be hijacked
+    ///         by a caller pointing the check at a different (fake) guard. This
+    ///         does not prove `vault` is a genuine, reviewed MandateVault -- that
+    ///         remains the same trusted-integration-boundary assumption the rest
+    ///         of the protocol already makes (docs/batch-allocator-milestone2.md).
+    ///         A caller who deploys their own fake vault-plus-guard pair can only
+    ///         ever write an entry keyed by an address they themselves control;
+    ///         `agentOf[vault]` for any vault that already existed before they
+    ///         acted is fixed by that vault's own immutable constructor and is
+    ///         unreachable to them (2026-10-04 security review, round 2).
+    ///         Reverts unless `limits` is exactly what the guard has locked in
+    ///         for `vault` and `adapter` is on its allowlist, so a genuine
+    ///         vault's registry entry can never drift from the terms an
+    ///         allocator actually signed up for. Only the guard's own owner may
+    ///         call this -- `fees`/`modelHash` are declared, not derivable from
+    ///         chain state, so unlike the rest of the tuple they need an
+    ///         authorization boundary, and the operator who already configured
+    ///         and locked the vault's real terms is the natural one. One entry
+    ///         per vault, forever -- a changed mandate is a new vault, same rule
+    ///         MandateRiskGuard.lockTerms() already enforces.
     function registerAgent(
         address vault,
         address adapter,

@@ -24,7 +24,10 @@ const MANDATES = [
     thesis: "Low-leverage basis carry",
     deposit: USDC(12_000),
     openSizeE18: E18(3),
-    limits: { maxLeverageX100: 150, maxDrawdownBps: 800, maxMarkAgeSeconds: 60 }
+    limits: {
+      maxLeverageX100: 150, maxDrawdownBps: 800, maxMarkAgeSeconds: 60,
+      volWindowSeconds: 300, stressHorizonSeconds: 300, stressSigmasX10: 30
+    }
   },
   {
     key: "range",
@@ -33,7 +36,10 @@ const MANDATES = [
     thesis: "Mean-reversion inside a band",
     deposit: USDC(8_000),
     openSizeE18: E18(6),
-    limits: { maxLeverageX100: 300, maxDrawdownBps: 1200, maxMarkAgeSeconds: 30 }
+    limits: {
+      maxLeverageX100: 300, maxDrawdownBps: 1200, maxMarkAgeSeconds: 30,
+      volWindowSeconds: 120, stressHorizonSeconds: 120, stressSigmasX10: 30
+    }
   },
   {
     key: "momentum",
@@ -42,7 +48,10 @@ const MANDATES = [
     thesis: "Levered trend following",
     deposit: USDC(5_000),
     openSizeE18: E18(10),
-    limits: { maxLeverageX100: 500, maxDrawdownBps: 2000, maxMarkAgeSeconds: 30 }
+    limits: {
+      maxLeverageX100: 500, maxDrawdownBps: 2000, maxMarkAgeSeconds: 30,
+      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 20
+    }
   },
   {
     key: "tight",
@@ -51,9 +60,16 @@ const MANDATES = [
     thesis: "3% drawdown, 4s mark age",
     deposit: USDC(6_000),
     openSizeE18: E18(6),
-    limits: { maxLeverageX100: 300, maxDrawdownBps: 300, maxMarkAgeSeconds: 4 }
+    limits: {
+      maxLeverageX100: 300, maxDrawdownBps: 300, maxMarkAgeSeconds: 4,
+      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 30
+    }
   }
 ];
+// The last three terms are the volatility clause (roadmap item 10): a realised
+// volatility estimate over `volWindowSeconds` of marks, and any order that adds
+// exposure must survive a `stressSigmasX10/10`-sigma move over
+// `stressHorizonSeconds` without breaching maxDrawdownBps. Zero window = no clause.
 
 // Generous notional caps across the board so leverage and drawdown are what
 // actually bind. A cap that never binds teaches nobody anything.
@@ -75,7 +91,11 @@ function serialiseLimits(limits) {
 
 export async function startChain() {
   const compiled = compileContracts();
-  const chain = await hre.network.create();
+  // EDR stamps every block at least one second after the previous one. The demo
+  // mines several blocks a second (a mine, a mark, one observe per vault), so
+  // without this override chain time would run several times faster than the
+  // clock and every "seconds" term on screen would mean something else.
+  const chain = await hre.network.create({ override: { allowBlocksWithSameTimestamp: true } });
   const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 50;
 
@@ -94,16 +114,19 @@ export async function startChain() {
 
   let deployment = null;
   let venue = null;
+  let guard = null;
+  let adapterAddress = null;
 
   async function setup() {
     // The vaults' own allocation and opening trades are the first entries the
     // execution feed shows, so the browser needs to know where to start reading.
     const startBlock = await provider.getBlockNumber();
     const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
-    const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
+    guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
     venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [basePriceE18]);
     const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [await venue.getAddress()]);
-    await (await venue.setAdapter(await adapter.getAddress(), true)).wait();
+    adapterAddress = await adapter.getAddress();
+    await (await venue.setAdapter(adapterAddress, true)).wait();
 
     const allocatorAddress = await allocator.getAddress();
     const totalDeposits = MANDATES.reduce((sum, m) => sum + m.deposit, 0n);
@@ -212,6 +235,17 @@ export async function startChain() {
       const priceE18 = (basePriceE18 * BigInt(10_000 + wobbleBps)) / 10_000n;
       await (await venue.setPrice(priceE18)).wait();
       lastPushTs = await chainNow();
+      // Feed the mark to every vault with a volatility clause. observe() only
+      // updates the estimate - it never freezes, never pays a bounty - so it can
+      // run on every push without stealing the poke() step from the demo.
+      for (const vault of deployment.vaults) {
+        if (Number(vault.limits.volWindowSeconds) === 0) continue;
+        try {
+          await (await guard.connect(keeper).observe(vault.address, adapterAddress)).wait();
+        } catch (error) {
+          console.error("[observe]", vault.key, error.shortMessage || error.message);
+        }
+      }
     } catch (error) {
       console.error("[oracle]", error.shortMessage || error.message);
     } finally {

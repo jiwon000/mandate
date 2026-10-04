@@ -100,6 +100,16 @@ async function tick() {
     } else {
       line += `, vault state ${state} (no poke)`;
     }
+  } else {
+    // No poke means nothing else feeds the mark to the volatility estimate, and
+    // an estimate built from stale samples over-states the risk of every order.
+    // observe() is the side-effect-free way to keep it current.
+    try {
+      await (await guard.observe(deployment.MandateVault, deployment.MockVenueAdapter)).wait();
+      line += ", observed";
+    } catch (error) {
+      line += `, observe skipped (${error.shortMessage ?? error.message})`;
+    }
   }
   console.log(line);
 }

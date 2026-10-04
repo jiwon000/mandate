@@ -157,7 +157,12 @@ async function refresh() {
     state.snapshot = await Promise.all(
       deployment.vaults.map(async (meta, index) => {
         const vault = contracts.vaults[index];
-        const [quote, totalAssets, totalSupply, agentState, position, mark, shares, unwindStepsDone] =
+        // The stress tile answers one question: would the order the "inside
+        // mandate" button sends (0.7x of max leverage) pass the volatility clause
+        // right now? Quote it at that leverage.
+        const hasVol = Number(meta.limits.volWindowSeconds) > 0;
+        const stressLevX100 = Math.round(meta.limits.maxLeverageX100 * 0.7);
+        const [quote, totalAssets, totalSupply, agentState, position, mark, shares, unwindStepsDone, stress] =
           await Promise.all([
             contracts.guard.quote(meta.address, deployment.addresses.adapter),
             vault.totalAssets(),
@@ -166,7 +171,10 @@ async function refresh() {
             contracts.adapter.positionState(meta.address),
             contracts.adapter.markEquity(meta.address),
             state.wallet ? vault.balanceOf(state.wallet) : Promise.resolve(0n),
-            vault.unwindStepsDone()
+            vault.unwindStepsDone(),
+            hasVol
+              ? contracts.guard.stressQuote(meta.address, deployment.addresses.adapter, stressLevX100)
+              : Promise.resolve([0n, 0n, 0n])
           ]);
 
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
@@ -195,6 +203,11 @@ async function refresh() {
           positionNotional: position[0],
           equity6,
           levX100,
+          hasVol,
+          stressLevX100,
+          stressSigmaBps: Number(stress[0]),
+          stressMoveBps: Number(stress[1]),
+          stressedDrawdownBps: Number(stress[2]),
           userShares: shares
         };
       })
@@ -439,6 +452,15 @@ function renderAgent() {
     ],
     ["Mark age", vault.markAge, vault.limits.maxMarkAgeSeconds, `${vault.markAge}s`, `${vault.limits.maxMarkAgeSeconds}s`]
   ];
+  if (vault.hasVol) {
+    rows.push([
+      `Stressed drawdown (${stressLabel(vault)} at ${lev(vault.stressLevX100)})`,
+      vault.stressedDrawdownBps,
+      vault.limits.maxDrawdownBps,
+      pct(vault.stressedDrawdownBps),
+      pct(vault.limits.maxDrawdownBps)
+    ]);
+  }
   $("#agentLimits").innerHTML = rows
     .map(([label, used, limit, usedText, limitText]) => {
       const ratio = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
@@ -539,6 +561,11 @@ function renderAllocate() {
   updateAmount($("#allocationAmount").value);
 }
 
+// "3.0σ/120s": the size of move the mandate makes the agent survive.
+function stressLabel(vault) {
+  return `${(vault.limits.stressSigmasX10 / 10).toFixed(1)}σ/${vault.limits.stressHorizonSeconds}s`;
+}
+
 function renderRisk() {
   const vault = state.snapshot[state.selected];
   const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
@@ -556,6 +583,9 @@ function renderRisk() {
   const ddOver = vault.drawdownBps > vault.limits.maxDrawdownBps;
   const levOver = Number.isFinite(vault.levX100) && vault.levX100 > vault.limits.maxLeverageX100;
   const breached = vault.agentState === 0 && (ddOver || levOver);
+  // The volatility clause is the one limit that blocks before anything is lost:
+  // it only ever refuses an order, so it has its own line rather than a state.
+  const stressed = vault.agentState === 0 && vault.hasVol && vault.stressedDrawdownBps > vault.limits.maxDrawdownBps;
   const headline = $("#guardHeadline");
   headline.textContent = closed
     ? "Position closed"
@@ -575,7 +605,9 @@ function renderRisk() {
       ? `${ddOver ? `Drawdown is ${pct(vault.drawdownBps)} against a ${pct(vault.limits.maxDrawdownBps)} mandate` : `Leverage is ${lev(vault.levX100)} against a ${lev(vault.limits.maxLeverageX100)} mandate`}. Nothing freezes until someone calls poke() - and whoever does is paid for it.`
       : stale
         ? `The last mark is ${vault.markAge}s old and this mandate accepts ${vault.limits.maxMarkAgeSeconds}s. The guard will refuse to act on it.`
-        : "Every monitored limit is inside the terms the allocator accepted.";
+        : stressed
+          ? `Realised volatility is ${vault.stressSigmaBps} bps over ${vault.limits.stressHorizonSeconds}s. An order adding exposure at ${lev(vault.stressLevX100)} would sit ${pct(vault.stressedDrawdownBps)} under water after a ${stressLabel(vault)} move, past the ${pct(vault.limits.maxDrawdownBps)} mandate, so execute() refuses it with StressBreach. Reducing orders still pass; the estimate decays as calm marks arrive.`
+          : "Every monitored limit is inside the terms the allocator accepted.";
   const pill = $("#pillMark");
   pill.textContent = `mark ${vault.markAge}s / ${vault.limits.maxMarkAgeSeconds}s`;
   pill.classList.toggle("stale", stale && !closed);
@@ -597,6 +629,18 @@ function renderRisk() {
   );
   tile("#tileDd", "#barDd", pct(vault.drawdownBps), vault.drawdownBps, vault.limits.maxDrawdownBps, `Limit ${pct(vault.limits.maxDrawdownBps)}`);
   tile("#tileAge", "#barAge", `${vault.markAge}s`, vault.markAge, vault.limits.maxMarkAgeSeconds, `Limit ${vault.limits.maxMarkAgeSeconds}s`);
+  if (vault.hasVol) {
+    tile(
+      "#tileStress",
+      "#barStress",
+      pct(vault.stressedDrawdownBps),
+      vault.stressedDrawdownBps,
+      vault.limits.maxDrawdownBps,
+      `Limit ${pct(vault.limits.maxDrawdownBps)} · ${stressLabel(vault)} = ${vault.stressMoveBps} bps at ${lev(vault.stressLevX100)}`
+    );
+  } else {
+    tile("#tileStress", "#barStress", "—", 0, 0, "No volatility clause in this mandate");
+  }
 
   $("#pokeButton").textContent = `poke(${vault.name}) — prove the breach, take the bounty`;
   // unwind() only has work to do on a Frozen vault. Keep the button honest about
@@ -818,6 +862,20 @@ $("#runViolation").addEventListener("click", (event) =>
     const contract = state.contracts.vaults[state.selected].connect(signer);
     await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
     showToast("Order went through — it was inside the mandate after all");
+  })
+);
+
+$("#reduceOrder").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "execute()…", async () => {
+    const vault = state.snapshot[state.selected];
+    if (vault.positionNotional === 0n || state.price === 0n) throw new Error("nothing on the book to reduce");
+    const currentSize = (vault.positionNotional * ONE) / state.price;
+    const delta = -(currentSize / 5n);
+    if (delta === 0n) throw new Error("position too small to split");
+    const signer = await state.provider.getSigner(vault.agent);
+    const contract = state.contracts.vaults[state.selected].connect(signer);
+    await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
+    showToast(`${vault.name} cut a fifth of its position. Orders that reduce exposure are never stress-tested.`);
   })
 );
 

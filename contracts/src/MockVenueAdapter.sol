@@ -103,6 +103,12 @@ contract MockVenueAdapter is IVenueAdapter {
         markedAt = venue.updatedAt();
     }
 
+    /// @inheritdoc IVenueAdapter
+    /// @dev One market on the mock venue, so the vault does not pick the price.
+    function markPrice(address) external view returns (uint256 priceE18, uint256 markedAt) {
+        return (venue.priceE18(), venue.updatedAt());
+    }
+
     function _abs(int256 value) private pure returns (uint256) {
         return value >= 0 ? uint256(value) : uint256(-value);
     }

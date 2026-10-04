@@ -110,6 +110,7 @@ The first executable contract milestone is complete:
 - mark-to-market drawdown against a high-water mark, checked after every trade and by anyone through `poke()`; a breach freezes the vault and pays the caller a bounty
 - reduce-only unwind of a frozen position: anyone can call `unwind()` five times, each closes a fifth of the size at freeze inside a 1% slippage bound and pays 0.01% of cash; the last step moves the vault `Frozen -> Closed`
 - one-way terms lock: `lockTerms()` makes the limits and the adapter allowlist final, a vault refuses deposits until its terms are locked, and `termsHash` is the value an allocator can quote
+- volatility clause: the guard keeps a realised-volatility estimate built from the marks it sees (every trade, `poke()` and the side-effect-free `observe()` feed it), and an order that adds exposure is refused with `StressBreach` when a k-sigma move over the mandate's horizon would leave the vault past `maxDrawdownBps`; orders that reduce exposure are never stress-tested
 - first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
 - epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds
 
@@ -202,7 +203,9 @@ A revert cannot also preserve a `Frozen` state change, so a rejected order never
 
 A freeze stops the agent but does not close the position, so the loss can keep growing while the vault waits. Anyone can call `MandateVault.unwind()` on a frozen vault. Each call asks the adapter to close a fifth of the size the position had at the freeze (Hyperliquid uses the same 20% step when a withdrawal needs margin), reduce-only and inside `MAX_UNWIND_SLIPPAGE_BPS` (1%) of the venue mark, and pays the caller `UNWIND_BOUNTY_BPS` (0.01%) of cash. One step per block. When nothing is left on the book the vault moves `Frozen -> Closed`: no trades, no deposits, no more unwinding, and `withdraw()` no longer needs a fresh mark because there is no position left to misprice. The term therefore reads "the agent stops at X% and liquidation starts; the realised loss can exceed X% by slippage and gaps".
 
-The terms an allocator reads are the terms they get. `MandateRiskGuard.lockTerms(vault)` is one-way: after it `configure()` and `setAdapter()` revert with `LimitsLocked`, and until it has happened `MandateVault.allocate()` reverts with `TermsNotLocked`. Money only ever enters behind terms the owner can no longer rewrite, which is what turns "read the terms" into a claim the contract enforces. `termsHash(vault)` is the keccak256 of the eight limits in `RiskLimits` order; the UI shows it and a registry release would anchor it. There is no timelock or amendment path: a different mandate is a new vault.
+The terms an allocator reads are the terms they get. `MandateRiskGuard.lockTerms(vault)` is one-way: after it `configure()` and `setAdapter()` revert with `LimitsLocked`, and until it has happened `MandateVault.allocate()` reverts with `TermsNotLocked`. Money only ever enters behind terms the owner can no longer rewrite, which is what turns "read the terms" into a claim the contract enforces. `termsHash(vault)` is the keccak256 of the eleven limits in `RiskLimits` order; the UI shows it and a registry release would anchor it. There is no timelock or amendment path: a different mandate is a new vault.
+
+Every check above looks at what the order does to the position now. The volatility clause asks what the market could do to it next. The guard keeps, per vault, a variance rate built from the marks it has seen: each new mark contributes its squared return, weighted by the seconds since the previous mark, into an exponentially weighted average whose memory is `volWindowSeconds` (`v' = (window * v + r^2) / (window + dt)`). A first mark only seeds the series, a mark the guard has already seen changes nothing, and a vault with `volWindowSeconds = 0` has no clause. Before an order that would raise total exposure, the guard scales that variance to `stressHorizonSeconds`, takes `stressSigmasX10 / 10` standard deviations of it as the move, applies the move to the vault at the leverage the order would leave, and refuses the order with `StressBreach(sigmaBps, moveBps, stressedDrawdownBps)` if the resulting drawdown against the high-water mark would exceed `maxDrawdownBps`. So the drawdown term is enforced twice: after the fact by `poke()` and the freeze, and before the fact by refusing to add exposure the current tape could not carry. The refusal is per order: a reducing order always passes, nothing freezes, and the estimate decays as calm marks arrive. `stressQuote(vault, adapter, leverageX100)` returns the same three numbers without a transaction, which is what the UI's stressed-drawdown tile shows. The estimate is only as good as its sampling, so anyone can call `observe(vault, adapter)` to feed it a fresh mark; it has no bounty and no state change beyond the estimate itself.
 
 Custody and execution permissions are enforced on-chain. Market-value risk limits depend on the configured venue price source; the demo uses a deterministic on-chain mock venue. Production deployments would require a guarded TWAP or validated oracle. Drawdown is mark-to-market against that price source, and `markedAt` is the venue's own price timestamp rather than `block.timestamp`, so a fast chain cannot make a stale feed look fresh.
 
@@ -218,8 +221,13 @@ Custody and execution permissions are enforced on-chain. Market-value risk limit
 | `maxBlockNotional` | notional traded inside one block | order reverts |
 | `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust (0 disables) | trade, allocation, withdrawal and `poke()` revert until the price is refreshed |
 | `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
+| `volWindowSeconds` | memory of the realised-volatility estimate: how many seconds of marks one squared return is averaged over (0 disables the clause) | no violation of its own; sets how fast the estimate reacts and decays |
+| `stressHorizonSeconds` | the horizon the estimate is scaled to before the stress move is taken | no violation of its own |
+| `stressSigmasX10` | the move, in tenths of a standard deviation over the horizon, an exposure-adding order must survive without breaching `maxDrawdownBps` (30 = 3 sigma) | order reverts with `StressBreach`; reducing orders are exempt; nothing freezes |
 
-Seven of the eight terms reject one order and stop; only the drawdown term changes the vault's state, and only through a mark. The guard's inputs today are the adapter's order preview, the venue mark (price and its timestamp) and the vault's share supply and cash. Volatility is not an input yet; see the roadmap.
+Ten of the eleven terms reject one order and stop (the three volatility fields are one check); only the drawdown term changes the vault's state, and only through a mark. The guard's inputs are the adapter's order preview, the venue mark (price and its timestamp), the vault's share supply and cash, and the variance the guard itself has accumulated from those marks. No external volatility oracle is involved.
+
+Suggested ranges for the volatility clause, with the reasoning. `volWindowSeconds`: at least a few dozen marks long, so one print does not dominate, and no longer than the regime you want to react to; Chainlink's realised-volatility feeds publish 24-hour, 7-day and 30-day windows sampled every 10 minutes, and the demo uses 60 to 300 seconds only because its marks arrive every second. `stressHorizonSeconds`: the time it takes to get out, which for a frozen vault is five `unwind()` blocks plus however long nobody calls them; 60 seconds to a day. `stressSigmasX10`: 20 to 40, two to four standard deviations, with 30 as the default; exchange portfolio-margin systems also stress against fixed scenario moves, but the exact ranges they use have not been verified here and are not quoted. Volatility-targeted position sizing is known to cut the left tail of returns (Man Group, "The Impact of Volatility Targeting"), which is the effect the clause borrows.
 
 ## FlyGraph demo agent
 
@@ -246,8 +254,9 @@ The demo in `web/` has four screens: Market, Agent, Allocate and Live Risk.
 4. Send an order inside the mandate on Live Risk and watch it pass the guard.
 5. Send an over-limit order and see the guard's own custom error decoded from the revert data, before any venue state changes.
 6. Push a price shock, then call `poke()` from an account that is neither allocator nor agent: the vault past its drawdown limit freezes and the caller is paid the bounty.
-7. Switch the node to 12-second blocks: the mandate that asks for a 4-second mark can no longer be enforced and starts reverting with `MarkTooOld`.
-8. Withdraw from the frozen vault at marked NAV while its position is still open.
+7. Select Range Carry after the same 2% shock. Its drawdown is about 3% against a 12% mandate, so nothing freezes, but the stressed-drawdown tile jumps: realised volatility is now roughly 200 bps over 120 seconds, three of those is a 6% move, and the vault would sit about 15% under water if the agent added exposure at 2.1x. The same "inside mandate" order that passed in step 4 now reverts with `StressBreach(196, 588, 1480)` before any venue state changes; the reduce-only order still passes. Leave the tape alone for about 70 seconds and the estimate decays under the limit, and the order passes again.
+8. Switch the node to 12-second blocks: the mandate that asks for a 4-second mark can no longer be enforced and starts reverting with `MarkTooOld`.
+9. Withdraw from the frozen vault at marked NAV while its position is still open.
 
 The batch flow (escrow, signed intents, settlement, claims) is covered by contracts and tests, not by the demo UI. DP releases and the ε anchor are planned.
 
@@ -266,6 +275,10 @@ The batch flow (escrow, signed intents, settlement, claims) is covered by contra
 - `unwind()` closes at whatever the venue fills inside a 1% bound of its own mark. In a gap or a thin book the realised loss lands past `maxDrawdownBps`; the term bounds when liquidation starts, not where it ends. If the venue cannot fill inside the bound the step reverts and the position stays open until it can.
 - Locked terms cannot be amended, not even to tighten them; different terms mean a new vault. The lock covers the limits and the adapter allowlist, not the venue's price source. An owner who never calls `lockTerms()` has a vault nobody can deposit into.
 - On a testnet deployment the venue price comes from the deployer's keeper script, so the mark is only as honest as that keeper. A production venue would supply its own price.
+- The volatility estimate starts at zero. A freshly deployed vault, or one whose window has fully decayed, is not stress-tested until the tape moves; the clause protects against a spike that has already begun, not the first print of it.
+- The estimate is only as good as its sampling. It only sees the marks that reach the guard, so a mark series nobody observes for an hour is one squared return spread over that hour, and a jump that reverts between two samples is invisible. The demo keeper feeds every mark through `observe()`; a live deployment needs someone to do the same, and Chainlink's realised-volatility feeds solve the same problem with a fixed 10-minute sampling grid.
+- "k sigma" assumes returns that are roughly normal at the horizon. Crypto returns are fat-tailed, so a 3-sigma clause is a calibrated cushion, not a probability. The stressed drawdown also treats the move as a straight loss at the order's leverage, ignoring funding, fees and any hedge.
+- The clause is a per-order refusal, not a volatility-scaled leverage cap. The agent can keep the exposure it already has, whatever the tape does; only the drawdown term can take it away.
 - A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash or, after a freeze, until `unwind()` has closed the position.
 - FlyGraph is an experimental agent implementation, not part of the protocol's trust model.
 
@@ -290,18 +303,18 @@ Done:
 3. BatchAllocator escrow, settlement, claims and refunds
 4. Reduce-only `unwind()` after a freeze (from the 2026-09-23 review): permissionless, bountied, five 20% steps with a slippage bound, `Frozen -> Closed`, `IVenueAdapter.reduce()`
 5. Locked terms (from the 2026-09-23 review): one-way `lockTerms()` over the limits and the adapter allowlist, deposits refused until locked, `termsHash` for the UI and a future registry anchor
+6. Volatility clause (from the 2026-09-23 review): three more terms in `RiskLimits`, an on-chain realised-volatility estimate fed by every mark the guard sees plus a permissionless `observe()`, and a pre-trade stress test that refuses exposure-adding orders with `StressBreach`. A volatility-scaled leverage cap (`min(maxLeverage, targetVol / sigma)`) was considered and not built: it would shrink the mandate under the agent's feet between orders, and the drawdown term already handles a position the tape has turned against. The stress refusal is the "breaker that rejects rather than freezes" from the review.
 
 Next:
 
-6. Registry release anchor (of `termsHash` among other things) and DP Reporter
-7. Published-release and Privacy Simulator screens; batch flow in the UI
-8. Baseline bot, then FlyGraph as an optional differentiated agent
-9. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
+7. Registry release anchor (of `termsHash` among other things) and DP Reporter
+8. Published-release and Privacy Simulator screens; batch flow in the UI
+9. Baseline bot, then FlyGraph as an optional differentiated agent
+10. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
 
-From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze" and item 5 "can the terms I read change"; the rest:
+From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
-10. Volatility-aware pre-trade checks. Pre-trade only; post-trade volatility is item 4. Candidates: an on-chain realised-volatility estimate from the mark series (updated at each `Marked`), a stress test in `preview` that rejects an order if a k-sigma move on the post-trade position would breach `maxDrawdownBps`, and a leverage cap scaled by volatility (`min(maxLeverage, targetVol / sigma)`). A breaker that rejects risk-increasing orders in a volatility spike, rather than freezing.
-11. Term coverage. Per-adapter instrument, direction and concentration whitelist; `FeeTerms`; a bound on how far the venue mark may deviate from a reference price. Recommended ranges for every term, with the sources they come from, are due before the next review.
+11. Term coverage. Per-adapter instrument, direction and concentration whitelist; `FeeTerms`; a bound on how far the venue mark may deviate from a reference price. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
 
 ## Stack
 

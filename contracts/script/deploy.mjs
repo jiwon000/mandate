@@ -84,7 +84,13 @@ await (await guard.configure(vaultAddress, {
   maxOrderNotional: parseUnits("500", 18),
   maxPositionNotional: parseUnits("1500", 18),
   maxTotalNotional: parseUnits("1500", 18),
-  maxBlockNotional: parseUnits("750", 18)
+  maxBlockNotional: parseUnits("750", 18),
+  // Stress test: a 3-sigma move over the next 60 seconds on the post-trade exposure
+  // must stay inside maxDrawdownBps. Volatility is estimated over a 5-minute window
+  // from the marks the guard observes; see README "Risk enforcement".
+  volWindowSeconds: 300,
+  stressHorizonSeconds: 60,
+  stressSigmasX10: 30
 })).wait();
 // Deposits are refused until the terms are locked, and after the lock neither the
 // limits nor the adapter allowlist can change. Different terms mean a new vault.

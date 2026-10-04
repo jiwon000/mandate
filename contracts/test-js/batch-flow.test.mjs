@@ -40,7 +40,8 @@ async function fixture(t) {
   // A vault takes no deposit, batched or not, until its terms are configured and locked.
   const limits = {
     maxLeverageX100: 100, maxDrawdownBps: 2_000, minBlocksBetweenTrades: 0, maxMarkAgeSeconds: 0,
-    maxOrderNotional: 10n ** 22n, maxPositionNotional: 10n ** 22n, maxTotalNotional: 10n ** 22n, maxBlockNotional: 10n ** 22n
+    maxOrderNotional: 10n ** 22n, maxPositionNotional: 10n ** 22n, maxTotalNotional: 10n ** 22n, maxBlockNotional: 10n ** 22n,
+    volWindowSeconds: 0, stressHorizonSeconds: 0, stressSigmasX10: 0
   };
   for (const vault of vaults) {
     await (await guard.configure(vault.target, limits)).wait();

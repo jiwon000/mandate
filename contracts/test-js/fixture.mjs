@@ -14,7 +14,12 @@ export const BASE_LIMITS = {
   maxOrderNotional: parseUnits("2000", 18),
   maxPositionNotional: parseUnits("2000", 18),
   maxTotalNotional: parseUnits("2000", 18),
-  maxBlockNotional: parseUnits("2000", 18)
+  maxBlockNotional: parseUnits("2000", 18),
+  // Stress terms off by default so every test that is not about them sees the
+  // guard exactly as before. stress.test.mjs turns them on per test.
+  volWindowSeconds: 0,
+  stressHorizonSeconds: 0,
+  stressSigmasX10: 0
 };
 
 /// One vault funded with 1,000 mUSDC, one venue at $2,000, one agent, one keeper,

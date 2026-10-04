@@ -25,6 +25,12 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     error MarkTooOld(uint256 markedAt, uint256 maxAge);
     error VaultNotActive();
     error LimitsLocked();
+    /// @notice A window without a horizon or a sigma multiple would be a stress term
+    ///         that never bites; refused at configure() so nobody reads it as one.
+    error InvalidStressTerms();
+    /// @notice A k-sigma move over the stress horizon, applied to the exposure the order
+    ///         would leave, would take the vault past `maxDrawdownBps`.
+    error StressBreach(uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps);
 
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
@@ -38,6 +44,21 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         uint128 highWaterNavPerShare;
     }
 
+    /// @dev Realised-volatility state. `varRatePerSecond` is the exponentially weighted
+    ///      variance of the mark's return per second, scaled by 1e36 (a return is
+    ///      1e18-scaled, so its square is 1e36-scaled).
+    struct VolState {
+        uint128 lastPriceE18;
+        uint64 lastPriceAt;
+        uint128 varRatePerSecond;
+    }
+
+    /// @dev A return larger than this is capped before squaring. It keeps the arithmetic
+    ///      in range; a 10x move in one observation is already off any drawdown scale.
+    uint256 private constant MAX_RETURN = 10 * ONE;
+    /// @dev Leverage above this is treated as this in the stress arithmetic.
+    uint256 private constant MAX_STRESS_LEVERAGE_X100 = 1_000_000;
+
     mapping(address => RiskLimits) public limitsOf;
     mapping(address => bool) public configured;
     /// @notice Vaults whose terms are final. MandateVault refuses deposits until then.
@@ -46,6 +67,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => BlockUsage) public blockUsageOf;
     mapping(address => uint256) public lastTradeBlock;
     mapping(address => MarkState) public markOf;
+    mapping(address => VolState) public volOf;
 
     event LimitsConfigured(address indexed vault);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
@@ -64,6 +86,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     function configure(address vault, RiskLimits calldata limits) external onlyOwner {
         if (termsLocked[vault]) revert LimitsLocked();
+        if (
+            limits.volWindowSeconds != 0 &&
+            (limits.stressHorizonSeconds == 0 || limits.stressSigmasX10 == 0)
+        ) revert InvalidStressTerms();
         limitsOf[vault] = limits;
         configured[vault] = true;
         // Seed the high-water mark at par. Shares are minted 1:1 against the first
@@ -109,10 +135,28 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (!adapterAllowed[vault][adapter]) revert AdapterNotAllowed();
 
         RiskLimits memory limits = limitsOf[vault];
+        // Fold the current mark into the volatility estimate before judging the order,
+        // so a shock that landed since the last observation counts against it.
+        VolState memory vol = _observePrice(vault, adapter, limits);
+
         if (trade.orderNotional > limits.maxOrderNotional) revert OrderNotionalExceeded();
         if (trade.expectedPositionNotional > limits.maxPositionNotional) revert PositionNotionalExceeded();
         if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
         if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
+
+        // Pre-trade stress test, only for orders that add exposure. An order that takes
+        // risk off is never refused here, whatever the market is doing: in a spike the
+        // guard wants the agent to be able to get smaller, not to be stuck.
+        if (limits.volWindowSeconds != 0 && limits.maxDrawdownBps != 0) {
+            (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
+            if (trade.expectedTotalNotional > totalNotional) {
+                (uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps) =
+                    _stress(vault, adapter, limits, vol, trade.expectedLeverageX100);
+                if (stressedDrawdownBps > limits.maxDrawdownBps) {
+                    revert StressBreach(sigmaBps, moveBps, stressedDrawdownBps);
+                }
+            }
+        }
         if (
             lastTradeBlock[vault] != 0 &&
             block.number < lastTradeBlock[vault] + limits.minBlocksBetweenTrades
@@ -140,6 +184,18 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (!configured[vault]) revert LimitsNotConfigured();
         if (!adapterAllowed[vault][adapter]) revert AdapterNotAllowed();
         return _markAndCheck(vault, adapter, msg.sender);
+    }
+
+    /// @notice Feed the current mark into the vault's volatility estimate. Permissionless
+    ///         and free of side effects on the vault: no mark, no freeze, no bounty.
+    /// @dev poke() and every trade observe as well; this is for a keeper that wants the
+    ///      estimate sampled on a steady cadence between them. The price itself comes
+    ///      from the adapter, so a caller controls when the series is sampled, not what
+    ///      it says.
+    function observe(address vault, address adapter) external {
+        if (!configured[vault]) revert LimitsNotConfigured();
+        if (!adapterAllowed[vault][adapter]) revert AdapterNotAllowed();
+        _observePrice(vault, adapter, limitsOf[vault]);
     }
 
     /// @inheritdoc IRiskGuard
@@ -175,6 +231,21 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         drawdownBps = _drawdownBps(navPerShare, highWaterNavPerShare);
     }
 
+    /// @notice The stress numbers checkAndConsumeBefore would use right now for a vault
+    ///         levered `leverageX100` after the order: sigma over the stress horizon, the
+    ///         k-sigma move, and the drawdown that move would leave. Folds in the current
+    ///         mark without writing it, so the view and the check agree.
+    function stressQuote(address vault, address adapter, uint256 leverageX100)
+        external
+        view
+        returns (uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps)
+    {
+        RiskLimits memory limits = limitsOf[vault];
+        if (limits.volWindowSeconds == 0) return (0, 0, 0);
+        (VolState memory vol,) = _projectVol(vault, adapter, limits);
+        return _stress(vault, adapter, limits, vol, leverageX100);
+    }
+
     function _markAndCheck(address vault, address adapter, address beneficiary)
         internal
         returns (bool frozen)
@@ -185,6 +256,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (limits.maxMarkAgeSeconds != 0 && block.timestamp > markedAt + limits.maxMarkAgeSeconds) {
             revert MarkTooOld(markedAt, limits.maxMarkAgeSeconds);
         }
+
+        _observePrice(vault, adapter, limits);
 
         uint256 supply = IMandateVaultView(vault).totalSupply();
         if (supply == 0) return false;
@@ -204,6 +277,85 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         uint256 bounty = IMandateVaultFreeze(vault).freeze(beneficiary);
         emit DrawdownBreach(vault, beneficiary, navPerShare, drawdownBps, bounty);
         return true;
+    }
+
+    /// @dev Write the projected volatility state if the mark moved on. A vault without a
+    ///      window never touches this storage, so the term costs nothing where it is off.
+    function _observePrice(address vault, address adapter, RiskLimits memory limits)
+        private
+        returns (VolState memory vol)
+    {
+        if (limits.volWindowSeconds == 0) return vol;
+        bool changed;
+        (vol, changed) = _projectVol(vault, adapter, limits);
+        if (changed) volOf[vault] = vol;
+    }
+
+    /// @dev The volatility state after folding in the adapter's current mark. Nothing is
+    ///      written. A mark no newer than the last one observed changes nothing.
+    ///
+    ///      The estimate is a time-weighted EWMA of squared returns per second:
+    ///          v' = (window * v + r^2) / (window + dt)
+    ///      where r is the return since the last observation and dt the seconds between
+    ///      them. Dividing by dt inside the weight normalises for uneven sampling, so a
+    ///      2% move over 10 seconds counts for ten times the variance rate of the same
+    ///      move over 100 seconds. The first observation only seeds the price.
+    function _projectVol(address vault, address adapter, RiskLimits memory limits)
+        private
+        view
+        returns (VolState memory vol, bool changed)
+    {
+        vol = volOf[vault];
+        (uint256 priceE18, uint256 markedAt) = IVenueAdapter(adapter).markPrice(vault);
+        if (priceE18 == 0 || markedAt <= vol.lastPriceAt) return (vol, false);
+        if (priceE18 > type(uint128).max) priceE18 = type(uint128).max;
+
+        if (vol.lastPriceAt != 0) {
+            uint256 last = vol.lastPriceE18;
+            uint256 diff = priceE18 > last ? priceE18 - last : last - priceE18;
+            uint256 r = Math.mulDiv(diff, ONE, last);
+            if (r > MAX_RETURN) r = MAX_RETURN;
+            uint256 dt = markedAt - vol.lastPriceAt;
+            uint256 next = (uint256(limits.volWindowSeconds) * vol.varRatePerSecond + r * r) /
+                (uint256(limits.volWindowSeconds) + dt);
+            vol.varRatePerSecond = next > type(uint128).max ? type(uint128).max : uint128(next);
+        }
+        vol.lastPriceE18 = uint128(priceE18);
+        vol.lastPriceAt = uint64(markedAt);
+        changed = true;
+    }
+
+    /// @dev Sigma over the stress horizon in bps, the k-sigma move in bps, and the
+    ///      drawdown the vault would show if that move went against a position levered
+    ///      `leverageX100` at today's equity. Direction is not guessed: the move is taken
+    ///      as adverse. Leverage already carries the asset's decimals (the adapter divides
+    ///      notional by equity), so the loss is a plain fraction of equity:
+    ///          loss_bps = leverage * move_bps.
+    function _stress(
+        address vault,
+        address adapter,
+        RiskLimits memory limits,
+        VolState memory vol,
+        uint256 leverageX100
+    ) private view returns (uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps) {
+        // variance over the horizon = rate * seconds, still 1e36-scaled; its square root
+        // is a 1e18-scaled sigma, and 1e14 of those make a basis point.
+        sigmaBps = Math.sqrt(uint256(vol.varRatePerSecond) * limits.stressHorizonSeconds) / 1e14;
+        moveBps = (sigmaBps * limits.stressSigmasX10) / 10;
+
+        (uint256 equity,) = IVenueAdapter(adapter).markEquity(vault);
+        uint256 supply = IMandateVaultView(vault).totalSupply();
+        if (supply == 0) return (sigmaBps, moveBps, 0);
+
+        if (leverageX100 > MAX_STRESS_LEVERAGE_X100) leverageX100 = MAX_STRESS_LEVERAGE_X100;
+        uint256 lossBps = (leverageX100 * moveBps) / 100;
+        uint256 navNow = Math.mulDiv(equity, ONE, supply);
+        uint256 highWater = markOf[vault].highWaterNavPerShare;
+        // The next mark would lift the high-water mark before any loss is measured
+        // against it, so the stress is measured the same way.
+        if (navNow > highWater) highWater = navNow;
+        uint256 stressedNav = lossBps >= 10_000 ? 0 : navNow - Math.mulDiv(navNow, lossBps, 10_000);
+        stressedDrawdownBps = _drawdownBps(stressedNav, highWater);
     }
 
     function _drawdownBps(uint256 navPerShare, uint256 highWater) private pure returns (uint256) {

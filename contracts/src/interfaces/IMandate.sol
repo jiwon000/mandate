@@ -17,6 +17,19 @@ struct RiskLimits {
     uint256 maxPositionNotional;
     uint256 maxTotalNotional;
     uint256 maxBlockNotional;
+    /// @notice Window of the guard's realised-volatility estimate, in seconds.
+    ///         0 disables the estimate and the pre-trade stress check with it.
+    /// @dev The guard keeps an exponentially weighted variance of the mark's return
+    ///      per second, fed by every price it observes: observe(), poke() and trades.
+    ///      Appended after the original eight fields so `termsHash` of an older
+    ///      configuration is not silently re-ordered.
+    uint32 volWindowSeconds;
+    /// @notice Horizon of the stress move, in seconds: how long the position could sit
+    ///         before anyone reacts to it. On a chain where poke() can land every
+    ///         block this is short; it is the reaction time the allocator accepts.
+    uint32 stressHorizonSeconds;
+    /// @notice Size of the stress move in tenths of a sigma (30 = a 3-sigma move).
+    uint16 stressSigmasX10;
 }
 
 struct TradePreview {
@@ -57,6 +70,12 @@ interface IVenueAdapter {
     ///      `markedAt` is the venue's own price timestamp, not block.timestamp, so a
     ///      stale feed cannot be laundered into a fresh-looking mark by a fast chain.
     function markEquity(address vault) external view returns (uint256 equity, uint256 markedAt);
+
+    /// @notice The venue's mark price for the market this vault trades, 1e18-scaled, with
+    ///         the venue's own timestamp for it.
+    /// @dev The guard's volatility estimate is built from this series. Equity would not
+    ///      do: a flat vault's equity is constant whatever the market does.
+    function markPrice(address vault) external view returns (uint256 priceE18, uint256 markedAt);
 }
 
 interface IRiskGuard {

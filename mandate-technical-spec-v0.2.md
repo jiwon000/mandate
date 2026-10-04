@@ -265,7 +265,7 @@ interface IMandateRegistry {
 
 epoch와 pinnedBlock은 단조 증가해야 하며 동일 epoch의 digest 교체를 금지한다.
 
-[구현 기준 2026-10-04] `contracts/src/MandateRegistry.sol`로 구현했다. 위 인터페이스에서 `registerAgent`에 `guard` 파라미터를 추가했다: `limits`를 그대로 신뢰하지 않고 `keccak256(abi.encode(limits)) == IRiskGuard(guard).termsHash(vault)`로 대조하고, `IRiskGuard(guard).adapterAllowed(vault, adapter)`도 확인한다 — 둘 다 `IRiskGuard` 인터페이스에 `termsHash`/`adapterAllowed`를 추가해서 가능해졌다. 이 검증 덕분에 `registerAgent`는 permissionless다: 호출자가 거짓을 등록할 방법이 없다. `fees`(`FeeTerms`)는 선언적 메타데이터이고(Vault에 수수료 엔진이 없음), `modelHash`도 검증하지 않는다. `postLeaderboard`는 EIP-712(`MandateRegistry`, `"1"`)로 서명을 받고, `cumulativeEpsilonE6`가 이전 값과 두 ε 필드의 합에 정확히 일치해야 하며(단순 단조 증가가 아니라 가산이 맞아떨어지는지까지 검증), `pinnedBlock`이 `block.number`를 넘을 수 없다. 한 번도 릴리즈가 없었는지는 `epoch`/`pinnedBlock` 기본값 0과 구분하기 위한 `hasReleased` 플래그로 판단한다.
+[구현 기준 2026-10-04, 2026-10-04 보안 리뷰로 수정] `contracts/src/MandateRegistry.sol`로 구현했다. `registerAgent`는 `limits`를 그대로 신뢰하지 않고 `keccak256(abi.encode(limits)) == guard.termsHash(vault)`로 대조하고 `guard.adapterAllowed(vault, adapter)`도 확인한다 — 둘 다 `IRiskGuard` 인터페이스에 `termsHash`/`adapterAllowed`를 추가해서 가능해졌다. `guard`는 **호출자가 넘기는 파라미터가 아니라 `vault.riskGuard()`에서 직접 읽는다.** 처음 구현 때는 `guard`를 파라미터로 받고 내부 일관성만 체크했는데, 공격자가 아무 체크에나 "통과"로 답하는 가짜 guard 컨트랙트를 배포해서 실제 vault의 1회용 등록 슬롯을 조작된 정보로 영구 점유할 수 있었다(보안 리뷰에서 발견, `docs/security-review-2026-10-04.md`). `fees`(`FeeTerms`)와 `modelHash`는 온체인에 대조할 근거가 없는 선언적 값이라, `registerAgent`는 permissionless가 아니라 **guard의 owner만** 호출할 수 있다(`OnlyGuardOwner`) — 이미 vault 조건을 설정·잠근 바로 그 운영자다. `postLeaderboard`는 EIP-712(`MandateRegistry`, `"1"`)로 서명을 받고, `cumulativeEpsilonE6`가 이전 값과 두 ε 필드의 합에 정확히 일치해야 하며(단순 단조 증가가 아니라 가산이 맞아떨어지는지까지 검증), `pinnedBlock`이 `block.number`를 넘을 수 없다. 한 번도 릴리즈가 없었는지는 `epoch`/`pinnedBlock` 기본값 0과 구분하기 위한 `hasReleased` 플래그로 판단한다.
 
 ## 4. DP Reporter
 
@@ -327,6 +327,8 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 `statsVersion` 필드는 아직 UI/온체인에 노출되지 않았고(§6 불변식 9 참고), Published ε·Privacy Simulator 웹 화면도 아직 없다 — 둘 다 백엔드 모듈과 테스트만 존재한다.
 
 ## 5. FlyGraph 데모 에이전트
+
+[2026-10-04: 범위 제외] baseline/FlyGraph 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다. 아래는 설계 시점 문안으로 남겨둔다.
 
 초파리 커넥톰은 Mandate의 보안 근거가 아니라 범용적인 실행 제한을 보여주는 선택적 실험 에이전트다.
 

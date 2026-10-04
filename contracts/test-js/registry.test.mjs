@@ -57,7 +57,6 @@ test("registerAgent catalogs a locked mandate and rejects a second registration"
 
   const tx = await registry.registerAgent(
     f.vaultAddress,
-    await f.guard.getAddress(),
     f.adapterAddress,
     BASE_LIMITS,
     { performanceFeeBps: 1000, managementFeeBps: 200 },
@@ -74,7 +73,6 @@ test("registerAgent catalogs a locked mandate and rejects a second registration"
   await assert.rejects(
     registry.registerAgent(
       f.vaultAddress,
-      await f.guard.getAddress(),
       f.adapterAddress,
       BASE_LIMITS,
       { performanceFeeBps: 0, managementFeeBps: 0 },
@@ -91,7 +89,6 @@ test("registerAgent refuses a vault whose terms are not locked yet", async (t) =
   await assert.rejects(
     registry.registerAgent(
       f.vaultAddress,
-      await f.guard.getAddress(),
       f.adapterAddress,
       BASE_LIMITS,
       { performanceFeeBps: 0, managementFeeBps: 0 },
@@ -108,7 +105,6 @@ test("registerAgent refuses limits that do not match the vault's real termsHash"
   await assert.rejects(
     registry.registerAgent(
       f.vaultAddress,
-      await f.guard.getAddress(),
       f.adapterAddress,
       { ...BASE_LIMITS, maxLeverageX100: 999 },
       { performanceFeeBps: 0, managementFeeBps: 0 },
@@ -126,13 +122,55 @@ test("registerAgent refuses an adapter the vault's guard has not allowed", async
   await assert.rejects(
     registry.registerAgent(
       f.vaultAddress,
-      await f.guard.getAddress(),
       await rogueAdapter.getAddress(),
       BASE_LIMITS,
       { performanceFeeBps: 0, managementFeeBps: 0 },
       ZeroHash
     ),
     /AdapterNotAllowed|revert/
+  );
+});
+
+// 2026-10-04 security review: an earlier version took `guard` as a parameter
+// and only checked that it was internally self-consistent, never that it was
+// actually the vault's own guard. That let anyone deploy a fake guard that
+// answers every check with "yes" and permanently squat a real vault's
+// one-time registry slot with fabricated terms. guard is now read from
+// vault.riskGuard() directly, so there is no parameter left to spoof.
+test("registerAgent reads the real guard off the vault and cannot be pointed at a fake one", async (t) => {
+  const f = await fixture(t);
+  const registry = await deployRegistry(f);
+
+  const tx = await registry.registerAgent(
+    f.vaultAddress,
+    f.adapterAddress,
+    BASE_LIMITS,
+    { performanceFeeBps: 0, managementFeeBps: 0 },
+    ZeroHash
+  );
+  await tx.wait();
+
+  const entry = await registry.agentOf(f.vaultAddress);
+  // The stored guard is whatever vault.riskGuard() actually returns -- there
+  // was never an opportunity for a caller to supply a different address.
+  assert.equal(entry.guard, await f.guard.getAddress());
+});
+
+test("registerAgent is restricted to the vault's guard owner, not permissionless", async (t) => {
+  const f = await fixture(t);
+  const registry = await deployRegistry(f);
+
+  await assert.rejects(
+    registry
+      .connect(f.outsider)
+      .registerAgent(
+        f.vaultAddress,
+        f.adapterAddress,
+        BASE_LIMITS,
+        { performanceFeeBps: 5000, managementFeeBps: 5000 },
+        ZeroHash
+      ),
+    /OnlyGuardOwner|revert/
   );
 });
 

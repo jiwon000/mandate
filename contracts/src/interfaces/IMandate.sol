@@ -52,6 +52,12 @@ struct TradePreview {
 interface IMandateVaultView {
     function totalAssets() external view returns (uint256);
     function totalSupply() external view returns (uint256);
+
+    /// @notice The one RiskGuard this vault actually trusts, fixed at construction.
+    /// @dev MandateRegistry.registerAgent() reads this instead of taking a `guard`
+    ///      argument, so a caller cannot point registration at a fake guard that
+    ///      just answers every check with "yes" (2026-10-04 security review).
+    function riskGuard() external view returns (IRiskGuard);
 }
 
 interface IMandateVaultFreeze {

@@ -4,15 +4,27 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {IRiskGuard, RiskLimits, FeeTerms} from "./interfaces/IMandate.sol";
+import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms} from "./interfaces/IMandate.sol";
 
 /// @notice Public catalog of registered mandates and the signed anchor point for
 ///         DP Reporter releases (mandate-technical-spec-v0.2.md 3.7).
 /// @dev Two independent trust levels live in one contract:
-///      - registerAgent() is permissionless and self-verifying: it only accepts a
-///        (vault, guard, adapter, limits) tuple that already matches the vault's
-///        own locked, on-chain terms, so there is nothing a caller can lie about.
-///        Calling it for someone else's vault just publishes the truth earlier.
+///      - registerAgent() checks a (vault, adapter, limits) tuple against the
+///        vault's own `riskGuard()` -- never a caller-supplied guard address.
+///        [2026-10-04 security review] An earlier version took `guard` as a
+///        parameter and only checked internal self-consistency of the
+///        (guard, limits, adapter) tuple by calling back into that same
+///        caller-chosen address. That let anyone deploy a trivial contract
+///        that answers every check with "yes" and permanently occupy a real
+///        vault's one-time registry slot with fabricated terms -- the exact
+///        claim "there is nothing a caller can lie about" was false, because
+///        `vault` itself was never consulted. Deriving `guard` from
+///        `vault.riskGuard()` makes it unspoofable: `vault` is either the
+///        real, reviewed MandateVault or the call reverts on first use.
+///        `fees`/`modelHash` still have no on-chain ground truth to check
+///        against, so the call is restricted to the guard's own owner -- the
+///        same operator already trusted to configure and lock the vault's
+///        terms -- rather than left permissionless.
 ///      - postLeaderboard() is the one privileged call. A DP statistic and the
 ///        epsilon spent computing it are not independently checkable on-chain, so
 ///        they are only accepted with a signature from a single configured
@@ -46,6 +58,7 @@ contract MandateRegistry is Ownable, EIP712 {
     error TermsNotLocked();
     error TermsMismatch();
     error AdapterNotAllowed();
+    error OnlyGuardOwner();
     error ReporterNotConfigured();
     error OnlyReporter();
     error InvalidSignature();
@@ -100,21 +113,28 @@ contract MandateRegistry is Ownable, EIP712 {
         emit EpsilonCapUpdated(cap);
     }
 
-    /// @notice Catalog a mandate. Reverts unless `limits` is exactly what `guard`
-    ///         has locked in for `vault` and `adapter` is on its allowlist, so a
-    ///         registry entry can never drift from the terms an allocator actually
-    ///         signed up for. One entry per vault, forever -- a changed mandate is
-    ///         a new vault, same rule MandateRiskGuard.lockTerms() already enforces.
+    /// @notice Catalog a mandate. `guard` is read from `vault` itself, not taken
+    ///         as a parameter, so it cannot be spoofed. Reverts unless `limits` is
+    ///         exactly what that guard has locked in for `vault` and `adapter` is
+    ///         on its allowlist, so a registry entry can never drift from the
+    ///         terms an allocator actually signed up for. Only the guard's own
+    ///         owner may call this -- `fees`/`modelHash` are declared, not
+    ///         derivable from chain state, so unlike the rest of the tuple they
+    ///         need an authorization boundary, and the operator who already
+    ///         configured and locked the vault's real terms is the natural one.
+    ///         One entry per vault, forever -- a changed mandate is a new vault,
+    ///         same rule MandateRiskGuard.lockTerms() already enforces.
     function registerAgent(
         address vault,
-        address guard,
         address adapter,
         RiskLimits calldata limits,
         FeeTerms calldata fees,
         bytes32 modelHash
     ) external {
         if (agentOf[vault].registeredAt != 0) revert AlreadyRegistered();
-        IRiskGuard riskGuard = IRiskGuard(guard);
+        IRiskGuard riskGuard = IMandateVaultView(vault).riskGuard();
+        address guard = address(riskGuard);
+        if (msg.sender != Ownable(guard).owner()) revert OnlyGuardOwner();
         if (!riskGuard.termsLocked(vault)) revert TermsNotLocked();
         bytes32 hash = keccak256(abi.encode(limits));
         if (hash != riskGuard.termsHash(vault)) revert TermsMismatch();

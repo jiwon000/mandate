@@ -29,7 +29,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - 일방향 조건 잠금 `lockTerms()`: 잠근 뒤에는 한도와 Adapter 허용 목록을 바꿀 수 없고, 잠그기 전에는 예치가 거절되며, `termsHash`가 배분자가 인용하는 조건 값
 - 변동성 조항: guard가 본 mark(거래·`poke()`·부작용 없는 `observe()`)로 실현 변동성을 추정하고, 조건의 horizon 동안 k-sigma 이동이 `maxDrawdownBps`를 넘기면 노출을 늘리는 주문을 `StressBreach`로 거절. 노출을 줄이는 주문은 검사하지 않음
 - 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
-- `MandateRegistry`: `registerAgent()`는 permissionless·자기검증형 — 호출자가 제시한 `limits`가 해당 vault의 실제 locked `termsHash`와 일치하고 `adapter`가 guard의 allowlist에 있을 때만 카탈로그에 기록됨. `postLeaderboard()`는 단일 설정된 reporter 키의 EIP-712 서명만 받고, epoch·pinnedBlock 단조 증가와 누적 ε 장부(`cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6`, 설정된 상한 초과 거부)를 온체인에서 강제
+- `MandateRegistry`: `registerAgent()`는 `guard`를 파라미터로 받지 않고 `vault.riskGuard()`에서 직접 읽어 — 호출자가 제시한 `limits`가 그 guard의 실제 locked `termsHash`와 일치하고 `adapter`가 allowlist에 있을 때만 카탈로그에 기록됨. 호출자는 guard의 owner로 제한(`OnlyGuardOwner`) — `fees`/`modelHash`는 온체인에 대조할 근거가 없는 선언적 값이라 아무나 등록하게 두면 안 됐음(2026-10-04 보안 리뷰에서 가짜 guard로 vault를 선점하는 취약점 발견 후 수정, `docs/security-review-2026-10-04.md`). `postLeaderboard()`는 단일 설정된 reporter 키의 EIP-712 서명만 받고, epoch·pinnedBlock 단조 증가와 누적 ε 장부(`cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6`, 설정된 상한 초과 거부)를 온체인에서 강제
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
 - `reporter/`: 공개 정산 금액과 거래 수익률(`[-c,c]` clip)의 mean/Sharpe/max drawdown을 순수 ε-DP(Laplace 메커니즘, scale = `2·clipBound/(N·ε)`)로 집계. 노이즈는 `HMAC_SHA256(reporterSecret, domainSeparator||epochId||pinnedBlock||statsVersion)` 시드로 결정론적으로 생성되고, `EpsilonLedger`가 `MandateRegistry`와 동일한 누적 ε 산식·상한을 먼저 체크해서 온체인에서 거부될 release는 애초에 서명하지 않음. Privacy Simulator(`reporter/simulator.mjs`)는 같은 scale 공식을 쓰되 ledger·secret에 전혀 접근하지 않는 별도 모듈 — 슬라이더가 실제 ε 예산을 쓸 수 없는 구조
 
@@ -89,13 +89,15 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 ## 다음 작업
 
-baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+외부 감사(제3자 진행 중)가 남아 있습니다. Monad 테스트넷 배포는 다른 팀원이 진행 중입니다. baseline/FlyGraph 에이전트는 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다.
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
 배치 흐름의 웹 연결 [구현 기준 2026-10-04]: `web/`이 더는 BatchAllocator를 우회하지 않습니다. `chain.mjs`가 배포 시 BatchAllocator를 배포·allowlist하고, 서버가 서명된 intent를 모아 epoch 종료 후 batcher로서 `settleEpoch()`를 호출하며, Merkle proof를 재구성해 클레임을 돌려줍니다. 단일 intent와 2-vault/2-allocator 다중 intent 정산을 직접 스크립트로 재현해 검증했습니다. batcher는 여전히 중앙화돼 있고(배포자 키), 정산 calldata에 포함된 intent는 공개됩니다 — `docs/batch-allocator-milestone2.md`의 프라이버시 경계는 그대로입니다.
 
-MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했습니다. `registerAgent()`는 permissionless이지만 `keccak256(abi.encode(limits))`가 해당 vault의 실제 `termsHash`와 일치하고 adapter가 guard allowlist에 있어야만 통과해서, 등록된 카탈로그가 실제 온체인 조건과 어긋날 수 없습니다. `fees`(`FeeTerms`)는 Vault에 수수료 엔진 자체가 없어서 강제되지 않는 선언적 메타데이터입니다. `postLeaderboard()`는 단일 설정된 reporter의 EIP-712 서명만 받고, epoch/pinnedBlock 단조 증가와 `cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6` 정확한 합, 설정된 상한 초과 거부를 체크합니다(핵심 불변식 #8, #9). Foundry invariant(128 runs × depth 32)로 ε 장부가 역행하거나 상한을 넘거나 실제 승인된 릴리즈 합과 어긋나지 않는지 추가 검증했고, 상한 체크를 일부러 제거해 invariant가 잡아내는 것도 확인했습니다.
+MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했습니다. `registerAgent()`는 `keccak256(abi.encode(limits))`가 해당 vault의 실제 `termsHash`와 일치하고 adapter가 guard allowlist에 있어야만 통과해서, 등록된 카탈로그가 실제 온체인 조건과 어긋날 수 없습니다. `fees`(`FeeTerms`)는 Vault에 수수료 엔진 자체가 없어서 강제되지 않는 선언적 메타데이터입니다. `postLeaderboard()`는 단일 설정된 reporter의 EIP-712 서명만 받고, epoch/pinnedBlock 단조 증가와 `cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6` 정확한 합, 설정된 상한 초과 거부를 체크합니다(핵심 불변식 #8, #9). Foundry invariant(128 runs × depth 32)로 ε 장부가 역행하거나 상한을 넘거나 실제 승인된 릴리즈 합과 어긋나지 않는지 추가 검증했고, 상한 체크를 일부러 제거해 invariant가 잡아내는 것도 확인했습니다.
+
+보안 리뷰 [구현 기준 2026-10-04]: Slither 정적 분석(45개 findings, 전부 트리아지 — 2개는 실제 수정, 나머지는 이 코드베이스 패턴에서 false positive임을 근거와 함께 문서화)과 `security-review` 스킬을 통한 2차 검토를 진행했습니다. 2차 검토에서 **진짜 취약점**을 찾았습니다: `registerAgent()`가 원래 `guard` 주소를 파라미터로 받아서 내부 일관성만 체크했는데, 공격자가 모든 체크에 "통과"로 답하는 가짜 guard 컨트랙트를 배포하면 실제 vault의 1회용 등록 슬롯을 조작된 정보로 영구 점유할 수 있었습니다 — "호출자가 거짓말할 방법이 없다"는 원래 주장이 거짓이었던 셈입니다. `guard`를 파라미터에서 빼고 `vault.riskGuard()`에서 직접 읽도록 고쳤고, `fees`/`modelHash`는 온체인 근거가 없는 선언적 값이라 호출자를 guard의 owner로 제한했습니다. 자세한 내용은 [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md) 참고. 이건 내부 리뷰이지 외부 감사를 대체하지 않습니다.
 
 DP Reporter [구현 기준 2026-10-04]: `reporter/` 모듈이 실제 통계를 계산·노이즈 처리해 서명합니다. 범위는 의도적으로 좁습니다 — 이미 공개된 정산 금액·거래 수익률만 Laplace 메커니즘(`scale = 2·clipBound/(N·ε)`)으로 DP 집계하고, 스펙의 "private watchlist"·"정산 전 intent" DP는 해당 기능 자체가 데모에 없어서 v1 범위 밖입니다. `EpsilonLedger`가 `MandateRegistry`와 완전히 동일한 장부 검증을 먼저 통과시키므로 빌드된 release는 온체인에서 거부될 수 없고, 통합 테스트로 실제 `postLeaderboard()`가 받아들이는 것까지 확인했습니다.
 
@@ -139,7 +141,7 @@ The first executable contract milestone is complete:
 - volatility clause: the guard keeps a realised-volatility estimate built from the marks it sees (every trade, `poke()` and the side-effect-free `observe()` feed it), and an order that adds exposure is refused with `StressBreach` when a k-sigma move over the mandate's horizon would leave the vault past `maxDrawdownBps`; orders that reduce exposure are never stress-tested
 - first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
 - epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds — connected end to end in `web/`'s Batch screen (sign, queue, settle, claim), not only in the contract tests
-- `MandateRegistry`: permissionless, self-verifying `registerAgent()` (claimed `RiskLimits` must hash to the vault's own locked `termsHash`; the adapter must be on the guard's allowlist); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
+- `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
 The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (58 cases). `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
@@ -261,6 +263,8 @@ Suggested ranges for the volatility clause, with the reasoning. `volWindowSecond
 
 ## FlyGraph demo agent
 
+**Out of scope as of 2026-10-04.** The protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation, so a baseline bot and FlyGraph are not the current priority. Left below as the design-time text.
+
 FlyGraph is an optional connectome-topology-inspired graph policy used to demonstrate that Mandate can constrain unusual autonomous models. It is not implemented yet; the demo agents are scripted.
 
 It is **not** presented as a literal biological brain simulation and is **not** assumed to be naturally risk-averse. A fixed fly-derived graph provides the policy topology; normalized market and vault features are mapped to graph input channels, and outputs are restricted to:
@@ -342,11 +346,11 @@ Done:
 8. Batch flow wired into `web/` (2026-10-04): a Batch screen covers escrow, EIP-712 intent signing, on-demand settlement and Merkle-proof claiming end to end, instead of only being exercised by contract tests.
 9. `MandateRegistry` and a real `reporter/` module (2026-10-04): the registry anchors agent terms and signed DP releases; the reporter computes and Laplace-noises real statistics over public settlement/trade data and is proven, by an integration test, to produce releases `MandateRegistry.postLeaderboard()` actually accepts. Scoped to public data only — see Privacy model.
 10. Published-ε and Privacy Simulator wired into `web/` (2026-10-04): the Privacy screen pools public per-vault NAV returns every price tick, publishes a signed release on click, and re-reads `releaseOf()` from the contract itself to show `VERIFIED ONCHAIN` rather than trusting the server's own report of what it posted. The Simulator slider beside it is pure client-side arithmetic — no fetch, no contract call — using the same scale formula as the real release.
+11. Security review (2026-10-04): Slither static analysis across all of `contracts/src` (45 findings, triaged — 2 fixed, the rest documented as false positives inherent to this codebase's patterns), plus an independent LLM-driven review of the full PR diff. That second pass found a real vulnerability: `MandateRegistry.registerAgent()` took `guard` as a caller-supplied parameter and only checked it for internal self-consistency, so a fake guard contract that answered every check "yes" could permanently squat a real vault's one-time registry slot with fabricated terms. Fixed by reading `guard` from `vault.riskGuard()` directly (no longer a parameter at all) and restricting the call to that guard's owner, since the remaining `fees`/`modelHash` fields have no on-chain ground truth to check. Full writeup: [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md). This is an internal review, not a substitute for an external audit.
 
 Next:
 
-11. Baseline bot, then FlyGraph as an optional differentiated agent
-12. Slither review, external audit and a published Monad testnet deployment
+12. An external, independent security audit — in progress with a third party; a testnet deployment is being handled by another team member. FlyGraph and a baseline agent are explicitly out of scope going forward (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation, and building an experimental agent is not the priority right now.
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 

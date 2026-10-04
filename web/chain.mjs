@@ -235,11 +235,13 @@ export async function startChain() {
     claimableProofs = new Map();
 
     // MandateRegistry: `owner` is both the admin and the configured reporter,
-    // same centralization-is-the-point tradeoff as the batcher above. Each
-    // vault registers itself right after lockTerms() -- registerAgent() checks
-    // the claimed limits against the guard's own termsHash, so this can only
-    // ever publish the truth, never something looser than what allocators
-    // actually signed up for.
+    // same centralization-is-the-point tradeoff as the batcher above. `owner`
+    // is also `guard`'s Ownable owner (it deployed `guard` above), which is
+    // exactly who registerAgent() now requires as the caller. Each vault
+    // registers itself right after lockTerms() -- registerAgent() reads the
+    // real guard off the vault itself and checks the claimed limits against
+    // its termsHash, so this can only ever publish the truth, never something
+    // looser than what allocators actually signed up for.
     registry = await deploy("MandateRegistry", "MandateRegistry");
     await (await registry.setReporter(await owner.getAddress())).wait();
     await (await registry.setEpsilonCap(REPORT_EPSILON_CAP)).wait();
@@ -252,7 +254,6 @@ export async function startChain() {
       await (
         await registry.registerAgent(
           v.address,
-          await guard.getAddress(),
           adapterAddress,
           v.limits,
           { performanceFeeBps: 0, managementFeeBps: 0 },

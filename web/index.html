@@ -22,6 +22,7 @@
         <button data-route="agent">Agent</button>
         <button data-route="allocate">Allocate</button>
         <button data-route="batch">Batch</button>
+        <button data-route="privacy">Privacy</button>
         <button data-route="risk">Live Risk</button>
       </nav>
       <div class="header-actions">
@@ -153,6 +154,47 @@
         </div>
         <div id="claimList"></div>
         <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set.</p>
+      </section>
+
+      <section class="view" data-view="privacy">
+        <div class="narrow-head">
+          <p class="eyebrow">DIFFERENTIAL PRIVACY</p>
+          <h1>Published ε and the Privacy Simulator</h1>
+          <p>Performance statistics over public settlement data are clipped, noised with the Laplace mechanism, and anchored on MandateRegistry with a signed epsilon ledger. The simulator on the right never touches that ledger — moving it cannot spend real privacy budget.</p>
+        </div>
+        <div class="allocate-layout">
+          <article class="panel allocation-card">
+            <div class="panel-title"><div><p class="eyebrow">ANCHORED ONCHAIN</p><h3>Published ε</h3></div><span class="verified" id="publishedBadge">NO RELEASE YET</span></div>
+            <div class="allocation-summary">
+              <div><span>Epoch</span><b id="pubEpoch">—</b></div>
+              <div><span>Cumulative ε</span><b id="pubCumulative">—</b></div>
+              <div><span>Epsilon cap</span><b id="pubCap">—</b></div>
+              <div><span>Sample size</span><b id="pubSampleSize">—</b></div>
+              <div><span>Noisy mean return</span><b id="pubMean">—</b></div>
+              <div><span>Noisy Sharpe</span><b id="pubSharpe">—</b></div>
+              <div><span>Noisy max drawdown</span><b id="pubMaxDD">—</b></div>
+            </div>
+            <button id="publishReleaseButton" class="button button-primary button-large">postLeaderboard()</button>
+            <div class="hash"><span>STATS DIGEST</span><code id="pubDigest">0x…</code></div>
+            <p class="fineprint">Noise is derived from a server-held secret via HMAC; nobody — including this page — can recompute the private noise realization, only verify the signed digest against what's anchored onchain.</p>
+          </article>
+          <aside class="allocation-aside">
+            <div class="custody-lock">
+              <span class="lock-icon">◇</span>
+              <p class="eyebrow">SYNTHETIC DATA</p>
+              <h3>Privacy Simulator</h3>
+              <p class="simulation-disclosure">Synthetic preview — not the published leaderboard</p>
+            </div>
+            <div class="slider-label"><span>More privacy</span><b>ε = <output id="simEpsilonValue">0.80</output></b><span>More precision</span></div>
+            <input id="simEpsilonSlider" type="range" min="0.1" max="3" step="0.05" value="0.8" aria-label="Epsilon simulator" />
+            <div class="allocation-summary">
+              <div><span>Noise scale (b)</span><b id="simScale">—</b></div>
+              <div><span>95% confidence interval</span><b id="simCI">—</b></div>
+            </div>
+            <p class="fineprint">Reuses the real reporter's own formula — scale = 2·clipBound / (N·ε) — on a synthetic 5% mean return over 200 samples. This control never calls the chain and never consumes ε.</p>
+          </aside>
+        </div>
+        <p class="disclosure">v1 scope: only data that was already public (settlement amounts, trade returns) is DP-released here. The spec's private watchlist and pre-settlement-intent aggregates are not implemented — this demo has no such feature, so there is nothing yet to protect.</p>
       </section>
 
       <section class="view" data-view="risk">

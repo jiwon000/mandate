@@ -5,9 +5,11 @@
 // talks to these contracts over JSON-RPC and every number it renders is read back
 // from contract state.
 import hre from "hardhat";
-import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits, getAddress, verifyTypedData } from "ethers";
+import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits, getAddress, verifyTypedData, ZeroHash } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
+import { DPReporter } from "../reporter/reporter.mjs";
+import { returnsFromNavSeries } from "../reporter/stats.mjs";
 
 const coder = AbiCoder.defaultAbiCoder();
 const E18 = (n) => parseUnits(String(n), 18);
@@ -20,6 +22,19 @@ const START_PRICE = E18(2000);
 // it never picks who gets how many shares (BatchAllocator.sol _allocate()).
 const BATCH_EPOCH_SECONDS = 20;
 const BATCH_SETTLEMENT_WINDOW_SECONDS = 600;
+
+// DP release tuning for the demo. "epoch" here is just a strictly-increasing
+// release counter, not a wall-clock window like BatchAllocator's -- the spec
+// only requires epoch/pinnedBlock to advance, and giving the Reporter its own
+// clock (mandate-technical-spec-v0.2.md 4.3: cadence is server config) avoids
+// coupling two independent concepts to the same timer.
+const REPORT_CLIP_BOUND = 0.1; // 10% per-step return
+const REPORT_EPSILON = 0.5; // epsilon spent per release's performance stats
+const REPORT_EPSILON_CAP = 50_000_000n; // 50.0 cumulative epsilon, generous for a demo session
+// Demo-only: a real deployment never hardcodes this, and it would not help if
+// it did -- the secret only shapes which noise lands, never whether a release
+// is accepted. See reporter/noise.mjs.
+const REPORT_SECRET = "mandate-demo-reporter-secret";
 
 // Four vaults, one venue, one adapter. They differ only in the mandate their
 // allocators signed - that is the entire point of the screen.
@@ -135,6 +150,18 @@ export async function startChain() {
   // notes proofs can be rebuilt from public calldata; this is that rebuild).
   let claimableProofs = new Map();
 
+  let registry = null;
+  let dpReporter = null;
+  // "epoch" for DP releases is just a strictly-increasing release counter, not
+  // a wall-clock window -- see the REPORT_* constants above.
+  let nextReportEpoch = 0;
+  let lastRelease = null;
+  // Per-vault step returns pooled since the last release, and a market-wide
+  // (average-across-vaults) NAV series for the drawdown stat. Reset on publish.
+  let pooledReturns = [];
+  let marketNavSeries = [];
+  let lastNavByVault = new Map();
+
   async function setup() {
     // The vaults' own allocation and opening trades are the first entries the
     // execution feed shows, so the browser needs to know where to start reading.
@@ -207,6 +234,50 @@ export async function startChain() {
     pendingIntents = [];
     claimableProofs = new Map();
 
+    // MandateRegistry: `owner` is both the admin and the configured reporter,
+    // same centralization-is-the-point tradeoff as the batcher above. Each
+    // vault registers itself right after lockTerms() -- registerAgent() checks
+    // the claimed limits against the guard's own termsHash, so this can only
+    // ever publish the truth, never something looser than what allocators
+    // actually signed up for.
+    registry = await deploy("MandateRegistry", "MandateRegistry");
+    await (await registry.setReporter(await owner.getAddress())).wait();
+    await (await registry.setEpsilonCap(REPORT_EPSILON_CAP)).wait();
+    for (const v of vaults) {
+      // v.limits is already the exact merged-and-locked RiskLimits (serialised
+      // for JSON transport, but keccak256(abi.encode(...)) only depends on the
+      // numeric value, not whether a given field arrived as a bigint or a
+      // decimal string) -- registerAgent() hashes it and checks the result
+      // against guard.termsHash(vault) itself, so there is nothing to recompute.
+      await (
+        await registry.registerAgent(
+          v.address,
+          await guard.getAddress(),
+          adapterAddress,
+          v.limits,
+          { performanceFeeBps: 0, managementFeeBps: 0 },
+          ZeroHash
+        )
+      ).wait();
+    }
+    const registryAddress = await registry.getAddress();
+
+    dpReporter = new DPReporter({
+      reporterSecret: REPORT_SECRET,
+      signer: owner,
+      registryAddress,
+      chainId,
+      cap: REPORT_EPSILON_CAP,
+      clipBound: REPORT_CLIP_BOUND,
+      epsilon: REPORT_EPSILON,
+      statsVersion: 1
+    });
+    nextReportEpoch = 0;
+    lastRelease = null;
+    pooledReturns = [];
+    marketNavSeries = [];
+    lastNavByVault = new Map();
+
     deployment = {
       chainId,
       addresses: {
@@ -226,13 +297,19 @@ export async function startChain() {
         adapter: abiOf("MockVenueAdapter", "MockVenueAdapter"),
         venue: abiOf("mocks/DeterministicMockVenue", "DeterministicMockVenue"),
         usdc: abiOf("mocks/MockUSDC", "MockUSDC"),
-        batch: abiOf("BatchAllocator", "BatchAllocator")
+        batch: abiOf("BatchAllocator", "BatchAllocator"),
+        registry: abiOf("MandateRegistry", "MandateRegistry")
       },
       batch: {
         address: batchAddress,
         genesis: batchGenesis,
         epochDuration: BATCH_EPOCH_SECONDS,
         settlementWindow: BATCH_SETTLEMENT_WINDOW_SECONDS
+      },
+      registry: {
+        address: registryAddress,
+        clipBound: REPORT_CLIP_BOUND,
+        epsilon: REPORT_EPSILON
       },
       vaults,
       startBlock,
@@ -297,6 +374,31 @@ export async function startChain() {
         } catch (error) {
           console.error("[observe]", vault.key, error.shortMessage || error.message);
         }
+      }
+
+      // Pool a step return per vault (for the Reporter's mean/Sharpe sample)
+      // and the average NAV across vaults this tick (for the market-wide
+      // drawdown stat). Public data only: every input here is a `quote()` read
+      // anyone could make, same as the Market screen's own numbers.
+      const navsThisTick = [];
+      for (const vault of deployment.vaults) {
+        try {
+          const [navPerShare] = await guard.quote(vault.address, adapterAddress);
+          const nav = Number(formatUnits(navPerShare, 18));
+          navsThisTick.push(nav);
+          const previous = lastNavByVault.get(vault.address);
+          if (previous !== undefined && previous !== 0) {
+            pooledReturns.push(nav / previous - 1);
+            if (pooledReturns.length > 2000) pooledReturns.shift();
+          }
+          lastNavByVault.set(vault.address, nav);
+        } catch (error) {
+          console.error("[reporter:quote]", vault.key, error.shortMessage || error.message);
+        }
+      }
+      if (navsThisTick.length > 0) {
+        marketNavSeries.push(navsThisTick.reduce((a, b) => a + b, 0) / navsThisTick.length);
+        if (marketNavSeries.length > 2000) marketNavSeries.shift();
       }
     } catch (error) {
       console.error("[oracle]", error.shortMessage || error.message);
@@ -469,6 +571,88 @@ export async function startChain() {
     }
   };
 
+  // --- DP reporter ----------------------------------------------------------
+  //
+  // Plays the Reporter role from mandate-technical-spec-v0.2.md 4: pools
+  // public per-vault step returns and the market-wide NAV series beat() has
+  // been collecting, builds a signed release (reporter/reporter.mjs), and
+  // posts it to MandateRegistry. Scoped to public data only (2026-10-04
+  // decision) -- there is no private watchlist or pre-settlement-intent
+  // aggregate here, because this demo has no such feature to protect.
+  const reporterApi = {
+    async status() {
+      const [cumulativeEpsilonE6, epsilonCap, lastEpoch, hasReleased] = await Promise.all([
+        registry.cumulativeEpsilonE6(),
+        registry.epsilonCap(),
+        registry.lastEpoch(),
+        registry.hasReleased()
+      ]);
+      return {
+        address: await registry.getAddress(),
+        cumulativeEpsilonE6: cumulativeEpsilonE6.toString(),
+        epsilonCap: epsilonCap.toString(),
+        lastEpoch: lastEpoch.toString(),
+        hasReleased,
+        nextEpoch: nextReportEpoch,
+        sampleSize: pooledReturns.length,
+        clipBound: REPORT_CLIP_BOUND,
+        epsilon: REPORT_EPSILON,
+        lastRelease
+      };
+    },
+
+    // Anyone can trigger this in the demo; only the transaction's effect is
+    // gated, by postLeaderboard()'s check that the EIP-712 signature recovers
+    // to the one configured reporter (`owner`, held by this server) -- the
+    // same relay-friendly shape as BatchAllocator.claimShares().
+    async publish() {
+      if (pooledReturns.length < 3) {
+        throw new Error(
+          `need at least 3 sampled returns to release, have ${pooledReturns.length} -- wait for a few more price ticks`
+        );
+      }
+      const pinnedBlock = await provider.getBlockNumber();
+      const { release, signature, published } = await dpReporter.buildRelease({
+        epoch: nextReportEpoch,
+        pinnedBlock,
+        perTradeReturns: pooledReturns,
+        navSeries: marketNavSeries.length >= 2 ? marketNavSeries : [1, 1]
+      });
+
+      const receipt = await (
+        await registry
+          .connect(owner)
+          .postLeaderboard(
+            release.epoch,
+            release.pinnedBlock,
+            release.statsDigest,
+            release.epsilonPerfE6,
+            release.epsilonIntentE6,
+            release.cumulativeEpsilonE6,
+            signature
+          )
+      ).wait();
+      dpReporter.commit(release.epoch, release.cumulativeEpsilonE6);
+
+      lastRelease = {
+        epoch: Number(release.epoch),
+        pinnedBlock: Number(release.pinnedBlock),
+        statsDigest: release.statsDigest,
+        epsilonPerfE6: release.epsilonPerfE6.toString(),
+        cumulativeEpsilonE6: release.cumulativeEpsilonE6.toString(),
+        txHash: receipt.hash,
+        published
+      };
+      nextReportEpoch += 1;
+      pooledReturns = [];
+      // Keep the last point so the next window still has a drawdown baseline
+      // instead of starting from an empty series.
+      marketNavSeries = marketNavSeries.slice(-1);
+
+      return lastRelease;
+    }
+  };
+
   await setup();
 
   return {
@@ -476,6 +660,7 @@ export async function startChain() {
     deployment: () => deployment,
     control,
     batch,
+    reporter: reporterApi,
     async close() {
       clearInterval(timer);
       await chain.close();

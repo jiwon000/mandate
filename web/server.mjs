@@ -108,6 +108,15 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, await chain.batch.claimsFor(url.searchParams.get("address")));
     }
 
+    if (pathname === "/api/reporter/status" && req.method === "GET") {
+      return sendJson(res, 200, await chain.reporter.status());
+    }
+
+    if (pathname === "/api/reporter/publish") {
+      if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      return sendJson(res, 200, await chain.reporter.publish());
+    }
+
     if (pathname === "/api/control") {
       if (req.method === "GET") return sendJson(res, 200, await chain.control.status());
       if (req.method !== "POST") return sendJson(res, 405, { error: "GET or POST" });

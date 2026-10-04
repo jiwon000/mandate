@@ -50,7 +50,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 
 Mandate는 임의의 `(venue, selector)` 호출을 허용하지 않습니다. 지원 venue마다 주문 해석, 사전 상태 계산, 원자적 외부 호출을 보장하는 Adapter가 필요합니다. 시장가치 위험 한도는 설정된 가격 소스에 의존하며, 데모는 결정론적 MockVenue를 사용합니다. 실서비스에서는 TWAP 또는 검증된 oracle과 stale/deviation guard가 필요합니다.
 
-DP는 공개 블록체인 거래를 숨기지 않습니다. 비공개 watchlist와 정산 전 demand 집계만 DP 대상이며, 거래·Vault 상태·escrow·정산 금액은 공개될 수 있습니다. 현재 웹 데모의 수치는 서버가 시작할 때 배포한 로컬 체인의 contract read와 transaction을 사용합니다.
+DP는 공개 블록체인 거래를 숨기지 않습니다. 거래·Vault 상태·escrow·정산 금액은 공개되며, `reporter/`는 바로 그 공개 데이터(정산 금액, 거래 수익률)를 DP 집계해 Privacy 화면에 게시합니다. 스펙이 말하는 비공개 watchlist·정산 전 demand DP는 해당 기능 자체가 데모에 없어서 v1 범위 밖입니다. 현재 웹 데모의 수치는 서버가 시작할 때 배포한 로컬 체인의 contract read와 transaction을 사용합니다.
 
 ## 데모 실행
 
@@ -70,7 +70,7 @@ npm run test:invariant
 
 브라우저에서 `http://localhost:3000`을 엽니다. 포트가 사용 중이면 `PORT=3001 npm run web`처럼 다른 포트를 지정할 수 있습니다.
 
-데모 화면은 Market, Agent, Allocate, Batch, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 즉시 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·변동성 조항의 `StressBreach` 거절과 reduce-only 주문 통과·`unwind()` 청산·동결 후 출금 흐름을 확인할 수 있습니다.
+데모 화면은 Market, Agent, Allocate, Batch, Privacy, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 즉시 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·변동성 조항의 `StressBreach` 거절과 reduce-only 주문 통과·`unwind()` 청산·동결 후 출금 흐름을 확인할 수 있습니다. Privacy 화면에서는 `postLeaderboard()`로 DP release를 직접 게시하고, 페이지가 서버 응답을 그냥 믿지 않고 `MandateRegistry.releaseOf()`를 다시 읽어 digest가 일치하는지 "VERIFIED ONCHAIN"으로 보여줍니다. 옆의 Privacy Simulator 슬라이더는 체인을 전혀 호출하지 않는 순수 클라이언트 계산입니다.
 
 배치 intent 정산 [구현 기준 2026-10-04]: Batch 화면에서 escrow 예치, EIP-712 `AllocationIntent` 서명(off-chain, 무료), 서명된 intent를 모아 epoch 종료 후 `settleEpoch()`로 정산, Merkle proof로 `claimShares()`까지 전부 웹에서 연결됩니다. 데모 서버가 `deploy.mjs`와 동일하게 배포자 키를 batcher로 사용해 정산을 대신 실행하고, 데모용 epoch은 20초로 짧게 잡았습니다(운영 배포 기본값은 1시간). 서명된 intent는 settlement calldata에 공개되므로 이 batcher는 익명성 집합이 아닙니다.
 
@@ -82,20 +82,24 @@ contracts/test-js/      in-process Hardhat EVM 계약 테스트
 contracts/test/         Foundry invariant/fuzz 테스트와 reentrancy 테스트
 contracts/script/       deploy.mjs와 keeper.mjs
 contracts/tools/        로컬 solc 컴파일러와 EIP-712/Merkle helper
-web/                    Market, Agent, Allocate, Batch, Live Risk 화면과 데모 서버
+web/                    Market, Agent, Allocate, Batch, Privacy, Live Risk 화면과 데모 서버
 docs/                   마일스톤 설계 문서
 mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ```
 
 ## 다음 작업
 
-DP Reporter(실제 통계 계산·노이즈·서명), baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
 배치 흐름의 웹 연결 [구현 기준 2026-10-04]: `web/`이 더는 BatchAllocator를 우회하지 않습니다. `chain.mjs`가 배포 시 BatchAllocator를 배포·allowlist하고, 서버가 서명된 intent를 모아 epoch 종료 후 batcher로서 `settleEpoch()`를 호출하며, Merkle proof를 재구성해 클레임을 돌려줍니다. 단일 intent와 2-vault/2-allocator 다중 intent 정산을 직접 스크립트로 재현해 검증했습니다. batcher는 여전히 중앙화돼 있고(배포자 키), 정산 calldata에 포함된 intent는 공개됩니다 — `docs/batch-allocator-milestone2.md`의 프라이버시 경계는 그대로입니다.
 
-MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했습니다. `registerAgent()`는 permissionless이지만 `keccak256(abi.encode(limits))`가 해당 vault의 실제 `termsHash`와 일치하고 adapter가 guard allowlist에 있어야만 통과해서, 등록된 카탈로그가 실제 온체인 조건과 어긋날 수 없습니다. `fees`(`FeeTerms`)는 Vault에 수수료 엔진 자체가 없어서 강제되지 않는 선언적 메타데이터입니다. `postLeaderboard()`는 단일 설정된 reporter의 EIP-712 서명만 받고, epoch/pinnedBlock 단조 증가와 `cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6` 정확한 합, 설정된 상한 초과 거부를 체크합니다(핵심 불변식 #8, #9). Foundry invariant(128 runs × depth 32)로 ε 장부가 역행하거나 상한을 넘거나 실제 승인된 릴리즈 합과 어긋나지 않는지 추가 검증했고, 상한 체크를 일부러 제거해 invariant가 잡아내는 것도 확인했습니다. 이 컨트랙트는 앵커링 메커니즘일 뿐이며, 실제 통계를 계산·노이즈 처리해 서명하는 DP Reporter는 아직 없습니다.
+MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했습니다. `registerAgent()`는 permissionless이지만 `keccak256(abi.encode(limits))`가 해당 vault의 실제 `termsHash`와 일치하고 adapter가 guard allowlist에 있어야만 통과해서, 등록된 카탈로그가 실제 온체인 조건과 어긋날 수 없습니다. `fees`(`FeeTerms`)는 Vault에 수수료 엔진 자체가 없어서 강제되지 않는 선언적 메타데이터입니다. `postLeaderboard()`는 단일 설정된 reporter의 EIP-712 서명만 받고, epoch/pinnedBlock 단조 증가와 `cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6` 정확한 합, 설정된 상한 초과 거부를 체크합니다(핵심 불변식 #8, #9). Foundry invariant(128 runs × depth 32)로 ε 장부가 역행하거나 상한을 넘거나 실제 승인된 릴리즈 합과 어긋나지 않는지 추가 검증했고, 상한 체크를 일부러 제거해 invariant가 잡아내는 것도 확인했습니다.
+
+DP Reporter [구현 기준 2026-10-04]: `reporter/` 모듈이 실제 통계를 계산·노이즈 처리해 서명합니다. 범위는 의도적으로 좁습니다 — 이미 공개된 정산 금액·거래 수익률만 Laplace 메커니즘(`scale = 2·clipBound/(N·ε)`)으로 DP 집계하고, 스펙의 "private watchlist"·"정산 전 intent" DP는 해당 기능 자체가 데모에 없어서 v1 범위 밖입니다. `EpsilonLedger`가 `MandateRegistry`와 완전히 동일한 장부 검증을 먼저 통과시키므로 빌드된 release는 온체인에서 거부될 수 없고, 통합 테스트로 실제 `postLeaderboard()`가 받아들이는 것까지 확인했습니다.
+
+Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개 vault를 모두 `MandateRegistry`에 등록하고, 매 가격 tick마다 vault별 NAV 수익률을 모읍니다. 웹의 Privacy 화면에서 `postLeaderboard()`를 클릭하면 서버가 release를 만들어 서명·게시하고, 페이지는 서버 응답을 그대로 믿지 않고 `registry.releaseOf()`를 직접 읽어 digest가 일치하는지 대조해서 "VERIFIED ONCHAIN"을 표시합니다. Privacy Simulator 슬라이더는 같은 scale 공식을 쓰되 체인 호출이나 ledger 접근이 전혀 없는 순수 클라이언트 계산입니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
@@ -148,17 +152,17 @@ Autonomous agents can generate trades, but an allocator still needs answers to t
 2. Can the agent exceed the agreed risk mandate?
 3. Can market demand and performance be compared without publishing every private expression of interest?
 
-Mandate separates those concerns. Vault custody and execution constraints are enforced on-chain. Private watchlists and pre-settlement allocation intents are released only as differentially private aggregates. Public chain activity remains public and is never presented as hidden by DP.
+Mandate separates those concerns. Vault custody and execution constraints are enforced on-chain. Public chain activity (settlement amounts, trade returns) is DP-released as a performance leaderboard, never presented as hidden. The spec also calls for private watchlists and pre-settlement allocation intents to be released only as DP aggregates; this demo has no watchlist feature and nothing private to aggregate there yet, so that half is explicitly out of v1 scope rather than implemented against invented data.
 
 ## How it works
 
-1. An operator deploys a vault bound to one `VenueAdapter`, configures its risk limits in `MandateRiskGuard` and locks them. The vault takes no deposit before the lock, and after it neither the limits nor the adapter allowlist can change. (Planned: a registry with model hashes and fee terms.)
+1. An operator deploys a vault bound to one `VenueAdapter`, configures its risk limits in `MandateRiskGuard` and locks them. The vault takes no deposit before the lock, and after it neither the limits nor the adapter allowlist can change. `registerAgent()` then catalogs it on `MandateRegistry`, checking the claimed limits against the vault's own `termsHash` rather than trusting the caller. Fee terms are declared metadata only; the vault has no fee-deduction mechanism yet.
 2. Allocators escrow USDC and sign EIP-712 allocation intents. A `BatchAllocator` settles each epoch as net allocations to agent vaults.
 3. The agent submits an order through its dedicated Adapter. The Adapter previews the resulting exposure and `RiskGuard` checks it before any external call.
 4. Valid orders execute atomically. Limit violations revert before trading. Unexpected results revert the entire transaction. After the trade the guard re-marks the vault and checks drawdown.
 5. Anyone can call `poke()` between trades. If the marked drawdown exceeds the mandate, the vault freezes and the caller is paid a small bounty out of the vault.
 6. Allocators claim shares and can withdraw at the marked price, position included. Agents never receive withdrawal authority.
-7. (Planned) A DP Reporter publishes performance confidence intervals and private demand aggregates with a signed digest and cumulative ε anchored on-chain.
+7. A DP Reporter (`reporter/`) publishes performance confidence intervals over public settlement data with a signed digest and cumulative ε anchored on `MandateRegistry`. Private demand aggregates are not implemented — see Privacy model.
 
 ## Architecture
 
@@ -272,7 +276,7 @@ The evaluation compares FlyGraph with an MLP and a degree-preserving random grap
 
 ## Demo flow
 
-The demo in `web/` has five screens: Market, Agent, Allocate, Batch and Live Risk.
+The demo in `web/` has six screens: Market, Agent, Allocate, Batch, Privacy and Live Risk.
 
 1. Compare the four mandates on Market: drawdown, leverage and mark age are each shown against the limit the allocator accepted.
 2. Open one on Agent: NAV per share against its high-water mark, and every limit as a bar against what is used.
@@ -285,8 +289,7 @@ The demo in `web/` has five screens: Market, Agent, Allocate, Batch and Live Ris
 9. Withdraw from the frozen vault at marked NAV while its position is still open.
 
 10. On Batch, deposit to escrow, sign an `AllocationIntent` for the current epoch (off-chain, free), and once the epoch ends, settle it (the demo server plays the batcher role `deploy.mjs` gives the deployer key on Monad) and claim the resulting shares with the reconstructed Merkle proof.
-
-DP releases and the ε anchor are implemented at the `reporter/` + `MandateRegistry` layer and tested end to end (a built release is actually accepted by `postLeaderboard()`), but are not yet wired into a web screen — there is no live Published-ε or Privacy-Simulator UI yet, only the two modules and their test suites.
+11. On Privacy, click `postLeaderboard()` once a few price ticks have landed: the server pools public per-vault NAV returns, clips and Laplace-noises the mean/Sharpe/max-drawdown, signs a release and anchors it on `MandateRegistry`. The page re-reads `releaseOf()` straight from the contract and shows `VERIFIED ONCHAIN` once the digest it computed matches what it just read back — not just what the server's JSON claimed. The Privacy Simulator slider next to it never calls the chain: moving ε only recomputes a confidence interval over a synthetic example, using the real reporter's own `scale = 2·clipBound/(N·ε)` formula.
 
 ## Honest limitations
 
@@ -320,7 +323,7 @@ contracts/test/         Foundry invariant/fuzz and reentrancy tests
 contracts/script/       deploy.mjs and keeper.mjs for a live RPC
 contracts/tools/        solc compile runner and the EIP-712 / Merkle helper (batch.mjs)
 reporter/               DP release computation: clipping, Laplace noise, epsilon ledger, EIP-712 signing, Privacy Simulator
-web/                    Market, Agent, Allocate, Batch and Live Risk screens, demo server and chain
+web/                    Market, Agent, Allocate, Batch, Privacy and Live Risk screens, demo server and chain
 docs/                   Milestone design notes
 mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
@@ -338,10 +341,10 @@ Done:
 7. Invariant/fuzz tests (2026-10-04): Foundry stateful invariant suites for the Vault/RiskGuard/Adapter path and for `MandateRegistry`'s epsilon ledger, plus malicious-ERC20 reentrancy tests. Each suite was checked against a deliberately reintroduced bug to confirm it actually fails before being trusted to pass.
 8. Batch flow wired into `web/` (2026-10-04): a Batch screen covers escrow, EIP-712 intent signing, on-demand settlement and Merkle-proof claiming end to end, instead of only being exercised by contract tests.
 9. `MandateRegistry` and a real `reporter/` module (2026-10-04): the registry anchors agent terms and signed DP releases; the reporter computes and Laplace-noises real statistics over public settlement/trade data and is proven, by an integration test, to produce releases `MandateRegistry.postLeaderboard()` actually accepts. Scoped to public data only — see Privacy model.
+10. Published-ε and Privacy Simulator wired into `web/` (2026-10-04): the Privacy screen pools public per-vault NAV returns every price tick, publishes a signed release on click, and re-reads `releaseOf()` from the contract itself to show `VERIFIED ONCHAIN` rather than trusting the server's own report of what it posted. The Simulator slider beside it is pure client-side arithmetic — no fetch, no contract call — using the same scale formula as the real release.
 
 Next:
 
-10. Published-release and Privacy Simulator screens in the web UI (the `reporter/` + `MandateRegistry` backend exists; nothing renders it yet)
 11. Baseline bot, then FlyGraph as an optional differentiated agent
 12. Slither review, external audit and a published Monad testnet deployment
 

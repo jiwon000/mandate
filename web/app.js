@@ -25,7 +25,8 @@ const state = {
   feed: [],
   lastScannedBlock: 0,
   busy: false,
-  batch: { status: null, escrow: 0n, claims: [] }
+  batch: { status: null, escrow: 0n, claims: [] },
+  privacy: { status: null, onchainDigest: null }
 };
 
 const INTENT_TYPES = {
@@ -127,6 +128,7 @@ async function boot() {
     adapter: new ethers.Contract(addresses.adapter, abis.adapter, provider),
     usdc: new ethers.Contract(addresses.usdc, abis.usdc, provider),
     batch: new ethers.Contract(deployment.batch.address, abis.batch, provider),
+    registry: new ethers.Contract(deployment.registry.address, abis.registry, provider),
     vaults: deployment.vaults.map((v) => new ethers.Contract(v.address, abis.vault, provider))
   };
   state.eventInterfaces = [
@@ -147,6 +149,7 @@ async function boot() {
   );
 
   buildLeaderboardSkeleton();
+  updateSimulator();
   await refresh();
   setInterval(() => refresh().catch(reportError), 900);
 }
@@ -238,6 +241,7 @@ async function refresh() {
     await scanLogs();
     render();
     await refreshBatch();
+    await refreshPrivacy();
   } finally {
     state.busy = false;
   }
@@ -851,6 +855,113 @@ $("#claimList").addEventListener("click", (event) => {
   });
 });
 
+// --- DP reporter / privacy screen ----------------------------------------
+const pct2 = (fraction) => `${(fraction * 100).toFixed(2)}%`;
+const E6 = 1_000_000;
+
+// Same report-noisy-mean sensitivity the real reporter uses
+// (reporter/stats.mjs's laplaceScaleForMean): sensitivity of the mean of N
+// values clipped to [-c, c] is 2c/N, and Laplace scale = sensitivity/epsilon.
+function laplaceScaleForMean(clipBound, sampleSize, epsilon) {
+  if (sampleSize === 0 || epsilon === 0) return Infinity;
+  return (2 * clipBound) / (sampleSize * epsilon);
+}
+
+async function refreshPrivacy() {
+  if (!state.deployment?.registry) return;
+  try {
+    state.privacy.status = await (await fetch("/api/reporter/status")).json();
+    const status = state.privacy.status;
+    if (status.hasReleased) {
+      // Don't just trust the server's JSON: read the same release back from
+      // the contract directly and compare. Every other screen in this app
+      // reads the chain for its numbers; this one should too.
+      const onchain = await state.contracts.registry.releaseOf(BigInt(status.lastEpoch));
+      state.privacy.onchainDigest = onchain.statsDigest;
+    } else {
+      state.privacy.onchainDigest = null;
+    }
+    renderPrivacy();
+  } catch (error) {
+    console.error("[privacy]", error);
+  }
+}
+
+function renderPrivacy() {
+  const status = state.privacy.status;
+  if (!status) return;
+  const cumulative = Number(status.cumulativeEpsilonE6) / E6;
+  const cap = Number(status.epsilonCap) / E6;
+  $("#pubEpoch").textContent = status.hasReleased ? status.lastEpoch : "—";
+  $("#pubCumulative").textContent = `ε ${cumulative.toFixed(2)}`;
+  $("#pubCap").textContent = cap > 0 ? `ε ${cap.toFixed(2)}` : "no cap";
+  $("#pubSampleSize").textContent = status.hasReleased
+    ? String(status.lastRelease.published.sampleSize)
+    : `${status.sampleSize} collecting…`;
+
+  const badge = $("#publishedBadge");
+  if (!status.hasReleased) {
+    badge.textContent = "NO RELEASE YET";
+    badge.classList.remove("stale");
+  } else {
+    const verified = state.privacy.onchainDigest === status.lastRelease.statsDigest;
+    badge.textContent = verified ? "VERIFIED ONCHAIN" : "DIGEST MISMATCH";
+    badge.classList.toggle("stale", !verified);
+  }
+
+  if (status.hasReleased) {
+    const r = status.lastRelease.published;
+    $("#pubMean").textContent = pct2(r.noisyMean);
+    $("#pubSharpe").textContent = r.noisySharpe.toFixed(2);
+    $("#pubMaxDD").textContent = pct2(r.noisyMaxDrawdown);
+    $("#pubDigest").textContent = status.lastRelease.statsDigest;
+    $("#pubDigest").title = `tx ${status.lastRelease.txHash}`;
+  } else {
+    $("#pubMean").textContent = "—";
+    $("#pubSharpe").textContent = "—";
+    $("#pubMaxDD").textContent = "—";
+    $("#pubDigest").textContent = "0x…";
+  }
+
+  const button = $("#publishReleaseButton");
+  if (!button.dataset.busy) {
+    const ready = status.sampleSize >= 3;
+    button.disabled = !ready;
+    button.textContent = ready
+      ? `postLeaderboard() — epoch ${status.nextEpoch}`
+      : `postLeaderboard() — need ${3 - status.sampleSize} more sample(s)`;
+  }
+}
+
+$("#publishReleaseButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "building release…", async (button) => {
+    button.textContent = "postLeaderboard()…";
+    const response = await fetch("/api/reporter/publish", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "release rejected");
+    showToast(
+      `Epoch ${result.epoch} published — cumulative ε ${(Number(result.cumulativeEpsilonE6) / E6).toFixed(2)}, ${result.published.sampleSize} samples`
+    );
+  })
+);
+
+// Privacy Simulator: pure client-side, synthetic data, same formula as the
+// real reporter. No fetch, no contract call -- structurally incapable of
+// consuming real epsilon budget, not just conventionally forbidden from it.
+const SIM_MEAN_ESTIMATE = 0.05;
+const SIM_SAMPLE_SIZE = 200;
+function updateSimulator() {
+  const slider = $("#simEpsilonSlider");
+  const epsilon = Number(slider.value);
+  $("#simEpsilonValue").textContent = epsilon.toFixed(2);
+  const clipBound = state.deployment?.registry?.clipBound ?? 0.1;
+  const scale = laplaceScaleForMean(clipBound, SIM_SAMPLE_SIZE, epsilon);
+  const halfWidth = scale * Math.log(20); // 95% two-sided CI for Laplace(0, scale)
+  $("#simScale").textContent = scale.toFixed(4);
+  $("#simCI").textContent = `${pct2(SIM_MEAN_ESTIMATE - halfWidth)} to ${pct2(SIM_MEAN_ESTIMATE + halfWidth)}`;
+}
+$("#simEpsilonSlider").addEventListener("input", updateSimulator);
+
 // --- routing ------------------------------------------------------------
 function route(name) {
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === name));
@@ -1148,16 +1259,19 @@ $("#redeployButton").addEventListener("click", (event) =>
     state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
     state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
     state.contracts.batch = new ethers.Contract(deployment.batch.address, deployment.abis.batch, state.provider);
+    state.contracts.registry = new ethers.Contract(deployment.registry.address, deployment.abis.registry, state.provider);
     state.contracts.vaults = deployment.vaults.map(
       (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
     );
     state.navSeries.clear();
     state.feed = [];
     state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
-    // A redeploy is a fresh BatchAllocator at a fresh address; anything signed
-    // or settled against the old one no longer applies.
+    // A redeploy is a fresh BatchAllocator/MandateRegistry at fresh addresses;
+    // anything signed or settled against the old ones no longer applies.
     state.batch = { status: null, escrow: 0n, claims: [] };
+    state.privacy = { status: null, onchainDigest: null };
     buildLeaderboardSkeleton();
+    updateSimulator();
     showToast("Fresh contracts deployed. Four mandates live again.");
   })
 );

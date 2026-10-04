@@ -318,38 +318,9 @@ noiseSeed = HMAC_SHA256(
 
 Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라벨을 표시한다.
 
-## 5. FlyGraph 데모 에이전트
+## 5. 데모 에이전트
 
-초파리 커넥톰은 Mandate의 보안 근거가 아니라 범용적인 실행 제한을 보여주는 선택적 실험 에이전트다.
-
-정확한 설명:
-
-> FlyGraph is a connectome-topology-inspired graph policy agent. It uses a fixed fly-derived graph as an inductive bias; it is not a biological brain simulation and is not assumed to be inherently risk-averse.
-
-### 입력 및 출력
-
-| 시장/볼트 입력 | 그래프 입력 채널 | 정규화 |
-|---|---|---|
-| 단기 수익률 | direction | `clip(return / sigma, -1, 1)` |
-| 거래량 변화 | stimulus intensity | rolling z-score |
-| bid-ask spread | market friction | `[0,1]` |
-| 실현 변동성 | threat intensity | rolling volatility |
-| vault drawdown | internal stress | `drawdown / limit` |
-| RiskGuard utilization | inhibitory control | limit utilization |
-| signed exposure | body state | `[-1,1]` |
-
-출력은 `LONG / FLAT / SHORT`와 `0% / 10% / 25%` 크기로 양자화한다. 에이전트 러너는 NaN, 무한대, 범위 밖 값, checkpoint 불일치 및 cooldown 위반을 제출 전에 거부한다.
-
-### 등록 및 검증
-
-- 고정 graph topology hash
-- feature schema hash
-- trained checkpoint hash
-- build/version hash
-- MLP 및 degree-preserving random graph baseline과 out-of-sample 비교
-- 지표: net return, max drawdown, turnover, RiskGuard rejection count, seed variance
-
-모델은 주문을 제안할 뿐이며 안전을 결정하지 않는다. 모든 주문은 동일한 Adapter/RiskGuard 경로를 통과한다.
+데모의 에이전트는 스크립트된 주문 시퀀스다. 어떤 에이전트든 같은 Adapter와 RiskGuard를 거치며, 에이전트 정책 자체는 프로토콜의 보안 근거가 아니다. 학습 기반 정책은 이 스펙의 범위 밖이다.
 
 ## 6. 핵심 불변식
 
@@ -389,7 +360,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 ### E2E 데모
 
-1. Agent/FlyGraph 등록
+1. Agent 등록
 2. 여러 allocator가 escrow 예치 및 intent 서명
 3. watchlist/intent DP 집계 게시
 4. 에폭 batch settlement 및 shares claim

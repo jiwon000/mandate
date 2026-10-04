@@ -77,7 +77,7 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 ## 다음 작업
 
-Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline/FlyGraph 에이전트, invariant·fuzz 테스트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline 에이전트, invariant·fuzz 테스트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
@@ -97,7 +97,7 @@ The sections below describe the target v1 product. The current repository implem
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no DP Reporter or private Intent API yet.
 
-Registry/ε anchors, fee accounting, FlyGraph and a published Monad testnet deployment are pending. The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
+Registry/ε anchors, fee accounting and a published Monad testnet deployment are pending. The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
 
 ## Build status
 
@@ -233,21 +233,6 @@ Ten of the eleven terms reject one order and stop (the three volatility fields a
 
 Suggested ranges for the volatility clause, with the reasoning. `volWindowSeconds`: at least a few dozen marks long, so one print does not dominate, and no longer than the regime you want to react to; Chainlink's realised-volatility feeds publish 24-hour, 7-day and 30-day windows sampled every 10 minutes, and the demo uses 60 to 300 seconds only because its marks arrive every second. `stressHorizonSeconds`: the time it takes to get out, which for a frozen vault is five `unwind()` blocks plus however long nobody calls them; 60 seconds to a day. `stressSigmasX10`: 20 to 40, two to four standard deviations, with 30 as the default; exchange portfolio-margin systems also stress against fixed scenario moves, but the exact ranges they use have not been verified here and are not quoted. Volatility-targeted position sizing is known to cut the left tail of returns (Man Group, "The Impact of Volatility Targeting"), which is the effect the clause borrows.
 
-## FlyGraph demo agent
-
-FlyGraph is an optional connectome-topology-inspired graph policy used to demonstrate that Mandate can constrain unusual autonomous models. It is not implemented yet; the demo agents are scripted.
-
-It is **not** presented as a literal biological brain simulation and is **not** assumed to be naturally risk-averse. A fixed fly-derived graph provides the policy topology; normalized market and vault features are mapped to graph input channels, and outputs are restricted to:
-
-```text
-Direction: LONG | FLAT | SHORT
-Size:      0% | 10% | 25%
-```
-
-The model's graph, feature schema and checkpoint hashes are registered. NaN, infinite, out-of-range, stale-checkpoint and cooldown-violating outputs are rejected by the agent runner before submission. Every valid proposal still passes through the same Adapter and RiskGuard as any other agent.
-
-The evaluation compares FlyGraph with an MLP and a degree-preserving random graph on out-of-sample return, drawdown, turnover, RiskGuard rejection count and seed variance. The purpose is a reproducible experiment, not a claim of biological superiority.
-
 ## Demo flow
 
 The demo in `web/` has four screens: Market, Agent, Allocate and Live Risk.
@@ -284,7 +269,6 @@ The batch flow (escrow, signed intents, settlement, claims) is covered by contra
 - "k sigma" assumes returns that are roughly normal at the horizon. Crypto returns are fat-tailed, so a 3-sigma clause is a calibrated cushion, not a probability. The stressed drawdown also treats the move as a straight loss at the order's leverage, ignoring funding, fees and any hedge.
 - The clause is a per-order refusal, not a volatility-scaled leverage cap. The agent can keep the exposure it already has, whatever the tape does; only the drawdown term can take it away.
 - A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash or, after a freeze, until `unwind()` has closed the position.
-- FlyGraph is an experimental agent implementation, not part of the protocol's trust model.
 
 ## Repository layout
 
@@ -313,7 +297,7 @@ Next:
 
 7. Registry release anchor (of `termsHash` among other things) and DP Reporter
 8. Published-release and Privacy Simulator screens; batch flow in the UI
-9. Baseline bot, then FlyGraph as an optional differentiated agent
+9. Baseline agent bot
 10. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:

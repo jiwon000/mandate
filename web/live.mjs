@@ -8,6 +8,7 @@
 // every few seconds, and only at that pace while somebody is looking.
 import fs from "node:fs";
 import path from "node:path";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Contract, ContractFactory, JsonRpcProvider, NonceManager, formatEther, formatUnits, parseEther } from "ethers";
 import { loadArtifact } from "../contracts/script/artifacts.mjs";
 import { CONTRACT_SOURCES, START_PRICE, deployDemoSystem } from "./mandates.mjs";
@@ -19,6 +20,16 @@ import {
 } from "./rpc.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
+
+// Comparing secrets with !== leaks their length and contents through timing.
+// Hashing both sides to a fixed-length digest first means timingSafeEqual
+// never sees two differently-sized buffers, so there is no early-return case
+// to avoid.
+function timingSafeStringEqual(a, b) {
+  const digestA = createHash("sha256").update(String(a ?? "")).digest();
+  const digestB = createHash("sha256").update(String(b ?? "")).digest();
+  return timingSafeEqual(digestA, digestB);
+}
 
 export const NETWORKS = {
   143: { label: "Monad mainnet", explorer: "https://monadscan.com" },
@@ -670,7 +681,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       return { basePrice: formatUnits(basePriceE18, 18) };
     },
     async redeploy(token) {
-      if (!adminToken || String(token ?? "") !== adminToken) {
+      if (!adminToken || !timingSafeStringEqual(token, adminToken)) {
         throw new Error("reset needs the admin token on a live network");
       }
       return whileReset(async () => {

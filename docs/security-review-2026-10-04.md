@@ -252,6 +252,80 @@ allocator's claim cannot be redirected to another), and escrow accounting
 found that desyncs `escrowOf`/`totalEscrow` from real balances beyond the
 already-documented vault trust boundary).
 
+## Round 3: the live-testnet RPC proxy (`web/live.mjs` and friends)
+
+Scope: the code that landed in the merge with the teammate's live-testnet-demo
+branch — `web/live.mjs`, `web/live-policy.mjs`, `web/live-gas.mjs`,
+`web/accounts.mjs`, `web/rpc.mjs`. This is the highest-stakes surface in the
+repo to date: unlike the in-process Hardhat demo, this code holds real
+private keys (derived from `DEMO_MNEMONIC`) and signs real transactions on a
+live network on behalf of anonymous visitors. A fresh sub-agent was asked to
+review it specifically for: (1) authorization — can a caller reach a
+function or account the policy didn't mean to expose; (2) secrets — do the
+mnemonic, derived keys, or admin token ever leave the server or get compared
+unsafely; (3) the gas cap — can a caller force an unbounded or
+underpriced transaction; (4) concurrency — can two in-flight requests race
+each other into a bad nonce or double-spend state; (5) the read cache — can
+it serve stale or cross-caller data it shouldn't.
+
+**Finding: non-constant-time admin token comparison (confidence 7/10,
+low severity).** `control.redeploy(token)` (`web/live.mjs`, originally line
+673) checked `String(token ?? "") !== adminToken` — a plain string compare,
+which short-circuits on the first mismatched byte and so leaks a timing
+signal proportional to how many leading characters of a guess are correct
+against `DEMO_ADMIN_TOKEN`. Exploitability in practice is limited (this
+is a single local-network admin action gated by a cooldown, not a
+high-throughput remote oracle), which is why severity was scored low
+despite the finding being real.
+
+Fixed by hashing both sides to a fixed-length SHA-256 digest before
+comparing with `crypto.timingSafeEqual`:
+
+```js
+function timingSafeStringEqual(a, b) {
+  const digestA = createHash("sha256").update(String(a ?? "")).digest();
+  const digestB = createHash("sha256").update(String(b ?? "")).digest();
+  return timingSafeEqual(digestA, digestB);
+}
+```
+
+Hashing first (rather than comparing raw buffers) sidesteps the usual
+`timingSafeEqual` footgun of it throwing on unequal-length inputs — the two
+digests are always 32 bytes, so there is no length-based early return to
+reason about separately, and no length-leak work-around needed either.
+
+**Everything else came back clean:**
+
+- **Authorization.** `authorise()`/`buildPolicy()` in `live-policy.mjs`
+  gates every `eth_sendTransaction` to a per-role allowlist of
+  `(contract, selector)` pairs, independent of the token comparison above —
+  the allowlist, not the admin token, is what stops a visitor from reaching
+  owner-only functions, and that mechanism wasn't touched by this finding.
+  `eth_accounts` only ever lists the allocator/agent/keeper roles, never the
+  deployer/owner key.
+- **Secrets.** The mnemonic and derived private keys never cross the
+  `/rpc` boundary — `NonceManager`-wrapped wallets sign server-side, and only
+  the resulting signed call or receipt goes back to the browser.
+  `DEMO_ADMIN_TOKEN` is read once from `env` and never logged or echoed in
+  any response (including error paths, which stringify the thrown `Error`
+  message but never the token value).
+- **Gas cap.** `gasLimitFor()`/`RollingBudget` cap both the per-call gas
+  limit and the rolling spend per key; a request that would exceed either
+  is refused before `sendPatiently` ever submits it.
+- **Concurrency.** `perKeyQueue()` serializes sends per signing key, so two
+  overlapping requests against the same role never race for the same nonce;
+  `whileReset()` around `redeploy()` additionally blocks new sends while a
+  reset is in flight.
+- **Read cache.** `ReadCache` keys strictly on method+params (never on
+  caller identity, since reads are caller-independent by design here),
+  excludes receipts/estimates/anything caller-specific from caching, and
+  errors are never cached — matching the existing `web/rpc.test.mjs`
+  coverage re-run for this round.
+
+Re-ran the full suite after the fix — 61 contract tests
+(`npm run test:contracts`) and 23 web tests (`npm run test:web`), including
+`live-gas`/`live-policy`/`rpc` coverage — all green.
+
 ## What this review does not substitute for
 
 This is static analysis plus one LLM-driven pass, not an audit. It has no

@@ -6,26 +6,23 @@
 // from contract state. The mandates themselves, and the routine that deploys and
 // seeds them, live in ./mandates.mjs and are shared with the live-RPC deploy.
 import hre from "hardhat";
-import { BrowserProvider, Contract, ContractFactory, formatUnits, getAddress, verifyTypedData, ZeroHash } from "ethers";
+import { BrowserProvider, Contract, ContractFactory, formatUnits, getAddress, verifyTypedData } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
-import { START_PRICE, deployDemoSystem } from "./mandates.mjs";
+import {
+  BATCH_EPOCH_SECONDS,
+  BATCH_SETTLEMENT_WINDOW_SECONDS,
+  REPORT_CLIP_BOUND,
+  REPORT_EPSILON,
+  REPORT_EPSILON_CAP,
+  START_PRICE,
+  deployDemoSystem
+} from "./mandates.mjs";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 import { DPReporter } from "../reporter/reporter.mjs";
 
-// Short enough that a live demo sees an epoch end and settle inside one
-// session; the privileged settleEpoch() call still only nets signed intents,
-// it never picks who gets how many shares (BatchAllocator.sol _allocate()).
-const BATCH_EPOCH_SECONDS = 20;
-const BATCH_SETTLEMENT_WINDOW_SECONDS = 600;
-
-// DP release tuning for the demo. "epoch" here is just a strictly-increasing
-// release counter, not a wall-clock window like BatchAllocator's -- the spec
-// only requires epoch/pinnedBlock to advance, and giving the Reporter its own
-// clock (mandate-technical-spec-v0.2.md 4.3: cadence is server config) avoids
-// coupling two independent concepts to the same timer.
-const REPORT_CLIP_BOUND = 0.1; // 10% per-step return
-const REPORT_EPSILON = 0.5; // epsilon spent per release's performance stats
-const REPORT_EPSILON_CAP = 50_000_000n; // 50.0 cumulative epsilon, generous for a demo session
+// The batch epoch and DP release tuning live in ./mandates.mjs, beside the
+// routine that deploys the BatchAllocator and the MandateRegistry.
+//
 // Demo-only: a real deployment never hardcodes this, and it would not help if
 // it did -- the secret only shapes which noise lands, never whether a release
 // is accepted. See reporter/noise.mjs.
@@ -90,57 +87,20 @@ export async function startChain() {
 
     const chainId = deployment.chainId;
 
-    // The batcher is `owner`, same as deploy.mjs does for Monad: settleEpoch()
-    // only nets already-verified signed intents, so there is nothing a batcher
-    // key can steal by also being the deployer.
-    batchAllocator = await deploy("BatchAllocator", "BatchAllocator", [
-      deployment.addresses.usdc,
-      await owner.getAddress(),
-      BATCH_EPOCH_SECONDS,
-      BATCH_SETTLEMENT_WINDOW_SECONDS
-    ]);
-    for (const v of deployment.vaults) {
-      await (await batchAllocator.setVaultAllowed(v.address, true)).wait();
-    }
-    const batchAddress = await batchAllocator.getAddress();
-    batchGenesis = Number(await batchAllocator.genesis());
-    batchDomain = intentDomain(chainId, batchAddress);
+    // deployDemoSystem() deployed both: `owner` is the batcher, the registry
+    // admin and the configured reporter, every vault is allowed on the batch
+    // allocator and registered on the registry.
+    batchAllocator = new Contract(deployment.batch.address, deployment.abis.batch, owner);
+    batchGenesis = deployment.batch.genesis;
+    batchDomain = intentDomain(chainId, deployment.batch.address);
     pendingIntents = [];
     claimableProofs = new Map();
 
-    // MandateRegistry: `owner` is both the admin and the configured reporter,
-    // same centralization-is-the-point tradeoff as the batcher above. `owner`
-    // is also `guard`'s Ownable owner (it deployed `guard` via deployDemoSystem),
-    // which is exactly who registerAgent() now requires as the caller. Each
-    // vault registers itself right after lockTerms() -- registerAgent() reads
-    // the real guard off the vault itself and checks the claimed limits
-    // against its termsHash, so this can only ever publish the truth, never
-    // something looser than what allocators actually signed up for.
-    registry = await deploy("MandateRegistry", "MandateRegistry");
-    await (await registry.setReporter(await owner.getAddress())).wait();
-    await (await registry.setEpsilonCap(REPORT_EPSILON_CAP)).wait();
-    for (const v of deployment.vaults) {
-      // v.limits is already the exact merged-and-locked RiskLimits (serialised
-      // for JSON transport, but keccak256(abi.encode(...)) only depends on the
-      // numeric value, not whether a given field arrived as a bigint or a
-      // decimal string) -- registerAgent() hashes it and checks the result
-      // against guard.termsHash(vault) itself, so there is nothing to recompute.
-      await (
-        await registry.registerAgent(
-          v.address,
-          deployment.addresses.adapter,
-          v.limits,
-          { performanceFeeBps: 0, managementFeeBps: 0 },
-          ZeroHash
-        )
-      ).wait();
-    }
-    const registryAddress = await registry.getAddress();
-
+    registry = new Contract(deployment.registry.address, deployment.abis.registry, owner);
     dpReporter = new DPReporter({
       reporterSecret: REPORT_SECRET,
       signer: owner,
-      registryAddress,
+      registryAddress: deployment.registry.address,
       chainId,
       cap: REPORT_EPSILON_CAP,
       clipBound: REPORT_CLIP_BOUND,
@@ -153,21 +113,6 @@ export async function startChain() {
     marketNavSeries = [];
     lastNavByVault = new Map();
 
-    deployment = {
-      ...deployment,
-      abis: { ...deployment.abis, batch: abiOf("BatchAllocator", "BatchAllocator"), registry: abiOf("MandateRegistry", "MandateRegistry") },
-      batch: {
-        address: batchAddress,
-        genesis: batchGenesis,
-        epochDuration: BATCH_EPOCH_SECONDS,
-        settlementWindow: BATCH_SETTLEMENT_WINDOW_SECONDS
-      },
-      registry: {
-        address: registryAddress,
-        clipBound: REPORT_CLIP_BOUND,
-        epsilon: REPORT_EPSILON
-      }
-    };
     return deployment;
   }
 

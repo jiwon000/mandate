@@ -74,7 +74,9 @@ npm run deploy:demo         # 한 번: 배포·시드 후 web/deployments/10143.
 npm run web:live            # 페이지 서빙 + 오라클 + 대리 서명
 ```
 
-니모닉의 0번 계정이 배포·지불합니다(100 gwei 기준 배포와 시드에 약 1.4 MON, 데모 계정 6개에 각 0.3 MON 송금). 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
+니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 실측 약 1.25 MON, 데모 계정 6개에 각 0.4 MON 송금. 스크립트는 시작 전에 4 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
+
+2026-10-04에 Monad 테스트넷(chain 10143)에 배포했습니다. 컨트랙트 주소 8개와, 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다. AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
 
 ## 저장소 구조
 
@@ -92,7 +94,7 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 ## 다음 작업
 
-Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline 에이전트, invariant·fuzz 테스트, 외부 감사가 남아 있습니다. Monad 테스트넷 배포는 스크립트와 라이브 데모 모드까지 구현되었고 로컬 노드로 리허설을 마쳤으며, 실제 테스트넷 배포와 주소 게시가 남아 있습니다.
+Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline 에이전트, invariant·fuzz 테스트, 외부 감사가 남아 있습니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)). 라이브 데모의 공개 호스팅은 남아 있습니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
@@ -112,7 +114,7 @@ The sections below describe the target v1 product. The current repository implem
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no DP Reporter or private Intent API yet.
 
-Registry/ε anchors, fee accounting and a published Monad testnet deployment are pending. The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
+Registry/ε anchors and fee accounting are pending. The demo book is deployed on Monad testnet; addresses and a recorded run are under [Recorded run on Monad testnet](#recorded-run-on-monad-testnet). The four-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry fuzzing and an external security review are also pending.
 
 ## Build status
 
@@ -280,7 +282,7 @@ The batch flow (escrow, signed intents, settlement, claims) is covered by contra
 - Locked terms cannot be amended, not even to tighten them; different terms mean a new vault. The lock covers the limits and the adapter allowlist, not the venue's price source. An owner who never calls `lockTerms()` has a vault nobody can deposit into.
 - On a testnet deployment the venue price comes from the deployer's keeper script, so the mark is only as honest as that keeper. A production venue would supply its own price.
 - The live demo signs for its visitors. Nobody installs a wallet: the server holds six testnet-only keys derived from one mnemonic (an allocator, four agents, a keeper) and signs the browser's `eth_sendTransaction` on their behalf, so anyone with the URL is spending the operator's testnet gas. The proxy limits the damage - each key may only call the functions its role is allowed on the contracts it was deployed with, no value transfers, a gas cap per transaction, a global rate limit, and a reset that only the operator's token can trigger - but it is a demo convenience, not a custody model. The contracts never see the proxy; the same book works with a real wallet against the same addresses.
-- The live oracle is a transaction per mark. While a browser is open it re-marks the venue every 5 seconds (plus `observe()` every 30 seconds), and backs off to one mark every 5 minutes when nobody is watching. Tight Mandate's mark-age term is therefore 10 seconds on a live chain instead of the local 4 seconds, and a page opened after an idle stretch can show `MarkTooOld` for one beat until the oracle notices it. The execution feed only scans the last 90 blocks on load, so a fresh page starts almost empty on a chain that has been running for a while.
+- The live oracle is a transaction per mark. While a browser is open it re-marks the venue every 5 seconds (plus `observe()` every 60 seconds), and backs off to one mark every 5 minutes when nobody is watching. Tight Mandate's mark-age term is therefore 10 seconds on a live chain instead of the local 4 seconds, and a page opened after an idle stretch can show `MarkTooOld` for one beat until the oracle notices it. The execution feed only scans the last 90 blocks on load, so a fresh page starts almost empty on a chain that has been running for a while.
 - The volatility estimate starts at zero. A freshly deployed vault, or one whose window has fully decayed, is not stress-tested until the tape moves; the clause protects against a spike that has already begun, not the first print of it.
 - The estimate is only as good as its sampling. It only sees the marks that reach the guard, so a mark series nobody observes for an hour is one squared return spread over that hour, and a jump that reverts between two samples is invisible. The demo keeper feeds every mark through `observe()`; a live deployment needs someone to do the same, and Chainlink's realised-volatility feeds solve the same problem with a fixed 10-minute sampling grid.
 - "k sigma" assumes returns that are roughly normal at the horizon. Crypto returns are fat-tailed, so a 3-sigma clause is a calibrated cushion, not a probability. The stressed drawdown also treats the move as a straight loss at the order's leverage, ignoring funding, fees and any hedge.
@@ -317,7 +319,7 @@ Next:
 7. Registry release anchor (of `termsHash` among other things) and DP Reporter
 8. Published-release and Privacy Simulator screens; batch flow in the UI
 9. Baseline agent bot
-10. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
+10. Invariant/fuzz tests, Slither review, external audit and a publicly hosted live demo (the testnet deployment itself is published under "Recorded run on Monad testnet")
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
@@ -351,7 +353,7 @@ npm run deploy:demo         # once: deploys and seeds, writes web/deployments/10
 npm run web:live            # serves the page, runs the oracle, signs on visitors' behalf
 ```
 
-Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays (about 1.4 MON at the 100 gwei floor for the deploy and seeding, plus 0.3 MON sent to each of the six demo accounts); it needs that balance before `deploy:demo` runs. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
+Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays (a measured 1.25 MON or so for the deploy and seeding at the testnet's gas price of about 100 gwei, plus 0.4 MON sent to each of the six demo accounts); `deploy:demo` refuses to start with less than 4 MON. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
 
 What the visitor gets:
 
@@ -363,12 +365,43 @@ What the visitor gets:
 How the server keeps itself safe on a public URL:
 
 - Allowlist per role. A request to sign is refused unless the `from` account is one of the six demo keys, the target is a contract from the deployment, the selector is in that role's list (the allocator may not `execute`, an agent may not `withdraw`), and no value is attached. Refusals come back as JSON-RPC errors the page prints.
-- Gas cap (`MAX_GAS_PER_TX`, 1.5M) after a server-side estimate, so a reverting call costs nothing and a runaway one is not signed. Reverts surface with their custom-error data, so the page decodes `LeverageExceeded`, `StressBreach` and friends exactly as it does locally.
-- Rate limits: `SEND_TX_PER_MINUTE` (40) signed transactions and `CONTROL_PER_MINUTE` (12) shocks per minute across all visitors. Read methods are forwarded to the upstream RPC from a short allowlist; anything else (`evm_mine`, `eth_sign`, ...) is `-32601`. Every visitor's reads share the server's upstream quota (the public testnet RPC allows 25 `eth_call` per second per IP, and one open page issues about fifteen), so identical reads are answered from a `READ_CACHE_MS` (2000) cache that the server clears whenever it signs, marks or sees a receipt go by.
-- Presence-aware oracle. A visitor makes the server mark every `ORACLE_ACTIVE_SECONDS` (5) and `observe()` every `ORACLE_OBSERVE_SECONDS` (30); `PRESENCE_SECONDS` (60) after the last request it drops to `ORACLE_IDLE_SECONDS` (300). A shock lands on the next beat, so the price moves within seconds either way.
+- Gas cap (`MAX_GAS_PER_TX`, 1.5M) after a server-side estimate, so a reverting call costs nothing and a runaway one is not signed. The signed limit is the estimate plus `GAS_HEADROOM_PERCENT` (50): an oracle mark that lands between the estimate and inclusion makes `poke()` and `execute()` write more than was estimated, and Monad bills the limit whether or not it is used, so a transaction signed at the bare estimate can run out of gas and still be paid for in full. Reverts surface with their custom-error data, so the page decodes `LeverageExceeded`, `StressBreach` and friends exactly as it does locally.
+- Rate limits: `SEND_TX_PER_MINUTE` (40) signed transactions and `CONTROL_PER_MINUTE` (12) shocks per minute across all visitors. Read methods are forwarded to the upstream RPC from a short allowlist; anything else (`evm_mine`, `eth_sign`, ...) is `-32601`. Every visitor's reads share the server's upstream quota, and that quota is small: the public testnet RPC answers 15 `eth_call` a second per IP (measured 2026-10-04) while one page refresh is 32 to 34 reads, and inside a batch it refuses the surplus entry by entry under HTTP 200, where a client's ordinary 429 retry never sees it. So the proxy folds a batch's plain reads into one Multicall3 `aggregate3` call (`PACK_READS`, used when the chain has Multicall3 at its canonical address), resends whatever was refused for rate after a short pause, and answers identical reads from a `READ_CACHE_MS` (2000) cache that the server clears whenever it signs, marks or sees a receipt go by. None of the contracts' views depend on `msg.sender`, so a bundled read returns what a direct one would.
+- Presence-aware oracle. A visitor makes the server mark every `ORACLE_ACTIVE_SECONDS` (5) and `observe()` every `ORACLE_OBSERVE_SECONDS` (60); `PRESENCE_SECONDS` (60) after the last request it drops to `ORACLE_IDLE_SECONDS` (300). A shock lands on the next beat, so the price moves within seconds either way.
+- Gas for the demo accounts. Each of the six starts with `DEMO_GAS_PER_ACCOUNT_MON` (0.4). When one drops under `DEMO_GAS_FLOOR_MON` (0.2) the deployer fills it back up, within `DEMO_TOPUP_PER_HOUR_MON` (6) an hour so a visitor hammering the buttons cannot drain it, and never below its own `OWNER_RESERVE_MON` (1) so the oracle keeps marking. `/api/control` reports what has been refilled and says so when an account is low and cannot be.
 - Reset policy. `Reset demo` needs the admin token and respects `RESET_COOLDOWN_SECONDS` (600). With `AUTO_RESET` on (default), the server also redeploys by itself when a visitor leaves and at least `AUTO_RESET_MIN_FROZEN` (2) vaults are no longer `Active`, provided the deployer still holds `RESET_MIN_BALANCE_MON` (3). Each redeploy is a fresh book at new addresses; the page follows automatically.
 
 `deploy/systemd/mandate-web.service` runs it on a Linux host (`/opt/mandate`, a dedicated user, `.env` at mode 600); put a TLS reverse proxy in front of port 3000. The budget for ten days of judging traffic is on the order of 20-30 testnet MON. Rehearse the whole thing offline first with `npx hardhat node` and `MONAD_RPC_URL=http://127.0.0.1:8545`; the proxy, the oracle and the reset path behave the same, only the explorer links are missing.
+
+### Recorded run on Monad testnet
+
+The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one. These addresses and transactions stay on chain either way.
+
+| Contract | Address |
+| --- | --- |
+| MockUSDC | [`0x276A14be2b5D62580A58c74A29D348CF509AA4f6`](https://testnet.monadscan.com/address/0x276A14be2b5D62580A58c74A29D348CF509AA4f6) |
+| MandateRiskGuard | [`0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5`](https://testnet.monadscan.com/address/0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5) |
+| DeterministicMockVenue | [`0xC23e3fE7F931207233a804765c024DEf9C1F7BA4`](https://testnet.monadscan.com/address/0xC23e3fE7F931207233a804765c024DEf9C1F7BA4) |
+| MockVenueAdapter | [`0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354`](https://testnet.monadscan.com/address/0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354) |
+| MandateVault · Steady Basis | [`0x0309A8c6C9D416251D2786042857DAba9AE64388`](https://testnet.monadscan.com/address/0x0309A8c6C9D416251D2786042857DAba9AE64388) |
+| MandateVault · Range Carry | [`0xEAF037275B74f0536c38387130Fe4b758e395341`](https://testnet.monadscan.com/address/0xEAF037275B74f0536c38387130Fe4b758e395341) |
+| MandateVault · Momentum Vector | [`0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318`](https://testnet.monadscan.com/address/0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318) |
+| MandateVault · Tight Mandate | [`0x3de51B731E5F145B44a0d5D5F684459ff120505c`](https://testnet.monadscan.com/address/0x3de51B731E5F145B44a0d5D5F684459ff120505c) |
+
+One pass through the demo against that book, every step sent through the page's `/rpc` proxy and signed by the server's demo keys:
+
+| Step | What the chain did | Transaction |
+| --- | --- | --- |
+| Allocator approves and deposits 1,000 mUSDC into Steady Basis | mined | [`0x0ee552ec…9c1451`](https://testnet.monadscan.com/tx/0x0ee552ec365ba07f6756aa8fb0c535645cf9d5843809e1a372d950ee6a9c1451), [`0x0051d60b…30a3cb`](https://testnet.monadscan.com/tx/0x0051d60b98de1e9873b6ca615c10d038cb8c131f04a1705a16bcd191b830a3cb) |
+| Agent sends an order of 1,000 units, far past the order limit | refused with `OrderNotionalExceeded` at the server's estimate | none, nothing was signed |
+| Agent sends an order inside the mandate (Steady Basis, then Tight Mandate) | mined | [`0x3452ae43…cb8dcb`](https://testnet.monadscan.com/tx/0x3452ae43a0cef718f10787b695247d4d13522496e8fbaa2df8a7529395cb8dcb), [`0x5f63aed9…950f06`](https://testnet.monadscan.com/tx/0x5f63aed932f5e972273ef42bf0b5f52f99da5aed750fd4f95251d25bbf950f06) |
+| Oracle marks the venue 10% lower | price 2001.40 to 1801.26, on chain 4.5 s after the click | the server's own `setPrice` |
+| `poke()` on Steady Basis | mined, vault stays `Active` | [`0x83eb5e38…d58ca0`](https://testnet.monadscan.com/tx/0x83eb5e38ace6e7be44bb785062e7ee69c58dd83851a5bd4e92fc19699dd58ca0) |
+| `poke()` on Range Carry, Momentum Vector, Tight Mandate | mined, each vault goes `Frozen` | [`0x2570b23e…967ed8`](https://testnet.monadscan.com/tx/0x2570b23e2409a76318fced788bd2101fba33c8e700d2076ac34e6d8e17967ed8), [`0xfe156591…186d52`](https://testnet.monadscan.com/tx/0xfe156591ee120b8333f23d3bfb3db06515c6b2ad9fe1677af5c124114f186d52), [`0x790d52d2…08b50e`](https://testnet.monadscan.com/tx/0x790d52d27e3d63e56c3173b320ac4e1db6ccdf4b01e6966eef055e383708b50e) |
+| Agent sends an order on frozen Range Carry | refused with `AgentNotActive` | none, nothing was signed |
+| `unwind()` step 1 of 5 on Range Carry | mined, a fifth of the position closed | [`0x598d53b5…1f5e16`](https://testnet.monadscan.com/tx/0x598d53b5f45845f07a1178d83c6a63926e5af8dc246d9fc7d29dbc8fcb1f5e16) |
+
+Each transaction was confirmed 1.1 to 1.6 seconds after the request reached the server. In the same session eight consecutive `poke()` calls on Tight Mandate, 4.5 seconds apart on a quiet market, all passed its 10-second mark-age term; not one reverted with `MarkTooOld`.
 
 ## Deploying to a live RPC
 
@@ -384,6 +417,17 @@ npm run keeper:monad        # keeps the venue price fresh and calls poke() on ev
 The single-vault deploy configures the vault with `maxMarkAgeSeconds = 30` and locks its terms in the same run, so without a keeper every `execute`, `allocate` and `withdraw` starts reverting with `MarkTooOld` thirty seconds after deployment. The keeper walks the mock price inside a band and serves every vault in the deployment file it finds (`contracts/deployments.latest.json` first, then `web/deployments/<chainId>.json`, or `DEPLOYMENT_FILE`): `poke()` while a vault is `Active`, `observe()` once it is not, so a drawdown breach is caught and the volatility estimate stays fed. It accepts `DEPLOYER_PRIVATE_KEY` or `DEMO_MNEMONIC` (account 0), whichever owns the venue. Do not run it next to `web:live` on the same deployment: two oracles from one key fight over nonces. Never commit a private key or the mnemonic; `.env` is ignored.
 
 See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
+
+## AI tool disclosure
+
+AI coding tools were used to build this repository, and the rules of Monad Metropolis ask for that to be stated. Commits that carry a `Co-Authored-By: Claude …` trailer were written with Claude Code (Anthropic's CLI, models Claude Fable 5.1 and Claude Opus 5) under the committer's direction. They touch the contracts, the tests, the deploy scripts, the demo server and page, and this README; `git log` shows which commits those are. The team set the design and the requirements and decided what was merged.
+
+## Third-party code
+
+- [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) 5.4.0 (MIT): `ERC20`, `IERC20`, `SafeERC20`, `ReentrancyGuard`, `Ownable`, `EIP712`, `ECDSA`, `MerkleProof`, `Math`, imported unmodified from the npm package.
+- [Hardhat](https://github.com/NomicFoundation/hardhat) 3 (MIT), [ethers](https://github.com/ethers-io/ethers.js) 6 (MIT) and [solc-js](https://github.com/ethereum/solc-js) 0.8.37 (MIT) as development dependencies.
+- [Multicall3](https://github.com/mds1/multicall3) (MIT) is not vendored; the live server calls the canonical deployment at `0xcA11bde05977b3631167028862bE2a173976CA11` to bundle reads.
+- The page loads the Manrope and DM Mono typefaces from Google Fonts (SIL Open Font License).
 
 ## License
 

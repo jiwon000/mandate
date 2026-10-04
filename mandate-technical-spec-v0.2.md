@@ -265,6 +265,8 @@ interface IMandateRegistry {
 
 epoch와 pinnedBlock은 단조 증가해야 하며 동일 epoch의 digest 교체를 금지한다.
 
+[구현 기준 2026-10-04] `contracts/src/MandateRegistry.sol`로 구현했다. 위 인터페이스에서 `registerAgent`에 `guard` 파라미터를 추가했다: `limits`를 그대로 신뢰하지 않고 `keccak256(abi.encode(limits)) == IRiskGuard(guard).termsHash(vault)`로 대조하고, `IRiskGuard(guard).adapterAllowed(vault, adapter)`도 확인한다 — 둘 다 `IRiskGuard` 인터페이스에 `termsHash`/`adapterAllowed`를 추가해서 가능해졌다. 이 검증 덕분에 `registerAgent`는 permissionless다: 호출자가 거짓을 등록할 방법이 없다. `fees`(`FeeTerms`)는 선언적 메타데이터이고(Vault에 수수료 엔진이 없음), `modelHash`도 검증하지 않는다. `postLeaderboard`는 EIP-712(`MandateRegistry`, `"1"`)로 서명을 받고, `cumulativeEpsilonE6`가 이전 값과 두 ε 필드의 합에 정확히 일치해야 하며(단순 단조 증가가 아니라 가산이 맞아떨어지는지까지 검증), `pinnedBlock`이 `block.number`를 넘을 수 없다. 한 번도 릴리즈가 없었는지는 `epoch`/`pinnedBlock` 기본값 0과 구분하기 위한 `hasReleased` 플래그로 판단한다.
+
 ## 4. DP Reporter
 
 ### 4.1 DP 보장 범위
@@ -360,8 +362,8 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 5. Frozen 이후 execute와 신규 allocate는 차단되며 withdraw는 유지된다. `unwind()`는 Frozen에서만 동작하고 포지션을 키우거나 뒤집을 수 없다. Closed는 종착 상태다.
 6. 총 발행 shares는 사용자·BatchAllocator claim entitlement와 일치한다.
 7. escrow 자산은 정산 또는 deadline 이후 환불만 가능하다.
-8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다.
-9. 동일 epoch/pinnedBlock/statsVersion의 digest는 변경할 수 없다.
+8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다. [구현 기준 2026-10-04] `MandateRegistry.postLeaderboard`로 구현, `contracts/test/Registry.invariant.t.sol`로 fuzzing 검증.
+9. 동일 epoch/pinnedBlock/statsVersion의 digest는 변경할 수 없다. [구현 기준 2026-10-04] epoch/pinnedBlock 두 축 모두 구현; `statsVersion` 필드는 아직 없다 — DP Reporter가 실제 release를 만들 때 함께 들어갈 예정.
 10. malicious token/venue callback이 Vault 회계에 reentrancy를 일으킬 수 없다.
 11. allocate는 조건이 잠긴 vault에만 들어가고, 잠긴 조건(한도와 adapter allowlist)은 이후 바뀌지 않는다.
 12. 변동성 조항은 총 노출을 늘리는 주문만 거절하고 상태를 바꾸지 않는다. 변동성 상태는 mark 시각이 앞으로 갈 때만 갱신되며, 어떤 mark도 두 번 반영되지 않는다.

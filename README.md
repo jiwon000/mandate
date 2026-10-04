@@ -8,7 +8,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 
 ## 구현 현황
 
-현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다. 2026-09-23 진행 발표 피드백으로 동결 후 reduce-only `unwind()`, 일방향 조건 잠금 `lockTerms()`, 변동성 조항(`StressBreach`)이 추가되었습니다.
+현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다. 2026-09-23 진행 발표 피드백으로 동결 후 reduce-only `unwind()`, 일방향 조건 잠금 `lockTerms()`, 변동성 조항(`StressBreach`)이 추가되었습니다. 2026-10-04에 `MandateRegistry`가 추가되어 에이전트 카탈로그와 DP 릴리즈 앵커를 제공합니다.
 
 현재 프라이버시 경계는 명확합니다. 정산에 포함된 allocation intent와 서명은 정산 calldata에서 공개됩니다. 배치 순정산은 직접 연결을 줄이지만 완전한 익명성을 제공하지 않습니다. 원본 intent가 체인에 전혀 올라가지 않는다는 더 강한 v0.2 문구는 아직 구현되지 않았고, DP Reporter와 비공개 Intent API도 예정 사항입니다.
 
@@ -29,9 +29,10 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - 일방향 조건 잠금 `lockTerms()`: 잠근 뒤에는 한도와 Adapter 허용 목록을 바꿀 수 없고, 잠그기 전에는 예치가 거절되며, `termsHash`가 배분자가 인용하는 조건 값
 - 변동성 조항: guard가 본 mark(거래·`poke()`·부작용 없는 `observe()`)로 실현 변동성을 추정하고, 조건의 horizon 동안 k-sigma 이동이 `maxDrawdownBps`를 넘기면 노출을 늘리는 주문을 `StressBreach`로 거절. 노출을 줄이는 주문은 검사하지 않음
 - 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
+- `MandateRegistry`: `registerAgent()`는 permissionless·자기검증형 — 호출자가 제시한 `limits`가 해당 vault의 실제 locked `termsHash`와 일치하고 `adapter`가 guard의 allowlist에 있을 때만 카탈로그에 기록됨. `postLeaderboard()`는 단일 설정된 reporter 키의 EIP-712 서명만 받고, epoch·pinnedBlock 단조 증가와 누적 ε 장부(`cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6`, 설정된 상한 초과 거부)를 온체인에서 강제
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
 
-로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 34개(Hardhat/node:test)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(핵심 불변식 9개, 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 44개(Hardhat/node:test, MandateRegistry 10개 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
 
 ## 동작 흐름
 
@@ -87,11 +88,13 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 ## 다음 작업
 
-Registry와 DP Reporter, 공개 ε anchor, baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+DP Reporter(실제 통계 계산·노이즈·서명), baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
 
-Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다. Registry/DP Reporter 관련 불변식(#8, #9)은 해당 컨트랙트가 아직 없어 범위 밖입니다.
+Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
 배치 흐름의 웹 연결 [구현 기준 2026-10-04]: `web/`이 더는 BatchAllocator를 우회하지 않습니다. `chain.mjs`가 배포 시 BatchAllocator를 배포·allowlist하고, 서버가 서명된 intent를 모아 epoch 종료 후 batcher로서 `settleEpoch()`를 호출하며, Merkle proof를 재구성해 클레임을 돌려줍니다. 단일 intent와 2-vault/2-allocator 다중 intent 정산을 직접 스크립트로 재현해 검증했습니다. batcher는 여전히 중앙화돼 있고(배포자 키), 정산 calldata에 포함된 intent는 공개됩니다 — `docs/batch-allocator-milestone2.md`의 프라이버시 경계는 그대로입니다.
+
+MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했습니다. `registerAgent()`는 permissionless이지만 `keccak256(abi.encode(limits))`가 해당 vault의 실제 `termsHash`와 일치하고 adapter가 guard allowlist에 있어야만 통과해서, 등록된 카탈로그가 실제 온체인 조건과 어긋날 수 없습니다. `fees`(`FeeTerms`)는 Vault에 수수료 엔진 자체가 없어서 강제되지 않는 선언적 메타데이터입니다. `postLeaderboard()`는 단일 설정된 reporter의 EIP-712 서명만 받고, epoch/pinnedBlock 단조 증가와 `cumulativeEpsilonE6 == 이전값 + epsilonPerfE6 + epsilonIntentE6` 정확한 합, 설정된 상한 초과 거부를 체크합니다(핵심 불변식 #8, #9). Foundry invariant(128 runs × depth 32)로 ε 장부가 역행하거나 상한을 넘거나 실제 승인된 릴리즈 합과 어긋나지 않는지 추가 검증했고, 상한 체크를 일부러 제거해 invariant가 잡아내는 것도 확인했습니다. 이 컨트랙트는 앵커링 메커니즘일 뿐이며, 실제 통계를 계산·노이즈 처리해 서명하는 DP Reporter는 아직 없습니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 

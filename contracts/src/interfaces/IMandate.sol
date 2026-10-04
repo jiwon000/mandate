@@ -32,6 +32,14 @@ struct RiskLimits {
     uint16 stressSigmasX10;
 }
 
+/// @notice Declared, not enforced: MandateVault has no fee-deduction mechanism in
+///         v1. This is metadata an allocator can read before funding a mandate
+///         (via MandateRegistry), not a charge the vault actually makes.
+struct FeeTerms {
+    uint16 performanceFeeBps;
+    uint16 managementFeeBps;
+}
+
 struct TradePreview {
     uint256 orderNotional;
     uint256 expectedPositionNotional;
@@ -92,4 +100,12 @@ interface IRiskGuard {
 
     /// @notice True once the vault's limits and adapter allowlist can no longer change.
     function termsLocked(address vault) external view returns (bool);
+
+    /// @notice keccak256 of the vault's configured limits, in RiskLimits field order.
+    /// @dev What MandateRegistry.registerAgent() checks a caller's claimed limits
+    ///      against, so a registry entry cannot disagree with the real terms.
+    function termsHash(address vault) external view returns (bytes32);
+
+    /// @notice True if `adapter` may be used to trade `vault`.
+    function adapterAllowed(address vault, address adapter) external view returns (bool);
 }

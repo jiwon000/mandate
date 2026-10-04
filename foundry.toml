@@ -13,6 +13,11 @@ solc_version = "0.8.37"
 evm_version = "prague"
 optimizer = true
 optimizer_runs = 200
+# Only the Foundry test handlers need this (RegistryHandler.sol hits "stack too
+# deep" without it); the production path is still compiled separately by
+# contracts/tools/compile.mjs for the Hardhat suite and the web demo, so this
+# does not change what actually ships.
+via_ir = true
 remappings = [
     "forge-std/=contracts/lib/forge-std/src/",
     "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",

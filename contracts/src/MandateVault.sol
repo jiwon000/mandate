@@ -5,9 +5,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IRiskGuard, IVenueAdapter, TradePreview} from "./interfaces/IMandate.sol";
+import {IRiskGuard, IVenueAdapter, IMandateVaultFreeze, TradePreview} from "./interfaces/IMandate.sol";
 
-contract MandateVault is ReentrancyGuard {
+contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     using SafeERC20 for IERC20;
 
     enum AgentState { Active, Frozen, Closed }
@@ -26,6 +26,7 @@ contract MandateVault is ReentrancyGuard {
     error NotFrozen();
     error UnwindCooldown();
     error TermsNotLocked();
+    error ZeroAgent();
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -80,6 +81,12 @@ contract MandateVault is ReentrancyGuard {
     event Closed();
 
     constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_, IVenueAdapter adapter_) {
+        // The other three constructor args are typed as contracts: calling a
+        // real method on the zero address reverts on first use, so a bad value
+        // fails loud. `agent_` is only ever compared with `==`, so a zero value
+        // would not fail at all -- it would just quietly deploy a vault no one
+        // can ever call execute() on.
+        if (agent_ == address(0)) revert ZeroAgent();
         asset = asset_;
         riskGuard = riskGuard_;
         agent = agent_;

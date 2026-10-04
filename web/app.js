@@ -30,6 +30,7 @@ const state = {
   live: false,
   network: null,
   oracle: null,
+  gas: null,
   adminToken: new URLSearchParams(location.search).get("admin") ?? ""
 };
 
@@ -141,6 +142,7 @@ async function boot() {
   const status = await (await fetch("/api/control")).json();
   state.blockTimeSeconds = status.blockTimeSeconds;
   state.oracle = status.oracle ?? null;
+  state.gas = status.gas ?? null;
   $$("[data-blocktime]").forEach((button) =>
     button.classList.toggle("active", Number(button.dataset.blocktime) === state.blockTimeSeconds)
   );
@@ -155,6 +157,7 @@ async function boot() {
       try {
         const next = await (await fetch("/api/control")).json();
         state.oracle = next.oracle ?? null;
+        state.gas = next.gas ?? null;
       } catch (ignored) {
         // the next refresh reports the outage
       }
@@ -254,8 +257,13 @@ async function refresh() {
 }
 
 async function scanLogs() {
-  const from = state.lastScannedBlock + 1;
+  let from = state.lastScannedBlock + 1;
   if (from > state.blockNumber) return;
+  // A public RPC answers getLogs for a bounded range only (100 blocks on Monad
+  // testnet, about 40 seconds). A tab that slept longer than that skips ahead:
+  // a gap in the feed, rather than a scan that fails on every refresh from then on.
+  const maxRange = state.deployment.logRangeBlocks;
+  if (maxRange && state.blockNumber - from > maxRange) from = state.blockNumber - maxRange;
   const addresses = [
     state.deployment.addresses.guard,
     ...state.deployment.vaults.map((v) => v.address)
@@ -962,7 +970,8 @@ function liveNote() {
     `The oracle re-marks every ${oracle.cadenceSeconds}s right now (${
       oracle.active ? "someone is watching" : "idle pace"
     }; ${oracle.pushes} marks, ${spent} MON of gas so far)` +
-    (oracle.lastError ? `. Last oracle error: ${oracle.lastError}` : ".")
+    (oracle.lastError ? `. Last oracle error: ${oracle.lastError}` : ".") +
+    (state.gas?.warning ? ` Heads up: ${state.gas.warning}; a click may be refused until that clears.` : "")
   );
 }
 

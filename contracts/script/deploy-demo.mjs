@@ -8,12 +8,12 @@
 // web/deployments/<chainId>.json, which `npm run web:live` boots from.
 import { JsonRpcProvider, NonceManager, formatEther, parseEther } from "ethers";
 import { demoWallets } from "../../web/accounts.mjs";
-import { deployLiveSystem, deploymentFileFor, networkInfo } from "../../web/live.mjs";
+import { GAS_PER_ACCOUNT_MON, deployLiveSystem, deploymentFileFor, networkInfo } from "../../web/live.mjs";
 
 const {
   MONAD_RPC_URL,
   DEMO_MNEMONIC,
-  DEMO_GAS_PER_ACCOUNT_MON = "0.3",
+  DEMO_GAS_PER_ACCOUNT_MON = String(GAS_PER_ACCOUNT_MON),
   DEPLOYMENT_FILE = ""
 } = process.env;
 if (!MONAD_RPC_URL || !DEMO_MNEMONIC) throw new Error("Set MONAD_RPC_URL and DEMO_MNEMONIC");

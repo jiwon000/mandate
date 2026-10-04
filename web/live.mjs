@@ -13,7 +13,10 @@ import { loadArtifact } from "../contracts/script/artifacts.mjs";
 import { CONTRACT_SOURCES, START_PRICE, deployDemoSystem } from "./mandates.mjs";
 import { demoWallets } from "./accounts.mjs";
 import { authorise, buildPolicy } from "./live-policy.mjs";
-import { ReadCache, rpcFailure, rpcResult, toRpcError } from "./rpc.mjs";
+import { RollingBudget, gasLimitFor, perKeyQueue, planTopUps } from "./live-gas.mjs";
+import {
+  MULTICALL3, ReadCache, packCalls, packable, rpcFailure, rpcResult, sendPatiently, toRpcError, unpackAnswers
+} from "./rpc.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -33,6 +36,17 @@ export function loadAbis() {
 
 // Everything the page needs to read a chain. Anything else - signing methods,
 // node administration, raw transaction relay - is refused at the proxy.
+// The server's own reads, estimates and sends share the upstream quota with
+// every visitor's reads. ethers waits out an HTTP 429 by itself; inside a batch
+// the refusal arrives per call under a 200, and those are sent again here.
+class PatientProvider extends JsonRpcProvider {
+  async _send(payload) {
+    const calls = Array.isArray(payload) ? payload : [payload];
+    const answers = await sendPatiently(calls, (batch) => super._send(batch.length === 1 ? batch[0] : batch));
+    return answers.filter(Boolean);
+  }
+}
+
 const READ_METHODS = new Set([
   "eth_chainId", "eth_blockNumber", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_call",
   "eth_estimateGas", "eth_getLogs", "eth_getTransactionByHash", "eth_getTransactionReceipt",
@@ -56,7 +70,25 @@ class TokenBucket {
   }
 }
 
-const isNonceError = (error) => error?.code === "NONCE_EXPIRED" || /nonce/i.test(error?.message ?? "");
+// ethers reports an RPC error it does not recognise as "could not coalesce
+// error" and keeps what the node said underneath; the log wants both.
+const describe = (error) => {
+  const short = error?.shortMessage ?? error?.message ?? String(error);
+  const said = error?.info?.error?.message ?? error?.error?.message;
+  return said && !short.includes(said) ? `${short} (${said})` : short;
+};
+const isOutOfGasMoney = (error) => /insufficient|balance|funds/i.test(describe(error));
+// What each demo account is filled to, and the level under which it is refilled.
+// Monad bills the signed limit, so one trade costs about 0.04 MON at 100 gwei:
+// the floor leaves room for a few more clicks before the refill has landed.
+export const GAS_PER_ACCOUNT_MON = 0.4;
+const GAS_FLOOR_MON = 0.2;
+// How often the deployer looks at the demo accounts' balances while watched,
+// and how soon after one of them has signed.
+const FUND_CHECK_MS = 10_000;
+const FUND_RECHECK_MS = 2_000;
+const STATUS_SHARE_MS = 1_000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Tops every demo account up to `perAccountMon` of gas from the owner. Only the
 // shortfall is sent, so re-running is cheap.
@@ -74,7 +106,7 @@ export async function fundAccounts({ provider, wallets, owner, perAccountMon, lo
 
 // Deploys the four-mandate system from the demo accounts and records it in
 // web/deployments/<chainId>.json (addresses only; ABIs come from the artifacts).
-export async function deployLiveSystem({ provider, wallets, signers, file, perAccountMon = 0.3, log = () => {} }) {
+export async function deployLiveSystem({ provider, wallets, signers, file, perAccountMon = GAS_PER_ACCOUNT_MON, log = () => {} }) {
   await fundAccounts({ provider, wallets, owner: signers.owner, perAccountMon, log });
   const deploy = async (source, name, args = []) => {
     const { abi, bytecode } = loadArtifact(`${source}.sol`, name);
@@ -104,23 +136,30 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
   const config = {
     activeSeconds: number("ORACLE_ACTIVE_SECONDS", 5),
     idleSeconds: number("ORACLE_IDLE_SECONDS", 300),
-    observeSeconds: number("ORACLE_OBSERVE_SECONDS", 30),
+    observeSeconds: number("ORACLE_OBSERVE_SECONDS", 60),
     presenceSeconds: number("PRESENCE_SECONDS", 60),
     autoReset: env.AUTO_RESET !== "0",
     autoResetMinFrozen: number("AUTO_RESET_MIN_FROZEN", 2),
     resetCooldownSeconds: number("RESET_COOLDOWN_SECONDS", 600),
     resetMinBalanceMon: number("RESET_MIN_BALANCE_MON", 3),
-    gasPerAccountMon: number("DEMO_GAS_PER_ACCOUNT_MON", 0.3),
+    gasPerAccountMon: number("DEMO_GAS_PER_ACCOUNT_MON", GAS_PER_ACCOUNT_MON),
+    gasFloorMon: number("DEMO_GAS_FLOOR_MON", GAS_FLOOR_MON),
+    topUpPerHourMon: number("DEMO_TOPUP_PER_HOUR_MON", 6),
+    ownerReserveMon: number("OWNER_RESERVE_MON", 1),
     maxGasPerTx: number("MAX_GAS_PER_TX", 1_500_000),
+    gasHeadroomPercent: number("GAS_HEADROOM_PERCENT", 50),
+    txTimeoutSeconds: number("TX_TIMEOUT_SECONDS", 20),
     sendPerMinute: number("SEND_TX_PER_MINUTE", 40),
     controlPerMinute: number("CONTROL_PER_MINUTE", 12),
     logLookbackBlocks: number("LOG_LOOKBACK_BLOCKS", 90),
-    readCacheMs: number("READ_CACHE_MS", 2000)
+    readCacheMs: number("READ_CACHE_MS", 2000),
+    packReads: env.PACK_READS !== "0"
   };
 
-  const provider = new JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
+  const provider = new PatientProvider(rpcUrl, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 500;
   const chainId = Number((await provider.getNetwork()).chainId);
+  const canPack = config.packReads && (await provider.getCode(MULTICALL3)) !== "0x";
   const file = deploymentFile ?? deploymentFileFor(chainId);
   const wallets = demoWallets(mnemonic, provider);
   // Local nonces for every account that sends: a load-balanced public RPC can
@@ -136,6 +175,8 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
   const controlBucket = new TokenBucket(config.controlPerMinute);
   const reads = new ReadCache(config.readCacheMs);
   let forwarded = 0;
+  let packed = 0;
+  let reading = { at: 0, value: null, pending: null }; // see chainReading()
 
   let deployment = null;
   let policy = null;
@@ -185,51 +226,191 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
   let spentWei = 0n;
   let lastError = null;
   let busy = false;
+  let resets = 0; // redeploys in progress
+  const jobs = new Map(); // work running beside the beat, by kind
+  let lastFundCheckAt = 0;
+  let toppedUpWei = 0n;
+  let gasWarning = null;
+  const topUpBudget = new RollingBudget(parseEther(String(config.topUpPerHourMon)), 3_600_000);
 
   const touch = () => { lastTouch = Date.now(); };
   const isActive = () => Date.now() - lastTouch < config.presenceSeconds * 1000;
   // Monad bills the gas limit, not the gas used, so that is what gets counted.
   const spend = (response, receipt) => { spentWei += response.gasLimit * (receipt.gasPrice ?? response.gasPrice ?? 0n); };
 
-  async function send(contractCall) {
-    const response = await contractCall;
-    const receipt = await response.wait();
-    spend(response, receipt);
-    return receipt;
+  // NonceManager counts a transaction as sent before it is. When the send then
+  // fails (no balance left, a refused estimate), the nonce it reserved is never
+  // used and every later transaction from that account waits behind the gap. So
+  // any failure drops the local count and the next send asks the chain again,
+  // and an account sends one at a time: a failure beside a second send already
+  // on its way would leave that one signed past the gap.
+  const inOrder = perKeyQueue();
+  function submit(signer, makeCall) {
+    return inOrder(signer, async () => {
+      try {
+        return await makeCall();
+      } catch (error) {
+        signer.reset();
+        throw error;
+      }
+    });
+  }
+  // A transaction the chain never includes must not hold the oracle forever.
+  async function settle(signer, response) {
+    try {
+      const receipt = await response.wait(1, config.txTimeoutSeconds * 1000);
+      spend(response, receipt);
+      return receipt;
+    } catch (error) {
+      if (error?.receipt) spend(response, error.receipt); // mined and reverted: billed, nonce used
+      else await inOrder(signer, () => signer.reset()); // never included: count again from the chain
+      throw error;
+    }
+  }
+  const send = async (signer, makeCall) => settle(signer, await submit(signer, makeCall));
+  // The server's own calls carry the headroom too. What a call costs depends on
+  // what is mined just before it: an observe estimated while the vault has
+  // already seen the current mark writes nothing, and the same call after the
+  // next mark writes the estimate, about a tenth more gas.
+  async function padded(method, ...args) {
+    const gas = await method.estimateGas(...args);
+    return method(...args, { gasLimit: gasLimitFor(gas, config.gasHeadroomPercent, config.maxGasPerTx) });
   }
 
-  async function observeAll(why) {
-    for (const vault of deployment.vaults) {
+  // The round is submitted back to back and confirmed together, so four vaults
+  // cost one confirmation's wait instead of four. Rounds never overlap.
+  const observeLane = {};
+  const observeAll = (why) => inOrder(observeLane, () => observeRound(why));
+  async function observeRound(why) {
+    lastObserveAt = Date.now();
+    let states;
+    try {
+      states = await Promise.all(vaults.map((v) => v.state()));
+    } catch (error) {
+      lastObserveAt = 0; // nothing was sent: the next beat tries the round again
+      throw error;
+    }
+    const sent = [];
+    for (const [index, vault] of deployment.vaults.entries()) {
       if (Number(vault.limits.volWindowSeconds) === 0) continue;
+      // A frozen or closed vault takes no more orders, so nothing reads its estimate.
+      if (states[index] !== 0n) continue;
       try {
-        await send(guard.observe(vault.address, deployment.addresses.adapter));
+        const response = await submit(signers.keeper, () => padded(guard.observe, vault.address, deployment.addresses.adapter));
+        sent.push({ vault, response });
       } catch (error) {
-        log(`[observe:${why}] ${vault.key} ${error.shortMessage ?? error.message}`);
-        if (isNonceError(error)) signers.keeper.reset();
+        log(`[observe:${why}] ${vault.key} ${describe(error)}`);
+        if (isOutOfGasMoney(error)) lastFundCheckAt = 0;
+        break; // the keeper's nonce was just dropped; the next round starts clean
       }
     }
+    await Promise.all(sent.map(async ({ vault, response }) => {
+      try {
+        await settle(signers.keeper, response);
+      } catch (error) {
+        log(`[observe:${why}] ${vault.key} ${describe(error)}`);
+      }
+    }));
     reads.clear();
-    lastObserveAt = Date.now();
+  }
+
+  // The demo accounts are funded when the book is deployed and spend from then
+  // on: the keeper's observes alone are about 0.06 MON a minute while somebody
+  // is watching. The deployer refills whichever account drops under the floor,
+  // within an hourly allowance (a visitor hammering the buttons cannot drain
+  // it) and never below its own reserve (the oracle has to keep marking).
+  async function topUpAccounts() {
+    lastFundCheckAt = Date.now();
+    const recipients = [wallets.allocator, ...wallets.agents, wallets.keeper];
+    const [ownerBalance, ...balances] = await Promise.all(
+      [wallets.owner, ...recipients].map((w) => provider.getBalance(w.address))
+    );
+    const floor = parseEther(String(config.gasFloorMon));
+    const reserve = parseEther(String(config.ownerReserveMon));
+    const spare = ownerBalance > reserve ? ownerBalance - reserve : 0n;
+    const allowance = topUpBudget.left();
+    const plan = planTopUps(
+      recipients.map((w, i) => ({ address: w.address, balance: balances[i] })),
+      { floor, target: parseEther(String(config.gasPerAccountMon)), available: spare < allowance ? spare : allowance }
+    );
+    const low = balances.filter((b) => b < floor).length;
+    const warning = low > plan.length
+      ? `${low - plan.length} demo account(s) are low on gas and ${spare < allowance ? "the deployer is down to its reserve" : "the hourly refill allowance is used up"}`
+      : null;
+    if (warning && warning !== gasWarning) log(`[gas] ${warning}`);
+    gasWarning = warning;
+
+    const sent = [];
+    for (const { address, value } of plan) {
+      try {
+        // A plain transfer to a key is always 21,000 gas; no estimate needed.
+        const response = await submit(signers.owner, () => signers.owner.sendTransaction({ to: address, value, gasLimit: 21_000n }));
+        sent.push({ address, value, response });
+      } catch (error) {
+        log(`[gas] refill of ${address} failed: ${describe(error)}`);
+        break;
+      }
+    }
+    await Promise.all(sent.map(async ({ address, value, response }) => {
+      try {
+        await settle(signers.owner, response);
+        topUpBudget.spend(value);
+        toppedUpWei += value;
+        log(`[gas] refilled ${address} with ${formatEther(value)} MON`);
+      } catch (error) {
+        log(`[gas] refill of ${address} failed: ${describe(error)}`);
+      }
+    }));
+    if (sent.length) reads.clear();
   }
 
   async function push() {
+    const startedAt = Date.now();
     ticks += 1;
-    let shocked = false;
-    if (pendingShockBps !== 0) {
-      // Take the pre-shock mark first so the estimator sees the shock as one
-      // return over a block or two, as it does on the in-process chain.
-      if (isActive()) await observeAll("pre-shock");
-      basePriceE18 = (basePriceE18 * BigInt(10_000 + pendingShockBps)) / 10_000n;
-      pendingShockBps = 0;
-      shocked = true;
-    }
     const wobbleBps = Math.round(8 * Math.sin(ticks / 9));
     const priceE18 = (basePriceE18 * BigInt(10_000 + wobbleBps)) / 10_000n;
-    await send(venue.setPrice(priceE18));
+    await send(signers.owner, () => padded(venue.setPrice, priceE18));
     reads.clear();
+    reading = { at: 0, value: reading.value, pending: null };
     pushes += 1;
-    lastPushAt = Date.now();
-    return shocked;
+    // From the start of the send: the cadence is mark to mark. Counted from the
+    // confirmation, each mark would come a confirmation's wait later than the last.
+    lastPushAt = startedAt;
+  }
+
+  async function applyShock() {
+    // Take the pre-shock mark first so the estimator sees the shock as one
+    // return over a block or two, as it does on the in-process chain.
+    if (isActive()) await observeAll("pre-shock");
+    basePriceE18 = (basePriceE18 * BigInt(10_000 + pendingShockBps)) / 10_000n;
+    pendingShockBps = 0;
+    await push();
+    if (isActive()) await observeAll("post-shock");
+  }
+
+  // Observe rounds, refills and shocks run beside the beat, one of each kind at
+  // a time. Run inside it, they delayed the next mark by seconds, and a mandate
+  // with a 10 second mark-age limit then refused orders on a healthy oracle.
+  function runJob(kind, job) {
+    if (jobs.has(kind) || resets > 0) return;
+    const run = job()
+      .catch((error) => {
+        lastError = describe(error);
+        log(`[${kind}] ${lastError}`);
+      })
+      .finally(() => jobs.delete(kind));
+    jobs.set(kind, run);
+  }
+  // A redeploy replaces every contract the jobs talk to: they finish first and
+  // no new one starts until it is done.
+  async function whileReset(task) {
+    resets += 1;
+    try {
+      await Promise.all(jobs.values());
+      return await task();
+    } finally {
+      resets -= 1;
+    }
   }
 
   async function maybeAutoReset() {
@@ -247,24 +428,24 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
   }
 
   async function beat() {
-    if (busy || !deployment) return;
+    if (busy || resets > 0 || !deployment) return;
     busy = true;
     try {
       const active = isActive();
       const justLeft = wasActive && !active;
       wasActive = active;
-      if (justLeft && config.autoReset) await maybeAutoReset();
+      if (justLeft && config.autoReset) await whileReset(maybeAutoReset);
+      if (pendingShockBps !== 0) runJob("shock", applyShock);
+      if (active && Date.now() - lastFundCheckAt >= FUND_CHECK_MS) runJob("gas", topUpAccounts);
 
       const cadence = (active ? config.activeSeconds : config.idleSeconds) * 1000;
-      const now = Date.now();
-      if (pendingShockBps === 0 && now - lastPushAt < cadence) return;
-      const shocked = await push();
-      if (active && (shocked || now - lastObserveAt >= config.observeSeconds * 1000)) await observeAll("tick");
+      if (Date.now() - lastPushAt < cadence) return;
+      await push();
+      if (active && Date.now() - lastObserveAt >= config.observeSeconds * 1000) runJob("observe", () => observeAll("tick"));
       lastError = null;
     } catch (error) {
-      lastError = error.shortMessage ?? error.message;
+      lastError = describe(error);
       log(`[oracle] ${lastError}`);
-      if (isNonceError(error)) { signers.owner.reset(); signers.keeper.reset(); }
     } finally {
       busy = false;
     }
@@ -277,47 +458,103 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     pendingShockBps = 0;
     lastPushAt = 0;
     lastObserveAt = 0;
-    const stored = await deployLiveSystem({
-      provider, wallets, signers, file, perAccountMon: config.gasPerAccountMon, log: (line) => log(`[deploy:${by}] ${line}`)
-    });
+    // A deploy sends from every demo account: start each from the chain's count,
+    // and leave none with a local count that a failed deploy got ahead of.
+    const all = [signers.owner, signers.allocator, signers.keeper, ...signers.agents];
+    for (const signer of all) signer.reset();
+    let stored;
+    try {
+      stored = await deployLiveSystem({
+        provider, wallets, signers, file, perAccountMon: config.gasPerAccountMon, log: (line) => log(`[deploy:${by}] ${line}`)
+      });
+    } catch (error) {
+      for (const signer of all) signer.reset();
+      throw error;
+    }
     adopt(stored);
     reads.clear();
+    reading = { at: 0, value: null, pending: null };
     // The cooldown counts from the end of a reset, not its start.
     lastResetAt = Date.now();
     return deployment;
   }
 
   // --- JSON-RPC ---------------------------------------------------------
-  async function upstream(body) {
+  async function post(batch) {
     const response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(batch)
     });
+    if (response.status === 429) return batch.map((call) => rpcFailure(call.id, -32011, "upstream rate limit"));
     if (!response.ok) throw new Error(`upstream RPC answered ${response.status}`);
-    return response.json();
+    const answers = await response.json();
+    // One error object for the whole batch: it is every call's answer.
+    return Array.isArray(answers) ? answers : batch.map((call) => ({ ...answers, id: call.id }));
+  }
+
+  // The reads that have to leave for the upstream RPC, answered in call order.
+  // Where the chain has Multicall3, the plain contract reads of a page refresh
+  // go as one eth_call instead of thirty.
+  async function upstream(calls) {
+    const slots = calls.map((_, slot) => slot);
+    const noAnswer = () => rpcFailure(null, -32603, "no answer from upstream");
+    const direct = async (wanted) => {
+      forwarded += wanted.length;
+      const replies = await sendPatiently(wanted.map((slot) => ({ ...calls[slot], id: slot })), post);
+      return replies.map((reply) => reply ?? noAnswer());
+    };
+    const bundle = canPack ? slots.filter((slot) => packable(calls[slot])) : [];
+    if (bundle.length < 2) return direct(slots);
+
+    const answers = new Array(calls.length);
+    const rest = slots.filter((slot) => !bundle.includes(slot));
+    const bundled = bundle.map((slot) => calls[slot]);
+    forwarded += 1;
+    const [restAnswers, [reply]] = await Promise.all([
+      direct(rest),
+      sendPatiently([packCalls(bundled, "pack")], post)
+    ]);
+    for (const [at, slot] of rest.entries()) answers[slot] = restAnswers[at];
+    // A bundle that failed as a whole says nothing about its reads: ask for them one by one.
+    const unpacked = unpackAnswers(bundled, reply);
+    if (unpacked) packed += bundle.length;
+    for (const [at, answer] of (unpacked ?? (await direct(bundle))).entries()) answers[bundle[at]] = answer;
+    return answers;
   }
 
   async function sendOnBehalf(id, tx) {
     const verdict = authorise(policy, tx);
     if (!verdict.ok) return rpcFailure(id, -32000, `refused: ${verdict.reason}`);
+    if (resets > 0) return rpcFailure(id, -32000, "refused: the demo is being reset; try again in a few seconds");
     if (!sendBucket.take()) return rpcFailure(id, -32005, "the demo is signing too many transactions; try again in a minute");
     const signer = hot.get(String(tx.from).toLowerCase());
     const request = { to: tx.to, data: tx.data ?? tx.input, value: 0n };
+    let gas;
     try {
       // The browser's gas field is ignored: Monad charges the limit, so the
-      // server estimates for itself and caps what one click can cost.
-      const gas = await provider.estimateGas({ ...request, from: tx.from });
-      if (gas > BigInt(config.maxGasPerTx)) return rpcFailure(id, -32000, `refused: gas ${gas} is above the demo cap`);
-      const response = await signer.sendTransaction({ ...request, gasLimit: gas });
-      response.wait().then((receipt) => { spend(response, receipt); reads.clear(); }).catch(() => signer.reset());
+      // server estimates for itself and caps what one click can cost. A call
+      // that would revert stops here, with its custom error, and costs nothing.
+      gas = await provider.estimateGas({ ...request, from: tx.from });
+    } catch (error) {
+      return { jsonrpc: "2.0", id, error: toRpcError(error) };
+    }
+    if (gas > BigInt(config.maxGasPerTx)) return rpcFailure(id, -32000, `refused: gas ${gas} is above the demo cap`);
+    try {
+      const gasLimit = gasLimitFor(gas, config.gasHeadroomPercent, config.maxGasPerTx);
+      const response = await submit(signer, () => signer.sendTransaction({ ...request, gasLimit }));
+      settle(signer, response).then(() => reads.clear(), () => reads.clear());
+      // This account just spent: look at the balances soon rather than at the next regular check.
+      lastFundCheckAt = Math.min(lastFundCheckAt, Date.now() - FUND_CHECK_MS + FUND_RECHECK_MS);
       touch();
       log(`[sign] ${verdict.role} ${verdict.name} -> ${response.hash}`);
       return rpcResult(id, response.hash);
     } catch (error) {
-      if (isNonceError(error)) signer.reset();
-      const rpcError = toRpcError(error);
-      return { jsonrpc: "2.0", id, error: rpcError };
+      if (isOutOfGasMoney(error)) {
+        lastFundCheckAt = 0; // refill on the next beat rather than at the next check
+        return rpcFailure(id, -32000, "refused: this demo account is out of gas; it is refilled within a few seconds, try again");
+      }
+      return { jsonrpc: "2.0", id, error: toRpcError(error) };
     }
   }
 
@@ -341,13 +578,9 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       else forward.push(index);
     }
     if (forward.length) {
-      forwarded += forward.length;
       try {
         const answers = await upstream(forward.map((index) => calls[index]));
-        const byId = new Map((Array.isArray(answers) ? answers : [answers]).map((a) => [a.id, a]));
-        for (const index of forward) {
-          results[index] = byId.get(calls[index].id) ?? rpcFailure(calls[index].id ?? null, -32603, "no answer from upstream");
-        }
+        for (const [at, index] of forward.entries()) results[index] = { ...answers[at], id: calls[index].id ?? null };
         // A mined receipt passing through means the state the cache holds is
         // from before that transaction; the browser that sent it is about to
         // re-read everything and must not get the old answers.
@@ -360,11 +593,31 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     return Array.isArray(payload) ? results : results[0];
   }
 
+  // The chain half of a status answer. Every open page asks for it every few
+  // seconds and every control click once more, so one reading serves a second
+  // of them, and the previous one stands in while the upstream is refusing.
+  function chainReading() {
+    const mine = reading;
+    if (mine.value && Date.now() - mine.at < STATUS_SHARE_MS) return mine.value;
+    mine.pending ??= Promise.all([
+      venue.priceE18(), venue.updatedAt(), provider.getBlock("latest"), provider.getBalance(wallets.owner.address)
+    ]).then(
+      (value) => {
+        Object.assign(mine, { at: Date.now(), value, pending: null });
+        return value;
+      },
+      (error) => {
+        mine.pending = null;
+        if (mine.value) return mine.value;
+        throw error;
+      }
+    );
+    return mine.pending;
+  }
+
   const control = {
     async status() {
-      const [priceE18, markedAt, block, balance] = await Promise.all([
-        venue.priceE18(), venue.updatedAt(), provider.getBlock("latest"), provider.getBalance(wallets.owner.address)
-      ]);
+      const [priceE18, markedAt, block, balance] = await chainReading();
       const active = isActive();
       const cadenceSeconds = active ? config.activeSeconds : config.idleSeconds;
       return {
@@ -385,7 +638,15 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
           lastError
         },
         deployer: { address: wallets.owner.address, balanceMon: formatEther(balance) },
-        proxy: { forwarded, cached: reads.hits, cacheMs: config.readCacheMs },
+        gas: {
+          perAccountMon: config.gasPerAccountMon,
+          floorMon: config.gasFloorMon,
+          headroomPercent: config.gasHeadroomPercent,
+          toppedUpMon: formatEther(toppedUpWei),
+          topUpLeftMon: formatEther(topUpBudget.left()),
+          warning: gasWarning
+        },
+        proxy: { forwarded, packed, cached: reads.hits, cacheMs: config.readCacheMs, packing: canPack },
         reset: { admin: Boolean(adminToken), auto: config.autoReset, lastResetAt }
       };
     },
@@ -412,11 +673,14 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       if (!adminToken || String(token ?? "") !== adminToken) {
         throw new Error("reset needs the admin token on a live network");
       }
-      if (Date.now() - lastResetAt < config.resetCooldownSeconds * 1000) {
-        throw new Error(`reset cooldown: ${Math.ceil((lastResetAt + config.resetCooldownSeconds * 1000 - Date.now()) / 1000)}s left`);
-      }
-      await redeploy("admin");
-      return { ok: true, startedAt: deployment.startedAt };
+      return whileReset(async () => {
+        while (busy) await pause(50); // the mark in flight lands first
+        if (Date.now() - lastResetAt < config.resetCooldownSeconds * 1000) {
+          throw new Error(`reset cooldown: ${Math.ceil((lastResetAt + config.resetCooldownSeconds * 1000 - Date.now()) / 1000)}s left`);
+        }
+        await redeploy("admin");
+        return { ok: true, startedAt: deployment.startedAt };
+      });
     }
   };
 
@@ -428,7 +692,11 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     // block: a getLogs over days of testnet blocks is refused by public RPCs.
     deployment: async () => {
       const latest = await provider.getBlockNumber();
-      return { ...deployment, startBlock: Math.max(deployment.startBlock, latest - config.logLookbackBlocks) };
+      return {
+        ...deployment,
+        startBlock: Math.max(deployment.startBlock, latest - config.logLookbackBlocks),
+        logRangeBlocks: config.logLookbackBlocks
+      };
     },
     handleRpc,
     control,

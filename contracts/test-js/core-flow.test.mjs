@@ -59,8 +59,12 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
     maxOrderNotional: parseUnits("500", 18),
     maxPositionNotional: parseUnits("800", 18),
     maxTotalNotional: parseUnits("800", 18),
-    maxBlockNotional: parseUnits("500", 18)
+    maxBlockNotional: parseUnits("500", 18),
+    volWindowSeconds: 0,
+    stressHorizonSeconds: 0,
+    stressSigmasX10: 0
   })).wait();
+  await (await guard.lockTerms(vaultAddress)).wait();
 
   const deposit = parseUnits("1000", 6);
   await (await usdc.mint(await allocator.getAddress(), deposit)).wait();

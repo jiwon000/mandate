@@ -9,9 +9,16 @@ contract MockVenueAdapter is IVenueAdapter {
     error OnlyVault();
     error ZeroOrder();
     error PreviewMismatch();
+    error BadFraction();
 
     /// @dev Vault assets are 6dp; venue notionals are 1e18. 1e12 converts between them.
     uint256 private constant ASSET_TO_E18 = 1e12;
+
+    /// @notice Worst fill reduce() accepts, relative to the venue's current mark.
+    /// @dev A real venue fills a market close some distance from its mark; this is the
+    ///      distance past which the unwind step reverts and waits for the next block
+    ///      rather than dumping into a hole. The mock venue fills at its mark exactly.
+    uint16 public constant MAX_UNWIND_SLIPPAGE_BPS = 100;
 
     DeterministicMockVenue public immutable venue;
 
@@ -49,6 +56,36 @@ contract MockVenueAdapter is IVenueAdapter {
         realizedPnl = 0;
     }
 
+    /// @inheritdoc IVenueAdapter
+    function reduce(address vault, uint16 fractionBps)
+        external returns (uint256 closedNotional, int256 realizedPnl)
+    {
+        if (msg.sender != vault) revert OnlyVault();
+        if (fractionBps == 0 || fractionBps > 10_000) revert BadFraction();
+
+        int256 size = venue.positionSizeE18(vault);
+        if (size == 0) return (0, 0);
+
+        // Reduce-only by construction: the delta is a slice of the current size with
+        // the opposite sign, so it can shrink the position but never flip or grow it.
+        int256 sizeDelta = -(size * int256(uint256(fractionBps))) / 10_000;
+        if (sizeDelta == 0) sizeDelta = size > 0 ? int256(-1) : int256(1);
+
+        uint256 price = venue.priceE18();
+        // Selling a long tolerates a lower fill; buying back a short tolerates a higher one.
+        uint256 limitPrice = size > 0
+            ? Math.mulDiv(price, 10_000 - MAX_UNWIND_SLIPPAGE_BPS, 10_000)
+            : Math.mulDiv(price, 10_000 + MAX_UNWIND_SLIPPAGE_BPS, 10_000);
+
+        // The venue keeps a cash-flow basis, so total PnL (open plus realised) is the
+        // same before and after a close. Realised PnL for this step is the share of the
+        // pre-trade unrealised PnL that the closed slice carried.
+        int256 pnlBefore = venue.unrealizedPnlE18(vault);
+        uint256 fillPrice = venue.trade(vault, sizeDelta, limitPrice);
+        closedNotional = Math.mulDiv(_abs(sizeDelta), fillPrice, 1e18);
+        realizedPnl = (pnlBefore * int256(_abs(sizeDelta))) / int256(_abs(size));
+    }
+
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional)
     {
@@ -64,6 +101,12 @@ contract MockVenueAdapter is IVenueAdapter {
         int256 equityE18 = int256(cash * ASSET_TO_E18) + pnlE18;
         equity = equityE18 <= 0 ? 0 : uint256(equityE18) / ASSET_TO_E18;
         markedAt = venue.updatedAt();
+    }
+
+    /// @inheritdoc IVenueAdapter
+    /// @dev One market on the mock venue, so the vault does not pick the price.
+    function markPrice(address) external view returns (uint256 priceE18, uint256 markedAt) {
+        return (venue.priceE18(), venue.updatedAt());
     }
 
     function _abs(int256 value) private pure returns (uint256) {

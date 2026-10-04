@@ -1,13 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ContractFactory, JsonRpcProvider, NonceManager, Wallet, parseUnits } from "ethers";
+import { loadArtifact } from "./artifacts.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
-
-function loadArtifact(relativePath, name) {
-  const file = path.join(root, "contracts/artifacts-local", relativePath, `${name}.json`);
-  return JSON.parse(fs.readFileSync(file, "utf8"));
-}
 
 async function deploy(signer, relativePath, name, args = []) {
   const artifact = loadArtifact(relativePath, name);
@@ -84,8 +80,18 @@ await (await guard.configure(vaultAddress, {
   maxOrderNotional: parseUnits("500", 18),
   maxPositionNotional: parseUnits("1500", 18),
   maxTotalNotional: parseUnits("1500", 18),
-  maxBlockNotional: parseUnits("750", 18)
+  maxBlockNotional: parseUnits("750", 18),
+  // Stress test: a 3-sigma move over the next 60 seconds on the post-trade exposure
+  // must stay inside maxDrawdownBps. Volatility is estimated over a 5-minute window
+  // from the marks the guard observes; see README "Risk enforcement".
+  volWindowSeconds: 300,
+  stressHorizonSeconds: 60,
+  stressSigmasX10: 30
 })).wait();
+// Deposits are refused until the terms are locked, and after the lock neither the
+// limits nor the adapter allowlist can change. Different terms mean a new vault.
+await (await guard.lockTerms(vaultAddress)).wait();
+const termsHash = await guard.termsHash(vaultAddress);
 
 const addresses = {
   chainId: network.chainId.toString(),
@@ -95,7 +101,8 @@ const addresses = {
   DeterministicMockVenue: await venue.getAddress(),
   MockVenueAdapter: adapterAddress,
   MandateVault: vaultAddress,
-  BatchAllocator: await batch.getAddress()
+  BatchAllocator: await batch.getAddress(),
+  termsHash
 };
 fs.writeFileSync(
   path.join(root, "contracts/deployments.latest.json"),

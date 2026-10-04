@@ -4,9 +4,15 @@ contracts/artifacts-local/
 contracts/cache/
 contracts/out/
 contracts/broadcast/
+# Foundry: forge's own build cache (root-level, distinct from contracts/cache
+# above). contracts/lib/forge-std is a git submodule, not ignored -- `.gitmodules`
+# plus foundry.lock pin it, and `forge install` (no args) fetches it in CI.
+/cache/
 .env
 .env.local
 .env.*
 !.env.example
 contracts/deployments.latest.json
 .DS_Store
+# rehearsal deployments against a local node; real networks are committed
+web/deployments/31337.json

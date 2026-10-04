@@ -1,0 +1,30 @@
+# Mandate live demo as a systemd service.
+#
+#   sudo useradd -r -m -d /opt/mandate -s /usr/sbin/nologin mandate   # once
+#   sudo -u mandate git clone https://github.com/jiwon000/mandate /opt/mandate
+#   cd /opt/mandate && sudo -u mandate npm ci && sudo -u mandate npm run compile
+#   sudo -u mandate cp .env.example .env && sudo -u mandate chmod 600 .env   # fill MONAD_RPC_URL, DEMO_MNEMONIC, DEMO_ADMIN_TOKEN
+#   sudo -u mandate -- env $(grep -v '^#' .env | xargs) npm run deploy:demo     # once per deployment
+#   sudo cp deploy/systemd/mandate-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mandate-web
+#   journalctl -u mandate-web -f
+#
+# Put a TLS reverse proxy (caddy, nginx) in front of port 3000 for a public URL.
+[Unit]
+Description=Mandate demo (live RPC mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mandate
+WorkingDirectory=/opt/mandate
+EnvironmentFile=/opt/mandate/.env
+Environment=PORT=3000
+ExecStart=/usr/bin/env node web/server.mjs --live
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

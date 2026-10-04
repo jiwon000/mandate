@@ -4,11 +4,19 @@
   "type": "module",
   "scripts": {
     "web": "node web/server.mjs",
+    "web:live": "node --env-file-if-exists=.env web/server.mjs --live",
     "compile": "node contracts/tools/compile.mjs",
+    "test": "npm run test:contracts && npm run test:web",
     "test:contracts": "node --test contracts/test-js/*.test.mjs",
-    "deploy:monad": "node contracts/script/deploy.mjs",
-    "keeper:monad": "node contracts/script/keeper.mjs",
+    "test:web": "node --test web/*.test.mjs",
+    "test:invariant": "forge test",
+    "deploy:monad": "node --env-file-if-exists=.env contracts/script/deploy.mjs",
+    "deploy:demo": "node --env-file-if-exists=.env contracts/script/deploy-demo.mjs",
+    "keeper:monad": "node --env-file-if-exists=.env contracts/script/keeper.mjs",
     "clean": "hardhat clean"
+  },
+  "engines": {
+    "node": ">=22.14"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.0",

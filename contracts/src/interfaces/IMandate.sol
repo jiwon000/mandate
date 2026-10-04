@@ -17,6 +17,27 @@ struct RiskLimits {
     uint256 maxPositionNotional;
     uint256 maxTotalNotional;
     uint256 maxBlockNotional;
+    /// @notice Window of the guard's realised-volatility estimate, in seconds.
+    ///         0 disables the estimate and the pre-trade stress check with it.
+    /// @dev The guard keeps an exponentially weighted variance of the mark's return
+    ///      per second, fed by every price it observes: observe(), poke() and trades.
+    ///      Appended after the original eight fields so `termsHash` of an older
+    ///      configuration is not silently re-ordered.
+    uint32 volWindowSeconds;
+    /// @notice Horizon of the stress move, in seconds: how long the position could sit
+    ///         before anyone reacts to it. On a chain where poke() can land every
+    ///         block this is short; it is the reaction time the allocator accepts.
+    uint32 stressHorizonSeconds;
+    /// @notice Size of the stress move in tenths of a sigma (30 = a 3-sigma move).
+    uint16 stressSigmasX10;
+}
+
+/// @notice Declared, not enforced: MandateVault has no fee-deduction mechanism in
+///         v1. This is metadata an allocator can read before funding a mandate
+///         (via MandateRegistry), not a charge the vault actually makes.
+struct FeeTerms {
+    uint16 performanceFeeBps;
+    uint16 managementFeeBps;
 }
 
 struct TradePreview {
@@ -31,6 +52,12 @@ struct TradePreview {
 interface IMandateVaultView {
     function totalAssets() external view returns (uint256);
     function totalSupply() external view returns (uint256);
+
+    /// @notice The one RiskGuard this vault actually trusts, fixed at construction.
+    /// @dev MandateRegistry.registerAgent() reads this instead of taking a `guard`
+    ///      argument, so a caller cannot point registration at a fake guard that
+    ///      just answers every check with "yes" (2026-10-04 security review).
+    function riskGuard() external view returns (IRiskGuard);
 }
 
 interface IMandateVaultFreeze {
@@ -44,11 +71,25 @@ interface IVenueAdapter {
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional);
 
+    /// @notice Close `fractionBps` of the vault's open position at the venue, reduce-only.
+    /// @dev Vault-only. The adapter derives the closing order from the position it can
+    ///      see, so the caller never has to know the venue's units or direction. Fills
+    ///      worse than the adapter's slippage bound against the current mark revert.
+    ///      `closedNotional` is what came off the book at the fill price.
+    function reduce(address vault, uint16 fractionBps)
+        external returns (uint256 closedNotional, int256 realizedPnl);
+
     /// @notice Vault equity marked to the venue's current price, in asset decimals.
     /// @dev equity = idle asset balance + unrealised PnL on the open position.
     ///      `markedAt` is the venue's own price timestamp, not block.timestamp, so a
     ///      stale feed cannot be laundered into a fresh-looking mark by a fast chain.
     function markEquity(address vault) external view returns (uint256 equity, uint256 markedAt);
+
+    /// @notice The venue's mark price for the market this vault trades, 1e18-scaled, with
+    ///         the venue's own timestamp for it.
+    /// @dev The guard's volatility estimate is built from this series. Equity would not
+    ///      do: a flat vault's equity is constant whatever the market does.
+    function markPrice(address vault) external view returns (uint256 priceE18, uint256 markedAt);
 }
 
 interface IRiskGuard {
@@ -62,4 +103,15 @@ interface IRiskGuard {
 
     /// @notice Revert unless a mark taken at `markedAt` is still fresh enough to price against.
     function requireFreshMark(address vault, uint256 markedAt) external view;
+
+    /// @notice True once the vault's limits and adapter allowlist can no longer change.
+    function termsLocked(address vault) external view returns (bool);
+
+    /// @notice keccak256 of the vault's configured limits, in RiskLimits field order.
+    /// @dev What MandateRegistry.registerAgent() checks a caller's claimed limits
+    ///      against, so a registry entry cannot disagree with the real terms.
+    function termsHash(address vault) external view returns (bytes32);
+
+    /// @notice True if `adapter` may be used to trade `vault`.
+    function adapterAllowed(address vault, address adapter) external view returns (bool);
 }

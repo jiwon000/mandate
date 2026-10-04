@@ -24,7 +24,28 @@ const state = {
   navSeries: new Map(),
   feed: [],
   lastScannedBlock: 0,
-  busy: false
+  busy: false,
+  batch: { status: null, escrow: 0n, claims: [] },
+  privacy: { status: null, onchainDigest: null },
+  // Live mode: the chain is a real network, the server signs for the demo
+  // accounts, and the oracle paces itself to whether anyone is watching.
+  live: false,
+  network: null,
+  oracle: null,
+  gas: null,
+  adminToken: new URLSearchParams(location.search).get("admin") ?? ""
+};
+
+const INTENT_TYPES = {
+  AllocationIntent: [
+    { name: "allocator", type: "address" },
+    { name: "vault", type: "address" },
+    { name: "amount", type: "uint256" },
+    { name: "minShares", type: "uint256" },
+    { name: "epoch", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" }
+  ]
 };
 
 // --- formatting ---------------------------------------------------------
@@ -113,6 +134,8 @@ async function boot() {
     venue: new ethers.Contract(addresses.venue, abis.venue, provider),
     adapter: new ethers.Contract(addresses.adapter, abis.adapter, provider),
     usdc: new ethers.Contract(addresses.usdc, abis.usdc, provider),
+    batch: new ethers.Contract(deployment.batch.address, abis.batch, provider),
+    registry: new ethers.Contract(deployment.registry.address, abis.registry, provider),
     vaults: deployment.vaults.map((v) => new ethers.Contract(v.address, abis.vault, provider))
   };
   state.eventInterfaces = [
@@ -121,20 +144,42 @@ async function boot() {
     new ethers.Interface(abis.venue)
   ];
 
-  $("#chainLabel").textContent = `Local EDR · chain ${deployment.chainId}`;
+  state.live = Boolean(deployment.live);
+  state.network = deployment.network ?? null;
+  $("#chainLabel").textContent = state.live
+    ? `${state.network?.label ?? "Live"} · chain ${deployment.chainId}`
+    : `Local EDR · chain ${deployment.chainId}`;
+  document.body.classList.toggle("live", state.live);
+  document.body.classList.toggle("admin", state.live && Boolean(state.adminToken));
   state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
 
   // Block cadence lives on the server, so a reload has to ask for it. Without
   // this the toggle snaps back to 1s while the chain is still mining every 12.
   const status = await (await fetch("/api/control")).json();
   state.blockTimeSeconds = status.blockTimeSeconds;
+  state.oracle = status.oracle ?? null;
+  state.gas = status.gas ?? null;
   $$("[data-blocktime]").forEach((button) =>
     button.classList.toggle("active", Number(button.dataset.blocktime) === state.blockTimeSeconds)
   );
 
   buildLeaderboardSkeleton();
+  updateSimulator();
   await refresh();
-  setInterval(() => refresh().catch(reportError), 900);
+  // A public RPC meters eth_call per request and a refresh is ~40 of them, so
+  // the live page polls at a third of the local pace.
+  setInterval(() => refresh().catch(reportError), state.live ? 2500 : 900);
+  if (state.live) {
+    setInterval(async () => {
+      try {
+        const next = await (await fetch("/api/control")).json();
+        state.oracle = next.oracle ?? null;
+        state.gas = next.gas ?? null;
+      } catch (ignored) {
+        // the next refresh reports the outage
+      }
+    }, 5000);
+  }
 }
 
 function reportError(error) {
@@ -157,7 +202,12 @@ async function refresh() {
     state.snapshot = await Promise.all(
       deployment.vaults.map(async (meta, index) => {
         const vault = contracts.vaults[index];
-        const [quote, totalAssets, totalSupply, agentState, position, mark, shares] =
+        // The stress tile answers one question: would the order the "inside
+        // mandate" button sends (0.7x of max leverage) pass the volatility clause
+        // right now? Quote it at that leverage.
+        const hasVol = Number(meta.limits.volWindowSeconds) > 0;
+        const stressLevX100 = Math.round(meta.limits.maxLeverageX100 * 0.7);
+        const [quote, totalAssets, totalSupply, agentState, position, mark, shares, unwindStepsDone, stress] =
           await Promise.all([
             contracts.guard.quote(meta.address, deployment.addresses.adapter),
             vault.totalAssets(),
@@ -165,7 +215,11 @@ async function refresh() {
             vault.state(),
             contracts.adapter.positionState(meta.address),
             contracts.adapter.markEquity(meta.address),
-            state.wallet ? vault.balanceOf(state.wallet) : Promise.resolve(0n)
+            state.wallet ? vault.balanceOf(state.wallet) : Promise.resolve(0n),
+            vault.unwindStepsDone(),
+            hasVol
+              ? contracts.guard.stressQuote(meta.address, deployment.addresses.adapter, stressLevX100)
+              : Promise.resolve([0n, 0n, 0n])
           ]);
 
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
@@ -190,9 +244,15 @@ async function refresh() {
           totalAssets,
           totalSupply,
           agentState: Number(agentState),
+          unwindStepsDone: Number(unwindStepsDone),
           positionNotional: position[0],
           equity6,
           levX100,
+          hasVol,
+          stressLevX100,
+          stressSigmaBps: Number(stress[0]),
+          stressMoveBps: Number(stress[1]),
+          stressedDrawdownBps: Number(stress[2]),
           userShares: shares
         };
       })
@@ -208,14 +268,21 @@ async function refresh() {
 
     await scanLogs();
     render();
+    await refreshBatch();
+    await refreshPrivacy();
   } finally {
     state.busy = false;
   }
 }
 
 async function scanLogs() {
-  const from = state.lastScannedBlock + 1;
+  let from = state.lastScannedBlock + 1;
   if (from > state.blockNumber) return;
+  // A public RPC answers getLogs for a bounded range only (100 blocks on Monad
+  // testnet, about 40 seconds). A tab that slept longer than that skips ahead:
+  // a gap in the feed, rather than a scan that fails on every refresh from then on.
+  const maxRange = state.deployment.logRangeBlocks;
+  if (maxRange && state.blockNumber - from > maxRange) from = state.blockNumber - maxRange;
   const addresses = [
     state.deployment.addresses.guard,
     ...state.deployment.vaults.map((v) => v.address)
@@ -229,7 +296,7 @@ async function scanLogs() {
 
   for (const log of logs) {
     const item = describeLog(log);
-    if (item) state.feed.unshift(item);
+    if (item) state.feed.unshift({ ...item, hash: log.transactionHash });
   }
   if (state.feed.length > 40) state.feed.length = 40;
 }
@@ -240,6 +307,11 @@ function vaultLabel(address) {
   );
   return match ? match.name : shortAddress(String(address));
 }
+
+// AgentState onchain: 0 Active, 1 Frozen, 2 Closed. Frozen still holds the
+// position; Closed means unwind() took it off the book and only cash is left.
+const STATE_NAMES = ["ACTIVE", "FROZEN", "CLOSED"];
+const stateName = (agentState) => STATE_NAMES[agentState] ?? "UNKNOWN";
 
 function describeLog(log) {
   for (const iface of state.eventInterfaces) {
@@ -286,6 +358,20 @@ function describeLog(log) {
           text: `${vaultLabel(log.address)} · agent frozen, bounty ${usdc(parsed.args.bounty)} mUSDC`,
           tag: "FROZEN",
           kind: "breach"
+        };
+      case "Unwound":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · unwind step ${parsed.args.step}/5 closed ${usd(parsed.args.closedNotional / ASSET_TO_E18)}, realised ${usd(parsed.args.realizedPnl / ASSET_TO_E18)} · bounty ${usdc(parsed.args.bounty)} mUSDC`,
+          tag: "UNWIND",
+          kind: "mark"
+        };
+      case "Closed":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · position fully closed, vault holds cash only`,
+          tag: "CLOSED",
+          kind: "pass"
         };
       case "Allocated":
         return {
@@ -351,12 +437,15 @@ function render() {
 function renderMarket() {
   const totalAum = state.snapshot.reduce((sum, v) => sum + v.totalAssets, 0n);
   const active = state.snapshot.filter((v) => v.agentState === 0).length;
+  const closed = state.snapshot.filter((v) => v.agentState === 2).length;
   $("#statAum").textContent = usd(totalAum);
   $("#statAumSub").textContent = `${state.snapshot.length} vaults, one venue`;
   $("#statMandates").textContent = String(active).padStart(2, "0");
-  $("#statMandatesSub").textContent = `${state.snapshot.length - active} frozen by RiskGuard`;
+  $("#statMandatesSub").textContent = `${state.snapshot.length - active - closed} frozen by RiskGuard${closed ? `, ${closed} closed` : ""}`;
   $("#statPrice").textContent = `$${Number(ethers.formatUnits(state.price, 18)).toFixed(2)}`;
-  $("#statPriceSub").textContent = `block #${state.blockNumber} · ${state.blockTimeSeconds}s cadence`;
+  $("#statPriceSub").textContent = state.live
+    ? `block #${state.blockNumber} · oracle every ${state.oracle?.cadenceSeconds ?? "–"}s`
+    : `block #${state.blockNumber} · ${state.blockTimeSeconds}s cadence`;
 
   for (const row of $$("#leaderboard .agent-row")) {
     const vault = state.snapshot[Number(row.dataset.index)];
@@ -376,8 +465,9 @@ function renderMarket() {
     // nobody has claimed yet is its own state - and the reason poke() pays.
     const breached = vault.agentState === 0 && (ddOver || levOver);
     const status = cell("state");
-    status.textContent = vault.agentState !== 0 ? "FROZEN" : breached ? "OVER LIMIT" : "ACTIVE";
-    status.classList.toggle("frozen", vault.agentState !== 0);
+    status.textContent = vault.agentState !== 0 ? stateName(vault.agentState) : breached ? "OVER LIMIT" : "ACTIVE";
+    status.classList.toggle("frozen", vault.agentState === 1);
+    status.classList.toggle("closed", vault.agentState === 2);
     status.classList.toggle("warn", breached);
     row.classList.toggle("selected", Number(row.dataset.index) === state.selected);
   }
@@ -386,7 +476,7 @@ function renderMarket() {
 function renderAgent() {
   const vault = state.snapshot[state.selected];
   $("#agentGlyph").textContent = vault.initials;
-  $("#agentEyebrow").textContent = `MANDATE · ${vault.agentState === 0 ? "ACTIVE" : "FROZEN"}`;
+  $("#agentEyebrow").textContent = `MANDATE · ${stateName(vault.agentState)}`;
   $("#agentName").textContent = vault.name;
   $("#agentThesis").textContent = `${vault.thesis} · ETH/USDC on DeterministicMockVenue`;
   $("#agentNav").textContent = nav4(vault.nav);
@@ -399,6 +489,10 @@ function renderAgent() {
   $("#agentAumSub").textContent = `${usdc(vault.totalSupply)} shares outstanding`;
   $("#agentAddress").textContent = vault.address;
   $("#agentKey").textContent = vault.agent;
+  // The hash the allocator is asked to accept. Locked onchain before the first
+  // deposit, so it cannot drift from what this page showed.
+  $("#agentTerms").textContent = `locked ${vault.termsHash.slice(0, 10)}…${vault.termsHash.slice(-6)}`;
+  $("#agentTerms").title = vault.termsHash;
 
   const rows = [
     ["Leverage", vault.levX100, vault.limits.maxLeverageX100, lev(vault.levX100), lev(vault.limits.maxLeverageX100)],
@@ -412,6 +506,15 @@ function renderAgent() {
     ],
     ["Mark age", vault.markAge, vault.limits.maxMarkAgeSeconds, `${vault.markAge}s`, `${vault.limits.maxMarkAgeSeconds}s`]
   ];
+  if (vault.hasVol) {
+    rows.push([
+      `Stressed drawdown (${stressLabel(vault)} at ${lev(vault.stressLevX100)})`,
+      vault.stressedDrawdownBps,
+      vault.limits.maxDrawdownBps,
+      pct(vault.stressedDrawdownBps),
+      pct(vault.limits.maxDrawdownBps)
+    ]);
+  }
   $("#agentLimits").innerHTML = rows
     .map(([label, used, limit, usedText, limitText]) => {
       const ratio = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
@@ -488,22 +591,33 @@ function renderAllocate() {
   const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
   const allocateButton = $("#allocateButton");
   allocateButton.disabled = frozen || stale;
-  allocateButton.textContent = stale
-    ? `Mark is ${vault.markAge}s old — nothing prices until it refreshes`
-    : frozen
-      ? "Frozen — allocate() is closed"
-      : "Review allocation";
+  const closed = vault.agentState === 2;
+  allocateButton.textContent = closed
+    ? "Closed — this mandate is over"
+    : stale
+      ? `Mark is ${vault.markAge}s old — nothing prices until it refreshes`
+      : frozen
+        ? "Frozen — allocate() is closed"
+        : "Review allocation";
   const withdrawButton = $("#withdrawButton");
   if (!withdrawButton.dataset.busy) {
-    withdrawButton.disabled = stale;
-    withdrawButton.textContent = stale
-      ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
-      : frozen
-        ? "Withdraw all shares (still open)"
-        : "Withdraw all shares";
+    // A Closed vault holds no position, so withdraw() skips the mark-age check.
+    withdrawButton.disabled = stale && !closed;
+    withdrawButton.textContent = closed
+      ? "Withdraw all shares (cash only, no mark needed)"
+      : stale
+        ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
+        : frozen
+          ? "Withdraw all shares (still open)"
+          : "Withdraw all shares";
   }
 
   updateAmount($("#allocationAmount").value);
+}
+
+// "3.0σ/120s": the size of move the mandate makes the agent survive.
+function stressLabel(vault) {
+  return `${(vault.limits.stressSigmasX10 / 10).toFixed(1)}σ/${vault.limits.stressHorizonSeconds}s`;
 }
 
 function renderRisk() {
@@ -515,32 +629,42 @@ function renderRisk() {
   $("#guardDd").dataset.digits = String(String(vault.drawdownBps).length);
   $("#guardDdLimit").textContent = `/ ${vault.limits.maxDrawdownBps} bps`;
 
-  const frozen = vault.agentState !== 0;
+  const frozen = vault.agentState === 1;
+  const closed = vault.agentState === 2;
   // Breaching a limit does not freeze anything on its own - the vault stays
   // Active until someone calls poke(). That unclaimed window is its own state
   // and the panel has to name it, or the page reads as if nothing happened.
   const ddOver = vault.drawdownBps > vault.limits.maxDrawdownBps;
   const levOver = Number.isFinite(vault.levX100) && vault.levX100 > vault.limits.maxLeverageX100;
-  const breached = !frozen && (ddOver || levOver);
+  const breached = vault.agentState === 0 && (ddOver || levOver);
+  // The volatility clause is the one limit that blocks before anything is lost:
+  // it only ever refuses an order, so it has its own line rather than a state.
+  const stressed = vault.agentState === 0 && vault.hasVol && vault.stressedDrawdownBps > vault.limits.maxDrawdownBps;
   const headline = $("#guardHeadline");
-  headline.textContent = frozen
-    ? "Agent frozen"
-    : breached
-      ? "Over the limit"
-      : stale
-        ? "Mark is stale"
-        : "Inside the mandate";
-  headline.classList.toggle("alarm", frozen || stale || breached);
-  $("#guardCopy").textContent = frozen
-    ? "execute() and allocate() are closed. withdraw() is not."
-    : breached
+  headline.textContent = closed
+    ? "Position closed"
+    : frozen
+      ? "Agent frozen"
+      : breached
+        ? "Over the limit"
+        : stale
+          ? "Mark is stale"
+          : "Inside the mandate";
+  headline.classList.toggle("alarm", frozen || (stale && !closed) || breached);
+  $("#guardCopy").textContent = closed
+    ? "unwind() took the whole position off the book. The vault holds cash plus whatever was realised, and withdraw() pays it out without waiting on a mark."
+    : frozen
+      ? `execute() and allocate() are closed. withdraw() is not. Anyone can call unwind() to close the position a fifth at a time (${vault.unwindStepsDone}/5 done) and take 0.01% for the gas.`
+      : breached
       ? `${ddOver ? `Drawdown is ${pct(vault.drawdownBps)} against a ${pct(vault.limits.maxDrawdownBps)} mandate` : `Leverage is ${lev(vault.levX100)} against a ${lev(vault.limits.maxLeverageX100)} mandate`}. Nothing freezes until someone calls poke() - and whoever does is paid for it.`
       : stale
         ? `The last mark is ${vault.markAge}s old and this mandate accepts ${vault.limits.maxMarkAgeSeconds}s. The guard will refuse to act on it.`
-        : "Every monitored limit is inside the terms the allocator accepted.";
+        : stressed
+          ? `Realised volatility is ${vault.stressSigmaBps} bps over ${vault.limits.stressHorizonSeconds}s. An order adding exposure at ${lev(vault.stressLevX100)} would sit ${pct(vault.stressedDrawdownBps)} under water after a ${stressLabel(vault)} move, past the ${pct(vault.limits.maxDrawdownBps)} mandate, so execute() refuses it with StressBreach. Reducing orders still pass; the estimate decays as calm marks arrive.`
+          : "Every monitored limit is inside the terms the allocator accepted.";
   const pill = $("#pillMark");
   pill.textContent = `mark ${vault.markAge}s / ${vault.limits.maxMarkAgeSeconds}s`;
-  pill.classList.toggle("stale", stale);
+  pill.classList.toggle("stale", stale && !closed);
 
   const tile = (id, bar, value, used, limit, limitText) => {
     $(id).textContent = value;
@@ -559,14 +683,39 @@ function renderRisk() {
   );
   tile("#tileDd", "#barDd", pct(vault.drawdownBps), vault.drawdownBps, vault.limits.maxDrawdownBps, `Limit ${pct(vault.limits.maxDrawdownBps)}`);
   tile("#tileAge", "#barAge", `${vault.markAge}s`, vault.markAge, vault.limits.maxMarkAgeSeconds, `Limit ${vault.limits.maxMarkAgeSeconds}s`);
+  if (vault.hasVol) {
+    tile(
+      "#tileStress",
+      "#barStress",
+      pct(vault.stressedDrawdownBps),
+      vault.stressedDrawdownBps,
+      vault.limits.maxDrawdownBps,
+      `Limit ${pct(vault.limits.maxDrawdownBps)} · ${stressLabel(vault)} = ${vault.stressMoveBps} bps at ${lev(vault.stressLevX100)}`
+    );
+  } else {
+    tile("#tileStress", "#barStress", "—", 0, 0, "No volatility clause in this mandate");
+  }
 
   $("#pokeButton").textContent = `poke(${vault.name}) — prove the breach, take the bounty`;
+  // unwind() only has work to do on a Frozen vault. Keep the button honest about
+  // that instead of letting it revert with NotFrozen, but never steal it back
+  // from a call that is still in flight.
+  const unwindButton = $("#unwindButton");
+  if (!unwindButton.dataset.busy) {
+    unwindButton.disabled = !frozen;
+    unwindButton.textContent = closed
+      ? `unwind(${vault.name}) — already closed`
+      : frozen
+        ? `unwind(${vault.name}) — step ${vault.unwindStepsDone + 1}/5, close a fifth, take 0.01%`
+        : `unwind(${vault.name}) — needs a frozen vault`;
+  }
 
   const unenforceable = state.snapshot.filter(
     (v) => v.limits.maxMarkAgeSeconds < state.blockTimeSeconds
   );
-  $("#blocktimeNote").textContent =
-    state.blockTimeSeconds === 1
+  $("#blocktimeNote").textContent = state.live
+    ? liveNote()
+    : state.blockTimeSeconds === 1
       ? "Block cadence 1s. Every mandate on this page can be re-marked inside its own mark-age limit."
       : `Block cadence 12s: the oracle cannot re-stamp a mark more often than a block arrives. ${
           unenforceable.length
@@ -574,14 +723,283 @@ function renderRisk() {
             : "Mandates with short mark-age limits become unenforceable."
         }`;
 
+  const explorer = state.network?.explorer;
   $("#eventFeed").innerHTML = state.feed
     .slice(0, 14)
     .map(
       (item) =>
-        `<div class="feed-item ${item.kind}"><time>${item.at}</time><span>${item.text}</span><b>${item.tag}</b></div>`
+        `<div class="feed-item ${item.kind}"><time>${
+          explorer && item.hash ? `<a href="${explorer}/tx/${item.hash}" target="_blank" rel="noopener">${item.at}</a>` : item.at
+        }</time><span>${item.text}</span><b>${item.tag}</b></div>`
     )
     .join("");
 }
+
+// --- batch allocation -----------------------------------------------------
+// The next epoch boundary this wallet's signature should target. A few
+// seconds of buffer before an epoch ends avoids a slow click landing an
+// intent in an epoch that is already unsettleable by the time it is signed.
+function targetEpoch() {
+  const b = state.deployment.batch;
+  if (!b) return 0;
+  const idx = Math.max(0, Math.floor((state.chainTime - b.genesis) / b.epochDuration));
+  const end = b.genesis + (idx + 1) * b.epochDuration;
+  return end - state.chainTime < 3 ? idx + 1 : idx;
+}
+
+async function refreshBatch() {
+  if (!state.deployment?.batch) return;
+  try {
+    state.batch.status = await (await fetch("/api/batch/status")).json();
+    if (state.wallet) {
+      state.batch.escrow = await state.contracts.batch.escrowOf(state.wallet);
+      state.batch.claims = await (
+        await fetch(`/api/batch/claims?address=${state.wallet}`)
+      ).json();
+    } else {
+      state.batch.escrow = 0n;
+      state.batch.claims = [];
+    }
+    renderBatch();
+  } catch (error) {
+    console.error("[batch]", error);
+  }
+}
+
+function renderBatch() {
+  if (!state.snapshot.length || !state.batch.status) return;
+  const vault = state.snapshot[state.selected];
+  const status = state.batch.status;
+  $("#batchVaultLabel").textContent = vault.name;
+  $("#batchEscrow").textContent = state.wallet
+    ? `${usdc(state.batch.escrow)} mUSDC escrowed`
+    : "Connect allocator to read escrow";
+  $("#batchEpoch").textContent = String(status.currentEpoch);
+  $("#batchEpochEnd").textContent = new Date(status.currentEpochEnd * 1000).toLocaleTimeString();
+  $("#batchDeadline").textContent = `${status.settlementWindow}s to settle after each epoch ends`;
+  $("#intentTargetEpoch").textContent = `epoch ${targetEpoch()}`;
+
+  $("#pendingIntents").innerHTML = status.pending.length
+    ? status.pending
+        .map(
+          (p) =>
+            `<div><b>${String(p.epoch).padStart(2, "0")}</b><span>${usdc(BigInt(p.amount))} mUSDC → ${vaultLabel(p.vault)}</span><em>${shortAddress(p.allocator)}</em></div>`
+        )
+        .join("")
+    : `<div><b>—</b><span>No signed intents waiting</span><em></em></div>`;
+
+  $("#claimList").innerHTML = state.batch.claims.length
+    ? state.batch.claims
+        .map(
+          (c, i) =>
+            `<div class="modal-row"><span>${vaultLabel(c.intent.vault)}</span><b>${usdc(BigInt(c.intent.amount))} mUSDC paid in</b><button class="button button-secondary" data-claim="${i}">claimShares()</button></div>`
+        )
+        .join("")
+    : `<p class="disclosure">Nothing settled for this wallet yet.</p>`;
+}
+
+$("#depositEscrowButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "approve()…", async (button) => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const amount = ethers.parseUnits(String(Number($("#escrowAmount").value) || 0), 6);
+    if (amount === 0n) throw new Error("amount must be greater than zero");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.usdc.connect(signer).approve(state.deployment.batch.address, amount)).wait();
+    button.textContent = "depositEscrow()…";
+    await (await state.contracts.batch.connect(signer).depositEscrow(amount)).wait();
+    showToast(`Deposited ${usdc(amount)} mUSDC to batch escrow`);
+  })
+);
+
+$("#withdrawEscrowButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "withdrawEscrow()…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const escrow = await state.contracts.batch.escrowOf(state.wallet);
+    if (escrow === 0n) throw new Error("no escrow to withdraw");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.batch.connect(signer).withdrawEscrow(escrow)).wait();
+    showToast(`Withdrew ${usdc(escrow)} mUSDC from batch escrow`);
+  })
+);
+
+$("#signIntentButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "signing…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const vault = state.snapshot[state.selected];
+    const amount = ethers.parseUnits(String(Number($("#intentAmount").value) || 0), 6);
+    if (amount === 0n) throw new Error("amount must be greater than zero");
+
+    const b = state.deployment.batch;
+    const epoch = targetEpoch();
+    const deadline = b.genesis + (epoch + 1) * b.epochDuration + b.settlementWindow;
+    // Same estimate updateAmount() uses for the instant Allocate screen, with a
+    // 1% tolerance: the epoch's net price is not known until settlement runs.
+    const estimatedShares =
+      vault.totalSupply === 0n || vault.equity6 === 0n
+        ? amount
+        : (amount * vault.totalSupply) / vault.equity6;
+    const minShares = estimatedShares > 1n ? (estimatedShares * 99n) / 100n : 1n;
+
+    const intent = {
+      allocator: state.wallet,
+      vault: vault.address,
+      amount: amount.toString(),
+      minShares: minShares.toString(),
+      epoch: String(epoch),
+      nonce: String(Date.now()),
+      deadline: String(deadline)
+    };
+    const domain = {
+      name: "MandateBatchAllocator",
+      version: "1",
+      chainId: state.deployment.chainId,
+      verifyingContract: b.address
+    };
+    const signer = await state.provider.getSigner(state.wallet);
+    const signature = await signer.signTypedData(domain, INTENT_TYPES, intent);
+
+    const response = await fetch("/api/batch/intent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ intent, signature })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "intent rejected");
+    showToast(
+      result.duplicate
+        ? "Already queued"
+        : `Intent queued for epoch ${epoch} — ${usdc(amount)} mUSDC into ${vault.name}`
+    );
+  })
+);
+
+$("#settleBatchButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "settleEpoch()…", async () => {
+    const response = await fetch("/api/batch/settle", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "settlement failed");
+    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)`);
+  })
+);
+
+$("#claimList").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-claim]");
+  if (!button) return;
+  const entry = state.batch.claims[Number(button.dataset.claim)];
+  withButton(button, "claimShares()…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.batch.connect(signer).claimShares(entry.intent, entry.proof)).wait();
+    showToast(`Claimed shares from ${usdc(BigInt(entry.intent.amount))} mUSDC paid into ${vaultLabel(entry.intent.vault)}`);
+  });
+});
+
+// --- DP reporter / privacy screen ----------------------------------------
+const pct2 = (fraction) => `${(fraction * 100).toFixed(2)}%`;
+const E6 = 1_000_000;
+
+// Same report-noisy-mean sensitivity the real reporter uses
+// (reporter/stats.mjs's laplaceScaleForMean): sensitivity of the mean of N
+// values clipped to [-c, c] is 2c/N, and Laplace scale = sensitivity/epsilon.
+function laplaceScaleForMean(clipBound, sampleSize, epsilon) {
+  if (sampleSize === 0 || epsilon === 0) return Infinity;
+  return (2 * clipBound) / (sampleSize * epsilon);
+}
+
+async function refreshPrivacy() {
+  if (!state.deployment?.registry) return;
+  try {
+    state.privacy.status = await (await fetch("/api/reporter/status")).json();
+    const status = state.privacy.status;
+    if (status.hasReleased) {
+      // Don't just trust the server's JSON: read the same release back from
+      // the contract directly and compare. Every other screen in this app
+      // reads the chain for its numbers; this one should too.
+      const onchain = await state.contracts.registry.releaseOf(BigInt(status.lastEpoch));
+      state.privacy.onchainDigest = onchain.statsDigest;
+    } else {
+      state.privacy.onchainDigest = null;
+    }
+    renderPrivacy();
+  } catch (error) {
+    console.error("[privacy]", error);
+  }
+}
+
+function renderPrivacy() {
+  const status = state.privacy.status;
+  if (!status) return;
+  const cumulative = Number(status.cumulativeEpsilonE6) / E6;
+  const cap = Number(status.epsilonCap) / E6;
+  $("#pubEpoch").textContent = status.hasReleased ? status.lastEpoch : "—";
+  $("#pubCumulative").textContent = `ε ${cumulative.toFixed(2)}`;
+  $("#pubCap").textContent = cap > 0 ? `ε ${cap.toFixed(2)}` : "no cap";
+  $("#pubSampleSize").textContent = status.hasReleased
+    ? String(status.lastRelease.published.sampleSize)
+    : `${status.sampleSize} collecting…`;
+
+  const badge = $("#publishedBadge");
+  if (!status.hasReleased) {
+    badge.textContent = "NO RELEASE YET";
+    badge.classList.remove("stale");
+  } else {
+    const verified = state.privacy.onchainDigest === status.lastRelease.statsDigest;
+    badge.textContent = verified ? "VERIFIED ONCHAIN" : "DIGEST MISMATCH";
+    badge.classList.toggle("stale", !verified);
+  }
+
+  if (status.hasReleased) {
+    const r = status.lastRelease.published;
+    $("#pubMean").textContent = pct2(r.noisyMean);
+    $("#pubSharpe").textContent = r.noisySharpe.toFixed(2);
+    $("#pubMaxDD").textContent = pct2(r.noisyMaxDrawdown);
+    $("#pubDigest").textContent = status.lastRelease.statsDigest;
+    $("#pubDigest").title = `tx ${status.lastRelease.txHash}`;
+  } else {
+    $("#pubMean").textContent = "—";
+    $("#pubSharpe").textContent = "—";
+    $("#pubMaxDD").textContent = "—";
+    $("#pubDigest").textContent = "0x…";
+  }
+
+  const button = $("#publishReleaseButton");
+  if (!button.dataset.busy) {
+    const ready = status.sampleSize >= 3;
+    button.disabled = !ready;
+    button.textContent = ready
+      ? `postLeaderboard() — epoch ${status.nextEpoch}`
+      : `postLeaderboard() — need ${3 - status.sampleSize} more sample(s)`;
+  }
+}
+
+$("#publishReleaseButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "building release…", async (button) => {
+    button.textContent = "postLeaderboard()…";
+    const response = await fetch("/api/reporter/publish", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "release rejected");
+    showToast(
+      `Epoch ${result.epoch} published — cumulative ε ${(Number(result.cumulativeEpsilonE6) / E6).toFixed(2)}, ${result.published.sampleSize} samples`
+    );
+  })
+);
+
+// Privacy Simulator: pure client-side, synthetic data, same formula as the
+// real reporter. No fetch, no contract call -- structurally incapable of
+// consuming real epsilon budget, not just conventionally forbidden from it.
+const SIM_MEAN_ESTIMATE = 0.05;
+const SIM_SAMPLE_SIZE = 200;
+function updateSimulator() {
+  const slider = $("#simEpsilonSlider");
+  const epsilon = Number(slider.value);
+  $("#simEpsilonValue").textContent = epsilon.toFixed(2);
+  const clipBound = state.deployment?.registry?.clipBound ?? 0.1;
+  const scale = laplaceScaleForMean(clipBound, SIM_SAMPLE_SIZE, epsilon);
+  const halfWidth = scale * Math.log(20); // 95% two-sided CI for Laplace(0, scale)
+  $("#simScale").textContent = scale.toFixed(4);
+  $("#simCI").textContent = `${pct2(SIM_MEAN_ESTIMATE - halfWidth)} to ${pct2(SIM_MEAN_ESTIMATE + halfWidth)}`;
+}
+$("#simEpsilonSlider").addEventListener("input", updateSimulator);
 
 // --- routing ------------------------------------------------------------
 function route(name) {
@@ -659,7 +1077,7 @@ $("#walletButton").addEventListener("click", async (event) => {
   await refresh();
   const balance = await state.contracts.usdc.balanceOf(address);
   $("#walletBalance").textContent = `Balance ${usdc(balance)} mUSDC`;
-  showToast(`Allocator ${shortAddress(address)} connected to the local chain`);
+  showToast(`Allocator ${shortAddress(address)} connected to ${state.live ? state.network?.label ?? "the live chain" : "the local chain"}`);
 });
 
 // --- allocation ---------------------------------------------------------
@@ -739,7 +1157,9 @@ $("#withdrawButton").addEventListener("click", (event) =>
         ? `Paid out to the cash on hand — ${usdc(left)} shares stay until the agent frees up more`
         : vault.agentState === 0
           ? "Withdrawn"
-          : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
+          : vault.agentState === 2
+            ? "Withdrawn from a closed vault — cash plus realised PnL, no mark needed"
+            : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
     );
     $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
   })
@@ -769,6 +1189,20 @@ $("#runViolation").addEventListener("click", (event) =>
   })
 );
 
+$("#reduceOrder").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "execute()…", async () => {
+    const vault = state.snapshot[state.selected];
+    if (vault.positionNotional === 0n || state.price === 0n) throw new Error("nothing on the book to reduce");
+    const currentSize = (vault.positionNotional * ONE) / state.price;
+    const delta = -(currentSize / 5n);
+    if (delta === 0n) throw new Error("position too small to split");
+    const signer = await state.provider.getSigner(vault.agent);
+    const contract = state.contracts.vaults[state.selected].connect(signer);
+    await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
+    showToast(`${vault.name} cut a fifth of its position. Orders that reduce exposure are never stress-tested.`);
+  })
+);
+
 $("#pokeButton").addEventListener("click", (event) =>
   withButton(event.currentTarget, "poke()…", async () => {
     const vault = state.snapshot[state.selected];
@@ -786,12 +1220,52 @@ $("#pokeButton").addEventListener("click", (event) =>
   })
 );
 
+$("#unwindButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "unwind()…", async () => {
+    const vault = state.snapshot[state.selected];
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const before = await state.contracts.usdc.balanceOf(caller);
+    const signer = await state.provider.getSigner(caller);
+    const contract = state.contracts.vaults[state.selected].connect(signer);
+    const receipt = await (await contract.unwind()).wait();
+    const after = await state.contracts.usdc.balanceOf(caller);
+    const closed = receipt.logs.some((log) => {
+      try {
+        return contract.interface.parseLog(log)?.name === "Closed";
+      } catch (ignored) {
+        return false;
+      }
+    });
+    const [remaining] = await state.contracts.adapter.positionState(vault.address);
+    showToast(
+      closed
+        ? `${vault.name} is closed. Nothing is left on the book; ${shortAddress(caller)} took ${usdc(after - before)} mUSDC for the last step.`
+        : `Step done. ${usd(remaining / ASSET_TO_E18)} of ${vault.name} still open; ${shortAddress(caller)} was paid ${usdc(after - before)} mUSDC.`
+    );
+  })
+);
+
+function liveNote() {
+  const oracle = state.oracle;
+  const where = state.network?.label ?? "a live network";
+  if (!oracle) return `Live on ${where}. Blocks arrive at the chain's own pace; the oracle is a transaction, not a block hook.`;
+  const spent = Number(oracle.spentMon ?? 0).toFixed(2);
+  return (
+    `Live on ${where}. Every click here is a real transaction signed by a demo key the server holds; nothing to install. ` +
+    `The oracle re-marks every ${oracle.cadenceSeconds}s right now (${
+      oracle.active ? "someone is watching" : "idle pace"
+    }; ${oracle.pushes} marks, ${spent} MON of gas so far)` +
+    (oracle.lastError ? `. Last oracle error: ${oracle.lastError}` : ".") +
+    (state.gas?.warning ? ` Heads up: ${state.gas.warning}; a click may be refused until that clears.` : "")
+  );
+}
+
 // --- chain controls -----------------------------------------------------
 async function control(op, value) {
   const response = await fetch("/api/control", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ op, value })
+    body: JSON.stringify({ op, value, token: state.adminToken })
   });
   if (!response.ok) throw new Error((await response.json()).error);
   return response.json();
@@ -838,13 +1312,20 @@ $("#redeployButton").addEventListener("click", (event) =>
     state.contracts.venue = new ethers.Contract(deployment.addresses.venue, deployment.abis.venue, state.provider);
     state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
     state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
+    state.contracts.batch = new ethers.Contract(deployment.batch.address, deployment.abis.batch, state.provider);
+    state.contracts.registry = new ethers.Contract(deployment.registry.address, deployment.abis.registry, state.provider);
     state.contracts.vaults = deployment.vaults.map(
       (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
     );
     state.navSeries.clear();
     state.feed = [];
     state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
+    // A redeploy is a fresh BatchAllocator/MandateRegistry at fresh addresses;
+    // anything signed or settled against the old ones no longer applies.
+    state.batch = { status: null, escrow: 0n, claims: [] };
+    state.privacy = { status: null, onchainDigest: null };
     buildLeaderboardSkeleton();
+    updateSimulator();
     showToast("Fresh contracts deployed. Four mandates live again.");
   })
 );

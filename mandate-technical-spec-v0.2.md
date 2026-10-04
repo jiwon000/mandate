@@ -62,7 +62,15 @@ struct RiskLimits {
     uint256 maxPositionNotional;
     uint256 maxTotalNotional;
     uint256 maxBlockNotional;
+    uint32 volWindowSeconds;      // 실현 변동성 추정치의 기억 길이(초). 0 = 변동성 조항 없음
+    uint32 stressHorizonSeconds;  // 스트레스 이동을 잡는 기간(초)
+    uint16 stressSigmasX10;       // 견뎌야 하는 이동, 0.1 sigma 단위 (30 = 3 sigma)
 }
+```
+
+세 변동성 필드는 뒤에 붙였다. `termsHash`가 필드 순서대로의 `abi.encode`이므로 순서를 바꾸면 기존 해시가 깨진다. `configure()`는 `volWindowSeconds != 0`인데 horizon이나 sigma가 0이면 `InvalidStressTerms`로 거부한다.
+
+```solidity
 
 struct FeeTerms {
     uint16 perfFeeBps;
@@ -83,9 +91,12 @@ interface IMandateVault {
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
     event PerfFeeAccrued(uint256 amount, uint256 highWater);
 
+    /// RiskGuard에서 조건이 잠기기 전에는 TermsNotLocked로 revert한다 (3.4의 7번).
     function allocate(uint256 assets, address receiver) external returns (uint256 shares);
     function withdraw(uint256 shares, address receiver) external returns (uint256 assets);
     function execute(address adapter, bytes calldata order) external;
+    /// 동결된 vault의 포지션을 누구나 5단계로 줄인다. 다 줄이면 Closed.
+    function unwind() external returns (bool closed);
 }
 ```
 
@@ -114,6 +125,12 @@ interface IVenueAdapter {
 
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional);
+
+    /// 현재 포지션의 fractionBps만큼을 reduce-only로 닫는다. vault만 호출한다.
+    /// 어댑터가 보이는 포지션에서 닫는 주문을 만들므로 호출자는 venue 단위·방향을 몰라도 된다.
+    /// mark 대비 슬리피지 상한(mock: 1%)보다 나쁜 체결은 revert한다.
+    function reduce(address vault, uint16 fractionBps)
+        external returns (uint256 closedNotional, int256 realizedPnl);
 
     /// 현금 + 미실현 손익을 venue 가격으로 평가한 지분 가치. markedAt은 venue의 가격 시각.
     function markEquity(address vault)
@@ -155,6 +172,9 @@ execute request
 3. 거래 사이의 검사: 누구나 `MandateRiskGuard.poke(vault, adapter)`를 호출할 수 있다. NAV/share가 고점 대비 `maxDrawdownBps`보다 더 떨어져 있으면 vault를 `Frozen`으로 전환하고, vault가 호출자에게 자산의 `POKE_BOUNTY_BPS`(0.05%)를 바운티로 지급한다. 신뢰된 keeper가 필요 없다.
 4. mark age: `block.timestamp > markedAt + maxMarkAgeSeconds`이면 execute·allocate·withdraw·poke 모두 `MarkTooOld`로 revert한다. mark가 갱신되면 풀린다.
 5. Frozen 상태: 신규 execute/allocate는 차단하고 allocator withdrawal과 `transferShares`는 유지한다.
+6. Frozen 이후 청산 [구현 기준 2026-09-23]: 동결은 에이전트를 멈출 뿐 포지션을 닫지 않으므로 손실은 계속 커질 수 있다. 누구나 `MandateVault.unwind()`를 호출할 수 있다. 한 번 호출할 때마다 어댑터의 `reduce()`로 동결 시점 크기의 1/5을 reduce-only로 닫고(잔여분의 2000·2500·3333·5000·10000 bps 순, 마지막은 전량), venue mark 대비 `MAX_UNWIND_SLIPPAGE_BPS`(1%) 안에서만 체결하며, 호출자에게 현금의 `UNWIND_BOUNTY_BPS`(0.01%)를 지급한다. 블록당 한 단계(`UnwindCooldown`). 포지션이 0이 되면 `Frozen -> Closed`로 전이하고 `Closed` 이벤트를 낸다. Closed에서는 execute·allocate·unwind가 모두 revert하고, withdraw는 mark age 검사를 건너뛴다(포지션이 없으니 가격이 지분 가치를 바꾸지 못한다). Hyperliquid가 인출 증거금 부족 시 20%씩 닫는 방식을 따랐다.
+7. 조건 잠금 [구현 기준 2026-09-23]: `MandateRiskGuard.lockTerms(vault)`는 owner만 부를 수 있고 되돌릴 수 없다. 잠긴 뒤에는 `configure()`와 `setAdapter()`가 `LimitsLocked`로 revert하고, 잠기기 전에는 `MandateVault.allocate()`가 `TermsNotLocked`로 revert한다. 돈은 owner가 더는 고칠 수 없는 조건 뒤로만 들어간다. `termsHash(vault)`는 `RiskLimits`를 필드 순서대로 `abi.encode`한 keccak256이고 `TermsLocked(vault, termsHash)` 이벤트에 실린다. timelock이나 수정 경로는 없다. 조건이 다르면 새 vault다. 3.7 Registry release가 생기면 이 해시를 앵커한다.
+8. 변동성 조항 [구현 기준 2026-09-23]: guard는 vault마다 `VolState{lastPriceE18, lastPriceAt, varRatePerSecond}`를 둔다. 새 mark가 들어오면(`checkAndConsumeBefore`, `checkAfter`, `poke`, 그리고 누구나 부를 수 있는 `observe(vault, adapter)`) 직전 mark 대비 수익률 `r = |p1 - p0| / p0`(상한 1000%)의 제곱을 경과 초 `dt`로 가중해 `v' = (window * v + r^2) / (window + dt)`로 갱신한다. 첫 mark는 가격만 기록하고, 이미 본 mark(`markedAt <= lastPriceAt`)나 가격 0은 무시한다. 총 노출을 늘리는 주문(`expectedTotalNotional > 현재 totalNotional`)에 한해, `sigmaBps = sqrt(v * stressHorizonSeconds)`, `moveBps = sigmaBps * stressSigmasX10 / 10`, 주문 후 레버리지(`expectedLeverageX100`, 상한 10000x)에서의 손실 `lossBps = lev * moveBps / 100`을 현재 NAV/share에 적용한 값을 `max(고점, 현재)` 대비 drawdown으로 환산해 `maxDrawdownBps`를 넘으면 `StressBreach(sigmaBps, moveBps, stressedDrawdownBps)`로 revert한다. 검사 순서는 레버리지 한도 뒤, 쿨다운·블록 노셔널 앞이다. 줄이는 주문은 검사하지 않고, 어떤 경우에도 동결하지 않는다. `stressQuote(vault, adapter, leverageX100)`는 같은 세 값을 view로 돌려주되 아직 반영 안 된 mark를 투영해서 계산한다(쓰지 않음). `volWindowSeconds = 0`이면 추정치도 검사도 없다. 이 조항은 drawdown 한도를 두 번 집행하는 셈이다: 사후에는 `poke()`와 동결로, 사전에는 지금 테이프가 감당 못 할 노출을 늘리는 주문의 거절로.
 
 [구현 기준 2026-09-22] v0.2의 `recordRejectedOrder`·`maxConsecutiveRejects`·guardian `freezeAgent`·`ExecutionRelay` 경로는 폐기했다. 거부 횟수는 온체인 상태가 아니라 증거 제출 문제를 만들었고, mark-to-market 검사가 같은 목적을 온체인 상태만으로 달성한다.
 
@@ -245,6 +265,8 @@ interface IMandateRegistry {
 
 epoch와 pinnedBlock은 단조 증가해야 하며 동일 epoch의 digest 교체를 금지한다.
 
+[구현 기준 2026-10-04, 2026-10-04 보안 리뷰로 수정] `contracts/src/MandateRegistry.sol`로 구현했다. `registerAgent`는 `limits`를 그대로 신뢰하지 않고 `keccak256(abi.encode(limits)) == guard.termsHash(vault)`로 대조하고 `guard.adapterAllowed(vault, adapter)`도 확인한다 — 둘 다 `IRiskGuard` 인터페이스에 `termsHash`/`adapterAllowed`를 추가해서 가능해졌다. `guard`는 **호출자가 넘기는 파라미터가 아니라 `vault.riskGuard()`에서 직접 읽는다.** 처음 구현 때는 `guard`를 파라미터로 받고 내부 일관성만 체크했는데, 공격자가 아무 체크에나 "통과"로 답하는 가짜 guard 컨트랙트를 배포해서 실제 vault의 1회용 등록 슬롯을 조작된 정보로 영구 점유할 수 있었다(보안 리뷰에서 발견, `docs/security-review-2026-10-04.md`). `fees`(`FeeTerms`)와 `modelHash`는 온체인에 대조할 근거가 없는 선언적 값이라, `registerAgent`는 permissionless가 아니라 **guard의 owner만** 호출할 수 있다(`OnlyGuardOwner`) — 이미 vault 조건을 설정·잠근 바로 그 운영자다. `postLeaderboard`는 EIP-712(`MandateRegistry`, `"1"`)로 서명을 받고, `cumulativeEpsilonE6`가 이전 값과 두 ε 필드의 합에 정확히 일치해야 하며(단순 단조 증가가 아니라 가산이 맞아떨어지는지까지 검증), `pinnedBlock`이 `block.number`를 넘을 수 없다. 한 번도 릴리즈가 없었는지는 `epoch`/`pinnedBlock` 기본값 0과 구분하기 위한 `hasReleased` 플래그로 판단한다.
+
 ## 4. DP Reporter
 
 ### 4.1 DP 보장 범위
@@ -298,38 +320,17 @@ noiseSeed = HMAC_SHA256(
 
 Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라벨을 표시한다.
 
-## 5. FlyGraph 데모 에이전트
+[구현 기준 2026-10-04] `reporter/`로 §4.1~4.3의 "public settlement analytics"와 성과 리더보드 통계를 구현했다. 범위는 의도적으로 좁다: 이미 공개된 정산 금액·거래 수익률만 DP 집계하고, 비공개 watchlist와 정산 전 intent의 "private demand analytics"는 범위 밖이다 — 이 데모에 watchlist 기능 자체가 없어서 보호할 대상이 없기 때문이다(날조해서 익명화하는 것은 프라이버시 연극이지 보호가 아니다).
 
-초파리 커넥톰은 Mandate의 보안 근거가 아니라 범용적인 실행 제한을 보여주는 선택적 실험 에이전트다.
+메커니즘: 거래별 return을 `[-c,c]`로 clip하고, mean/Sharpe/marked max drawdown을 report-noisy-mean 민감도(`scale = 2c/(N·ε)`)를 쓰는 Laplace 메커니즘으로 noise 처리한다(ε만 추적하고 δ는 없으므로 pure-DP Laplace를 택했다 — 가우시안은 아니다). `reporter/epsilon.mjs`의 `EpsilonLedger`가 `MandateRegistry`와 **완전히 동일한** 단조 증가·가산 누적 검사를 먼저 통과시키므로, 빌드된 release는 온체인에서 거부될 수 없다(통합 테스트로 검증: `contracts/test-js/reporter.test.mjs`가 실제 `MandateRegistry.postLeaderboard()`에 서명된 release를 제출해서 받아들여지는 것까지 확인). `reporter/simulator.mjs`는 같은 `laplaceScaleForMean` 공식을 재사용하되 `EpsilonLedger`나 `reporterSecret`을 전혀 import하지 않는 별도 파일 — 4.4의 Simulator 분리를 "규칙"이 아니라 "구조"로 강제한다.
 
-정확한 설명:
+`statsVersion` 필드는 아직 UI/온체인에 노출되지 않았고(§6 불변식 9 참고), Published ε/Privacy Simulator 웹 화면은 2026-10-04에 `web/`의 Privacy 탭으로 연결됐다 — README "Privacy 화면 연결" 참고.
 
-> FlyGraph is a connectome-topology-inspired graph policy agent. It uses a fixed fly-derived graph as an inductive bias; it is not a biological brain simulation and is not assumed to be inherently risk-averse.
+## 5. 데모 에이전트
 
-### 입력 및 출력
+[2026-10-04: 범위 제외] baseline/FlyGraph 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다.
 
-| 시장/볼트 입력 | 그래프 입력 채널 | 정규화 |
-|---|---|---|
-| 단기 수익률 | direction | `clip(return / sigma, -1, 1)` |
-| 거래량 변화 | stimulus intensity | rolling z-score |
-| bid-ask spread | market friction | `[0,1]` |
-| 실현 변동성 | threat intensity | rolling volatility |
-| vault drawdown | internal stress | `drawdown / limit` |
-| RiskGuard utilization | inhibitory control | limit utilization |
-| signed exposure | body state | `[-1,1]` |
-
-출력은 `LONG / FLAT / SHORT`와 `0% / 10% / 25%` 크기로 양자화한다. 에이전트 러너는 NaN, 무한대, 범위 밖 값, checkpoint 불일치 및 cooldown 위반을 제출 전에 거부한다.
-
-### 등록 및 검증
-
-- 고정 graph topology hash
-- feature schema hash
-- trained checkpoint hash
-- build/version hash
-- MLP 및 degree-preserving random graph baseline과 out-of-sample 비교
-- 지표: net return, max drawdown, turnover, RiskGuard rejection count, seed variance
-
-모델은 주문을 제안할 뿐이며 안전을 결정하지 않는다. 모든 주문은 동일한 Adapter/RiskGuard 경로를 통과한다.
+데모의 에이전트는 스크립트된 주문 시퀀스다. 어떤 에이전트든 같은 Adapter와 RiskGuard를 거치며, 에이전트 정책 자체는 프로토콜의 보안 근거가 아니다. 학습 기반 정책은 이 스펙의 범위 밖이다.
 
 ## 6. 핵심 불변식
 
@@ -337,12 +338,14 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 2. 승인되지 않은 Adapter를 통한 외부 호출은 불가능하다.
 3. 외부 거래 전에 주문·블록·포지션·총노셔널 한도를 검증한다.
 4. Adapter 결과 불일치 시 전체 트랜잭션이 원자적으로 revert된다.
-5. Frozen 이후 execute와 신규 allocate는 차단되며 withdraw는 유지된다.
+5. Frozen 이후 execute와 신규 allocate는 차단되며 withdraw는 유지된다. `unwind()`는 Frozen에서만 동작하고 포지션을 키우거나 뒤집을 수 없다. Closed는 종착 상태다.
 6. 총 발행 shares는 사용자·BatchAllocator claim entitlement와 일치한다.
 7. escrow 자산은 정산 또는 deadline 이후 환불만 가능하다.
-8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다.
-9. 동일 epoch/pinnedBlock/statsVersion의 digest는 변경할 수 없다.
+8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다. [구현 기준 2026-10-04] `MandateRegistry.postLeaderboard`로 구현, `contracts/test/Registry.invariant.t.sol`로 fuzzing 검증.
+9. 동일 epoch/pinnedBlock/statsVersion의 digest는 변경할 수 없다. [구현 기준 2026-10-04] epoch/pinnedBlock 두 축 모두 구현; `statsVersion` 필드는 아직 없다 — DP Reporter가 실제 release를 만들 때 함께 들어갈 예정.
 10. malicious token/venue callback이 Vault 회계에 reentrancy를 일으킬 수 없다.
+11. allocate는 조건이 잠긴 vault에만 들어가고, 잠긴 조건(한도와 adapter allowlist)은 이후 바뀌지 않는다.
+12. 변동성 조항은 총 노출을 늘리는 주문만 거절하고 상태를 바꾸지 않는다. 변동성 상태는 mark 시각이 앞으로 갈 때만 갱신되며, 어떤 mark도 두 번 반영되지 않는다.
 
 ## 7. 테스트 전략
 
@@ -355,19 +358,22 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - 별도 rejection evidence와 freeze 경로
 - MockVenue deterministic price, stale/deviation 시나리오
 - Batch escrow, nonce, deadline, cancellation, settlement root, claim, refund
-- Reentrancy 및 malicious adapter/token fuzzing
+- Reentrancy 및 malicious adapter/token fuzzing [구현 기준 2026-10-04]: `contracts/test/Reentrancy.t.sol`이 악의적 ERC20 asset으로 allocate()/withdraw() 상호 재진입을 검증하고, `contracts/test/Mandate.invariant.t.sol`이 Foundry stateful invariant로 §6의 불변식 1, 5, 6, 11, 12를 Vault/RiskGuard/MockVenueAdapter 위에서 임의 호출 순서로 검증한다. Registry/DP Reporter 관련 불변식(8, 9)은 해당 컨트랙트가 없어 범위 밖이다.
 
 ### Reporter
 
-- clipping sensitivity와 noise scale
-- 동일 domain input에 대한 내부 재현성
-- epoch 또는 statsVersion 변경 시 domain separation
-- ε composition 단조성 및 budget exhaustion
-- 실제 published release와 synthetic simulator의 데이터 경로 분리
+[구현 기준 2026-10-04] `contracts/test-js/reporter.test.mjs`로 아래 다섯 개를 전부 구현했다.
+
+- clipping sensitivity와 noise scale — `laplaceScaleForMean`이 `2c/(N·ε)` 공식과 정확히 일치하는지 검증
+- 동일 domain input에 대한 내부 재현성 — 같은 시드 인자는 항상 같은 샘플을 낸다
+- epoch 또는 statsVersion 변경 시 domain separation — 둘 중 하나만 바뀌어도 시드와 샘플이 전부 달라진다
+- ε composition 단조성 및 budget exhaustion — `EpsilonLedger`가 epoch 역행과 상한 초과를 전부 거부하고, `propose()`는 `commit()` 전까지 상태를 바꾸지 않는다
+- 실제 published release와 synthetic simulator의 데이터 경로 분리 — `reporter/simulator.mjs`는 `EpsilonLedger`/`reporterSecret`을 import하지 않는 별도 파일이라 구조적으로 분리되어 있다
+- (추가) `DPReporter`가 빌드한 release가 실제 `MandateRegistry.postLeaderboard()`에 받아들여지는지까지 in-process 체인에 대고 통합 테스트로 확인
 
 ### E2E 데모
 
-1. Agent/FlyGraph 등록
+1. Agent 등록
 2. 여러 allocator가 escrow 예치 및 intent 서명
 3. watchlist/intent DP 집계 게시
 4. 에폭 batch settlement 및 shares claim
@@ -385,6 +391,10 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - Reporter의 탈중앙화
 - 메인넷 및 실자금 운용
 - 시스템 전역 DP
+- 동결 후 청산의 자동 실행. `unwind()`는 누구나 부를 수 있고 바운티가 있지만 스스로 실행되지는 않는다(3.4). 아무도 부르지 않으면 포지션은 열린 채로 남고 인출은 현금 한도 안에서만 된다. mock venue는 실현 손익을 토큰으로 정산하지 않으므로 Closed vault의 지분 가치는 현금 + 실현 손익이고 토큰 잔고는 그대로다.
+- 외부 변동성 원천. 변동성은 guard가 자기가 본 mark로 직접 쌓은 분산(3.4의 8번)뿐이다. 외부 변동성 oracle, 옵션 내재변동성, 거래소 증거금 구간은 입력이 아니다. 추정치는 표본을 넣어 주는 만큼만 정확하다: 아무도 `observe()`하지 않는 한 시간은 그 한 시간의 수익률 한 개다.
+- 변동성 연동 레버리지 상한(`min(maxLeverage, targetVol / sigma)`). 검토했고 만들지 않았다. 주문 사이에 조건이 에이전트 발밑에서 줄어드는 셈이고, 이미 들고 있는 포지션이 테이프에 밀리는 경우는 drawdown 조항이 맡는다. 변동성 조항은 주문 단위 거절이지 포지션 축소가 아니다.
+- 조건 수정 경로. 잠긴 조건은 timelock으로도 바꿀 수 없다(3.4의 7번). 조건을 바꾸려면 새 vault를 띄운다. 잠금은 한도와 adapter allowlist를 덮고 venue 가격 원천은 덮지 않는다. owner가 `lockTerms()`를 부르지 않으면 아무도 예치할 수 없는 vault로 남는다. Registry release 앵커는 3.7이 구현될 때.
 
 ## 9. 이후 확장
 
@@ -394,4 +404,14 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - shielded batch funding 또는 privacy pool
 - delayed RFQ execution
 - RDP accountant와 multi-epoch scheduler
+
+### 2026-09-23 진행 발표 피드백 반영
+
+피드백 요지: 매개변수와 범위가 무엇인지, 한도 위반 시 거절인지 동결인지, 동결 뒤에는 어떻게 되는지, 변동성이 체결 전후 어디에 들어가는지. 현재 동작은 3.4(거절 vs 동결)와 README의 "What each term bounds" 표가 답한다. 아래는 그 답에서 비는 부분을 메우는 확장이다.
+
+1. **동결 후 reduce-only 청산.** [구현 기준 2026-09-23] 3.4의 6번으로 구현했다. 아래는 계획 당시 문안이다. 동결 시점에 포지션을 닫지 않으면 실제 venue에서는 증거금이 venue에 남고, 동결된 에이전트는 줄일 수도 없다. 확장: 누구나 호출할 수 있는 바운티 있는 `unwind()`가 동결된 포지션을 블록당 일정 비율씩(Hyperliquid는 인출 증거금 부족 시 20%씩 닫는다) 슬리피지 상한 안에서 줄인다. 다 줄이면 `Frozen -> Closed`로 전이하고 allocator는 현금으로 인출한다. `IVenueAdapter`에 reduce-only 진입점이 필요하다. 조건 문구는 "X%에서 에이전트가 멈추고 청산이 시작된다. 확정 손실은 슬리피지와 갭만큼 X%보다 클 수 있다"로 쓴다. 인출 시 비례 청산은 두 번째 경로다.
+2. **조건 고정.** [구현 기준 2026-09-23] 3.4의 7번으로 구현했다(`lockTerms`, 잠금 전 예치 거부, `termsHash`). Registry 앵커는 3.7과 함께, timelock은 두지 않았다. 아래는 계획 당시 문안이다. mandate 조건 해시를 3.7 Registry release에 앵커하고, 변경은 timelock 뒤에 두거나 새 mandate로만 허용한다.
+3. **체결 전 변동성 검사.** [구현 기준 2026-09-23] 3.4의 8번으로 구현했다(`RiskLimits`에 `volWindowSeconds`·`stressHorizonSeconds`·`stressSigmasX10` 추가, mark로 쌓는 EWMA 분산, 노출을 늘리는 주문의 k-sigma 스트레스 거절 `StressBreach`, 누구나 부르는 `observe()`, view `stressQuote()`). 아래 후보 중 변동성 연동 레버리지 상한은 만들지 않았고(8절), breaker는 이 거절이 그것이다. 권장 범위는 README "What each term bounds"에 있다. 아래는 계획 당시 문안이다. 체결 후 변동성 대응은 1번이 맡고, 여기서는 체결 전만 다룬다. 후보: `Marked`마다 갱신하는 온체인 실현 변동성 추정치(mark 수익률의 EWMA), `preview` 단계 스트레스 테스트(체결 후 포지션에 k-sigma 변동을 가정했을 때 `maxDrawdownBps`를 넘으면 거절), 변동성에 반비례하는 레버리지 상한(`min(maxLeverage, targetVol / sigma)`), 변동성 급등 시 위험을 늘리는 주문만 거절하는 breaker(동결이 아니라 거절). 3.5의 가격 원천에 그대로 의존하므로 mock venue에서는 서버가 밀어 넣는 가격 경로로 시연한다.
+4. **조건 범위 확장.** adapter별 instrument·방향·집중도 whitelist, `FeeTerms` 구현, venue mark와 참조 가격의 편차 상한.
+5. **다음 발표 전 검증 과제.** 원래 8개 조건 각각의 권장 범위와 근거(변동성 조항 3개의 범위는 README에 적었다). 확인할 자료: 거래소의 변동성 연동 증거금 구간, DeFi 위험 매개변수 설정 관행, vol-targeting 문헌, 온체인 변동성 원천. 아직 확인하지 않은 항목은 발표에서 "확인 중"으로 표시한다.
 

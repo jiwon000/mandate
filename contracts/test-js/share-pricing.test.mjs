@@ -116,7 +116,9 @@ test("a stale mark blocks the door as well as the trade", async (t) => {
 });
 
 test("the agent cannot trade on a venue the vault is not priced against", async (t) => {
-  const f = await fixture(t);
+  // The allowlist is part of the locked terms, so the second adapter has to be
+  // registered before the lock and the seed deposit.
+  const f = await fixture(t, {}, { lockTerms: false });
 
   // A second adapter, fully registered on both the venue and the guard. It is a
   // legitimate route to a venue - just not this vault's, so its position would
@@ -126,6 +128,9 @@ test("the agent cannot trade on a venue the vault is not priced against", async 
   const otherAddress = await other.getAddress();
   await (await f.venue.setAdapter(otherAddress, true)).wait();
   await (await f.guard.setAdapter(f.vaultAddress, otherAddress, true)).wait();
+  await (await f.guard.lockTerms(f.vaultAddress)).wait();
+  const allocatorAddress = await f.fund(f.allocator, f.deposit);
+  await (await f.vault.connect(f.allocator).allocate(f.deposit, allocatorAddress)).wait();
 
   await assert.rejects(
     f.vault.connect(f.agent).execute(otherAddress, f.order),

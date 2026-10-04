@@ -24,7 +24,20 @@ const state = {
   navSeries: new Map(),
   feed: [],
   lastScannedBlock: 0,
-  busy: false
+  busy: false,
+  batch: { status: null, escrow: 0n, claims: [] }
+};
+
+const INTENT_TYPES = {
+  AllocationIntent: [
+    { name: "allocator", type: "address" },
+    { name: "vault", type: "address" },
+    { name: "amount", type: "uint256" },
+    { name: "minShares", type: "uint256" },
+    { name: "epoch", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" }
+  ]
 };
 
 // --- formatting ---------------------------------------------------------
@@ -113,6 +126,7 @@ async function boot() {
     venue: new ethers.Contract(addresses.venue, abis.venue, provider),
     adapter: new ethers.Contract(addresses.adapter, abis.adapter, provider),
     usdc: new ethers.Contract(addresses.usdc, abis.usdc, provider),
+    batch: new ethers.Contract(deployment.batch.address, abis.batch, provider),
     vaults: deployment.vaults.map((v) => new ethers.Contract(v.address, abis.vault, provider))
   };
   state.eventInterfaces = [
@@ -223,6 +237,7 @@ async function refresh() {
 
     await scanLogs();
     render();
+    await refreshBatch();
   } finally {
     state.busy = false;
   }
@@ -677,6 +692,165 @@ function renderRisk() {
     .join("");
 }
 
+// --- batch allocation -----------------------------------------------------
+// The next epoch boundary this wallet's signature should target. A few
+// seconds of buffer before an epoch ends avoids a slow click landing an
+// intent in an epoch that is already unsettleable by the time it is signed.
+function targetEpoch() {
+  const b = state.deployment.batch;
+  if (!b) return 0;
+  const idx = Math.max(0, Math.floor((state.chainTime - b.genesis) / b.epochDuration));
+  const end = b.genesis + (idx + 1) * b.epochDuration;
+  return end - state.chainTime < 3 ? idx + 1 : idx;
+}
+
+async function refreshBatch() {
+  if (!state.deployment?.batch) return;
+  try {
+    state.batch.status = await (await fetch("/api/batch/status")).json();
+    if (state.wallet) {
+      state.batch.escrow = await state.contracts.batch.escrowOf(state.wallet);
+      state.batch.claims = await (
+        await fetch(`/api/batch/claims?address=${state.wallet}`)
+      ).json();
+    } else {
+      state.batch.escrow = 0n;
+      state.batch.claims = [];
+    }
+    renderBatch();
+  } catch (error) {
+    console.error("[batch]", error);
+  }
+}
+
+function renderBatch() {
+  if (!state.snapshot.length || !state.batch.status) return;
+  const vault = state.snapshot[state.selected];
+  const status = state.batch.status;
+  $("#batchVaultLabel").textContent = vault.name;
+  $("#batchEscrow").textContent = state.wallet
+    ? `${usdc(state.batch.escrow)} mUSDC escrowed`
+    : "Connect allocator to read escrow";
+  $("#batchEpoch").textContent = String(status.currentEpoch);
+  $("#batchEpochEnd").textContent = new Date(status.currentEpochEnd * 1000).toLocaleTimeString();
+  $("#batchDeadline").textContent = `${status.settlementWindow}s to settle after each epoch ends`;
+  $("#intentTargetEpoch").textContent = `epoch ${targetEpoch()}`;
+
+  $("#pendingIntents").innerHTML = status.pending.length
+    ? status.pending
+        .map(
+          (p) =>
+            `<div><b>${String(p.epoch).padStart(2, "0")}</b><span>${usdc(BigInt(p.amount))} mUSDC → ${vaultLabel(p.vault)}</span><em>${shortAddress(p.allocator)}</em></div>`
+        )
+        .join("")
+    : `<div><b>—</b><span>No signed intents waiting</span><em></em></div>`;
+
+  $("#claimList").innerHTML = state.batch.claims.length
+    ? state.batch.claims
+        .map(
+          (c, i) =>
+            `<div class="modal-row"><span>${vaultLabel(c.intent.vault)}</span><b>${usdc(BigInt(c.intent.amount))} mUSDC paid in</b><button class="button button-secondary" data-claim="${i}">claimShares()</button></div>`
+        )
+        .join("")
+    : `<p class="disclosure">Nothing settled for this wallet yet.</p>`;
+}
+
+$("#depositEscrowButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "approve()…", async (button) => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const amount = ethers.parseUnits(String(Number($("#escrowAmount").value) || 0), 6);
+    if (amount === 0n) throw new Error("amount must be greater than zero");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.usdc.connect(signer).approve(state.deployment.batch.address, amount)).wait();
+    button.textContent = "depositEscrow()…";
+    await (await state.contracts.batch.connect(signer).depositEscrow(amount)).wait();
+    showToast(`Deposited ${usdc(amount)} mUSDC to batch escrow`);
+  })
+);
+
+$("#withdrawEscrowButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "withdrawEscrow()…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const escrow = await state.contracts.batch.escrowOf(state.wallet);
+    if (escrow === 0n) throw new Error("no escrow to withdraw");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.batch.connect(signer).withdrawEscrow(escrow)).wait();
+    showToast(`Withdrew ${usdc(escrow)} mUSDC from batch escrow`);
+  })
+);
+
+$("#signIntentButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "signing…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const vault = state.snapshot[state.selected];
+    const amount = ethers.parseUnits(String(Number($("#intentAmount").value) || 0), 6);
+    if (amount === 0n) throw new Error("amount must be greater than zero");
+
+    const b = state.deployment.batch;
+    const epoch = targetEpoch();
+    const deadline = b.genesis + (epoch + 1) * b.epochDuration + b.settlementWindow;
+    // Same estimate updateAmount() uses for the instant Allocate screen, with a
+    // 1% tolerance: the epoch's net price is not known until settlement runs.
+    const estimatedShares =
+      vault.totalSupply === 0n || vault.equity6 === 0n
+        ? amount
+        : (amount * vault.totalSupply) / vault.equity6;
+    const minShares = estimatedShares > 1n ? (estimatedShares * 99n) / 100n : 1n;
+
+    const intent = {
+      allocator: state.wallet,
+      vault: vault.address,
+      amount: amount.toString(),
+      minShares: minShares.toString(),
+      epoch: String(epoch),
+      nonce: String(Date.now()),
+      deadline: String(deadline)
+    };
+    const domain = {
+      name: "MandateBatchAllocator",
+      version: "1",
+      chainId: state.deployment.chainId,
+      verifyingContract: b.address
+    };
+    const signer = await state.provider.getSigner(state.wallet);
+    const signature = await signer.signTypedData(domain, INTENT_TYPES, intent);
+
+    const response = await fetch("/api/batch/intent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ intent, signature })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "intent rejected");
+    showToast(
+      result.duplicate
+        ? "Already queued"
+        : `Intent queued for epoch ${epoch} — ${usdc(amount)} mUSDC into ${vault.name}`
+    );
+  })
+);
+
+$("#settleBatchButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "settleEpoch()…", async () => {
+    const response = await fetch("/api/batch/settle", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "settlement failed");
+    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)`);
+  })
+);
+
+$("#claimList").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-claim]");
+  if (!button) return;
+  const entry = state.batch.claims[Number(button.dataset.claim)];
+  withButton(button, "claimShares()…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const signer = await state.provider.getSigner(state.wallet);
+    await (await state.contracts.batch.connect(signer).claimShares(entry.intent, entry.proof)).wait();
+    showToast(`Claimed shares from ${usdc(BigInt(entry.intent.amount))} mUSDC paid into ${vaultLabel(entry.intent.vault)}`);
+  });
+});
+
 // --- routing ------------------------------------------------------------
 function route(name) {
   $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === name));
@@ -973,12 +1147,16 @@ $("#redeployButton").addEventListener("click", (event) =>
     state.contracts.venue = new ethers.Contract(deployment.addresses.venue, deployment.abis.venue, state.provider);
     state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
     state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
+    state.contracts.batch = new ethers.Contract(deployment.batch.address, deployment.abis.batch, state.provider);
     state.contracts.vaults = deployment.vaults.map(
       (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
     );
     state.navSeries.clear();
     state.feed = [];
     state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
+    // A redeploy is a fresh BatchAllocator at a fresh address; anything signed
+    // or settled against the old one no longer applies.
+    state.batch = { status: null, escrow: 0n, claims: [] };
     buildLeaderboardSkeleton();
     showToast("Fresh contracts deployed. Four mandates live again.");
   })

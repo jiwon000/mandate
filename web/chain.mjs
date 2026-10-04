@@ -5,14 +5,21 @@
 // talks to these contracts over JSON-RPC and every number it renders is read back
 // from contract state.
 import hre from "hardhat";
-import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits } from "ethers";
+import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits, getAddress, verifyTypedData } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
+import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 
 const coder = AbiCoder.defaultAbiCoder();
 const E18 = (n) => parseUnits(String(n), 18);
 const USDC = (n) => parseUnits(String(n), 6);
 
 const START_PRICE = E18(2000);
+
+// Short enough that a live demo sees an epoch end and settle inside one
+// session; the privileged settleEpoch() call still only nets signed intents,
+// it never picks who gets how many shares (BatchAllocator.sol _allocate()).
+const BATCH_EPOCH_SECONDS = 20;
+const BATCH_SETTLEMENT_WINDOW_SECONDS = 600;
 
 // Four vaults, one venue, one adapter. They differ only in the mandate their
 // allocators signed - that is the entire point of the screen.
@@ -116,6 +123,17 @@ export async function startChain() {
   let venue = null;
   let guard = null;
   let adapterAddress = null;
+  let batchAllocator = null;
+  let batchDomain = null;
+  let batchGenesis = 0;
+  // In-memory "batcher mempool": signed AllocationIntents that have not been
+  // netted into a settleEpoch() call yet, keyed only by holding the full signed
+  // struct (BatchAllocator itself never sees these until settlement).
+  let pendingIntents = [];
+  // intent digest -> { intent, proof }, filled in once settleEpoch() lands so a
+  // claim can be relayed without a chain indexer (batch-allocator-milestone2.md
+  // notes proofs can be rebuilt from public calldata; this is that rebuild).
+  let claimableProofs = new Map();
 
   async function setup() {
     // The vaults' own allocation and opening trades are the first entries the
@@ -169,8 +187,28 @@ export async function startChain() {
       });
     }
 
+    const chainId = Number((await provider.getNetwork()).chainId);
+
+    // The batcher is `owner`, same as deploy.mjs does for Monad: settleEpoch()
+    // only nets already-verified signed intents, so there is nothing a batcher
+    // key can steal by also being the deployer.
+    batchAllocator = await deploy("BatchAllocator", "BatchAllocator", [
+      await usdc.getAddress(),
+      await owner.getAddress(),
+      BATCH_EPOCH_SECONDS,
+      BATCH_SETTLEMENT_WINDOW_SECONDS
+    ]);
+    for (const v of vaults) {
+      await (await batchAllocator.setVaultAllowed(v.address, true)).wait();
+    }
+    const batchAddress = await batchAllocator.getAddress();
+    batchGenesis = Number(await batchAllocator.genesis());
+    batchDomain = intentDomain(chainId, batchAddress);
+    pendingIntents = [];
+    claimableProofs = new Map();
+
     deployment = {
-      chainId: Number((await provider.getNetwork()).chainId),
+      chainId,
       addresses: {
         usdc: await usdc.getAddress(),
         guard: await guard.getAddress(),
@@ -187,13 +225,27 @@ export async function startChain() {
         guard: abiOf("MandateRiskGuard", "MandateRiskGuard"),
         adapter: abiOf("MockVenueAdapter", "MockVenueAdapter"),
         venue: abiOf("mocks/DeterministicMockVenue", "DeterministicMockVenue"),
-        usdc: abiOf("mocks/MockUSDC", "MockUSDC")
+        usdc: abiOf("mocks/MockUSDC", "MockUSDC"),
+        batch: abiOf("BatchAllocator", "BatchAllocator")
+      },
+      batch: {
+        address: batchAddress,
+        genesis: batchGenesis,
+        epochDuration: BATCH_EPOCH_SECONDS,
+        settlementWindow: BATCH_SETTLEMENT_WINDOW_SECONDS
       },
       vaults,
       startBlock,
       startedAt: Date.now()
     };
     return deployment;
+  }
+
+  function batchEpochEnd(epoch) {
+    return batchGenesis + (epoch + 1) * BATCH_EPOCH_SECONDS;
+  }
+  function batchDeadline(epoch) {
+    return batchEpochEnd(epoch) + BATCH_SETTLEMENT_WINDOW_SECONDS;
   }
 
   // --- price oracle -------------------------------------------------------
@@ -291,12 +343,139 @@ export async function startChain() {
     }
   };
 
+  // --- batch allocator epoch flow -----------------------------------------
+  //
+  // This plays the off-chain "batcher" role the spec and
+  // docs/batch-allocator-milestone2.md assume: collect signed
+  // AllocationIntents, net them per vault once an epoch ends, and settle with
+  // a Merkle root the contract recomputes and checks itself. In production
+  // this is a separate service with its own key; here the demo server plays
+  // that role with the same `owner` account that deploys everything, exactly
+  // like deploy.mjs does for Monad.
+  const batch = {
+    async status() {
+      const now = await chainNow();
+      const currentEpoch = Math.max(0, Math.floor((now - batchGenesis) / BATCH_EPOCH_SECONDS));
+      return {
+        chainTime: now,
+        genesis: batchGenesis,
+        epochDuration: BATCH_EPOCH_SECONDS,
+        settlementWindow: BATCH_SETTLEMENT_WINDOW_SECONDS,
+        currentEpoch,
+        currentEpochEnd: batchEpochEnd(currentEpoch),
+        pending: pendingIntents.map(({ intent, digest }) => ({ ...intent, digest }))
+      };
+    },
+
+    // Minimal validation here; settleEpoch() re-verifies every signature,
+    // nonce, epoch, deadline and escrow balance itself and is the only check
+    // that actually matters. This just keeps an obviously-bad intent (wrong
+    // signer, unknown vault) out of a batch that would otherwise revert whole.
+    async submitIntent({ intent, signature } = {}) {
+      if (!intent || !signature) throw new Error("missing intent or signature");
+      for (const key of ["allocator", "vault", "amount", "minShares", "epoch", "nonce", "deadline"]) {
+        if (intent[key] === undefined || intent[key] === null) throw new Error(`intent missing ${key}`);
+      }
+      const recovered = verifyTypedData(batchDomain, intentTypes, intent, signature);
+      if (recovered.toLowerCase() !== String(intent.allocator).toLowerCase()) {
+        throw new Error("signature does not match intent.allocator");
+      }
+      const vaultKnown = deployment.vaults.some(
+        (v) => v.address.toLowerCase() === String(intent.vault).toLowerCase()
+      );
+      if (!vaultKnown) throw new Error("vault is not part of this demo");
+      const digest = hashIntent(batchDomain, intent);
+      if (pendingIntents.some((p) => p.digest === digest)) {
+        return { accepted: true, digest, duplicate: true };
+      }
+      pendingIntents.push({ intent, signature, digest });
+      return { accepted: true, digest };
+    },
+
+    // Settles whichever pending epoch is currently inside its settlement
+    // window. One net deposit per vault, exactly as settleEpoch() requires.
+    async settle() {
+      const now = await chainNow();
+      const candidates = [...new Set(pendingIntents.map((p) => Number(p.intent.epoch)))].sort(
+        (a, b) => a - b
+      );
+      const epoch = candidates.find((e) => now >= batchEpochEnd(e) && now <= batchDeadline(e));
+      if (epoch === undefined) {
+        const next = candidates[0];
+        if (next === undefined) throw new Error("no pending intents to settle");
+        const wait = Math.max(0, batchEpochEnd(next) - now);
+        throw new Error(
+          wait > 0
+            ? `epoch ${next} is not settleable yet — ${wait}s left before it ends`
+            : `epoch ${next} is past its settlement window`
+        );
+      }
+
+      const forEpoch = pendingIntents.filter((p) => Number(p.intent.epoch) === epoch);
+      const byVault = new Map();
+      for (const entry of forEpoch) {
+        const key = getAddress(entry.intent.vault);
+        if (!byVault.has(key)) byVault.set(key, []);
+        byVault.get(key).push(entry);
+      }
+      const sortedVaults = [...byVault.keys()].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+      const nets = sortedVaults.map((v) => ({ vault: v, intents: byVault.get(v) }));
+      const flatIntents = nets.flatMap((net) => net.intents.map((e) => e.intent));
+      const { root, proofs } = buildIntentTree(batchDomain, flatIntents);
+      const netsForTx = nets.map((net) => ({
+        vault: net.vault,
+        intents: net.intents.map((e) => ({ intent: e.intent, signature: e.signature }))
+      }));
+
+      const receipt = await (
+        await batchAllocator.connect(owner).settleEpoch(epoch, root, netsForTx)
+      ).wait();
+
+      flatIntents.forEach((intent, i) => {
+        claimableProofs.set(hashIntent(batchDomain, intent), { intent, proof: proofs[i] });
+      });
+      pendingIntents = pendingIntents.filter((p) => Number(p.intent.epoch) !== epoch);
+
+      return {
+        epoch,
+        intentCount: flatIntents.length,
+        vaultCount: nets.length,
+        txHash: receipt.hash
+      };
+    },
+
+    // Reconstructed from the settlement this server itself just ran, which is
+    // the "future API/UI integration" batch-allocator-milestone2.md leaves
+    // open rather than an indexer reading public calldata from scratch.
+    //
+    // claimShares() leaves the proof's digest in this map after a successful
+    // claim -- the map only records what settlement produced, not what is
+    // still outstanding -- so a second relay of the same claim would revert
+    // InvalidClaim(). Drop anything the contract no longer shows a nonzero
+    // entitlement for, and prune it so this stays cheap as epochs go by.
+    async claimsFor(address) {
+      const needle = String(address || "").toLowerCase();
+      const mine = [];
+      for (const [digest, { intent, proof }] of claimableProofs) {
+        if (String(intent.allocator).toLowerCase() !== needle) continue;
+        const shares = await batchAllocator.claimableShares(digest);
+        if (shares === 0n) {
+          claimableProofs.delete(digest);
+          continue;
+        }
+        mine.push({ intent, proof });
+      }
+      return mine;
+    }
+  };
+
   await setup();
 
   return {
     provider: chain.provider,
     deployment: () => deployment,
     control,
+    batch,
     async close() {
       clearInterval(timer);
       await chain.close();

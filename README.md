@@ -29,7 +29,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - 일방향 조건 잠금 `lockTerms()`: 잠근 뒤에는 한도와 Adapter 허용 목록을 바꿀 수 없고, 잠그기 전에는 예치가 거절되며, `termsHash`가 배분자가 인용하는 조건 값
 - 변동성 조항: guard가 본 mark(거래·`poke()`·부작용 없는 `observe()`)로 실현 변동성을 추정하고, 조건의 horizon 동안 k-sigma 이동이 `maxDrawdownBps`를 넘기면 노출을 늘리는 주문을 `StressBreach`로 거절. 노출을 줄이는 주문은 검사하지 않음
 - 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
-- EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불
+- EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
 
 로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 34개(Hardhat/node:test)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(핵심 불변식 9개, 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
 
@@ -68,7 +68,9 @@ npm run test:invariant
 
 브라우저에서 `http://localhost:3000`을 엽니다. 포트가 사용 중이면 `PORT=3001 npm run web`처럼 다른 포트를 지정할 수 있습니다.
 
-데모 화면은 Market, Agent, Allocate, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·변동성 조항의 `StressBreach` 거절과 reduce-only 주문 통과·`unwind()` 청산·동결 후 출금 흐름을 확인할 수 있습니다. 배치 intent 정산은 계약 테스트로 검증되며 현재 웹 화면에는 연결되지 않았습니다.
+데모 화면은 Market, Agent, Allocate, Batch, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 즉시 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·변동성 조항의 `StressBreach` 거절과 reduce-only 주문 통과·`unwind()` 청산·동결 후 출금 흐름을 확인할 수 있습니다.
+
+배치 intent 정산 [구현 기준 2026-10-04]: Batch 화면에서 escrow 예치, EIP-712 `AllocationIntent` 서명(off-chain, 무료), 서명된 intent를 모아 epoch 종료 후 `settleEpoch()`로 정산, Merkle proof로 `claimShares()`까지 전부 웹에서 연결됩니다. 데모 서버가 `deploy.mjs`와 동일하게 배포자 키를 batcher로 사용해 정산을 대신 실행하고, 데모용 epoch은 20초로 짧게 잡았습니다(운영 배포 기본값은 1시간). 서명된 intent는 settlement calldata에 공개되므로 이 batcher는 익명성 집합이 아닙니다.
 
 ## 저장소 구조
 
@@ -78,16 +80,18 @@ contracts/test-js/      in-process Hardhat EVM 계약 테스트
 contracts/test/         Foundry invariant/fuzz 테스트와 reentrancy 테스트
 contracts/script/       deploy.mjs와 keeper.mjs
 contracts/tools/        로컬 solc 컴파일러와 EIP-712/Merkle helper
-web/                    Market, Agent, Allocate, Live Risk 화면과 데모 서버
+web/                    Market, Agent, Allocate, Batch, Live Risk 화면과 데모 서버
 docs/                   마일스톤 설계 문서
 mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ```
 
 ## 다음 작업
 
-Registry와 DP Reporter, 공개 ε anchor, 배치 흐름의 웹 연결, baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
+Registry와 DP Reporter, 공개 ε anchor, baseline/FlyGraph 에이전트, 외부 감사와 Monad 테스트넷 배포가 남아 있습니다. FlyGraph는 실험용 정책이며 프로토콜의 보안 근거가 아닙니다.
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다. Registry/DP Reporter 관련 불변식(#8, #9)은 해당 컨트랙트가 아직 없어 범위 밖입니다.
+
+배치 흐름의 웹 연결 [구현 기준 2026-10-04]: `web/`이 더는 BatchAllocator를 우회하지 않습니다. `chain.mjs`가 배포 시 BatchAllocator를 배포·allowlist하고, 서버가 서명된 intent를 모아 epoch 종료 후 batcher로서 `settleEpoch()`를 호출하며, Merkle proof를 재구성해 클레임을 돌려줍니다. 단일 intent와 2-vault/2-allocator 다중 intent 정산을 직접 스크립트로 재현해 검증했습니다. batcher는 여전히 중앙화돼 있고(배포자 키), 정산 calldata에 포함된 intent는 공개됩니다 — `docs/batch-allocator-milestone2.md`의 프라이버시 경계는 그대로입니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 

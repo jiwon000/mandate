@@ -21,6 +21,7 @@
         <button data-route="market" class="active">Market</button>
         <button data-route="agent">Agent</button>
         <button data-route="allocate">Allocate</button>
+        <button data-route="batch">Batch</button>
         <button data-route="risk">Live Risk</button>
       </nav>
       <div class="header-actions">
@@ -110,6 +111,48 @@
             <div class="flow-list"><div><b>01</b><span>approve() the vault</span><em>ERC20</em></div><div><b>02</b><span>allocate() mints shares</span><em>ONCHAIN</em></div><div><b>03</b><span>withdraw() at the marked price</span><em>NO AGENT CONSENT</em></div></div>
           </aside>
         </div>
+      </section>
+
+      <section class="view" data-view="batch">
+        <div class="narrow-head">
+          <p class="eyebrow">BATCH SETTLEMENT</p>
+          <h1>Sign now, settle on an epoch</h1>
+          <p>Deposit to escrow once, then sign an EIP-712 allocation intent for any mandate. Nothing is spent until the epoch ends and the batcher nets every signed intent into one deposit per vault — the same path the contract tests exercise, now connected to this page.</p>
+        </div>
+        <div class="allocate-layout">
+          <article class="panel allocation-card">
+            <div class="field-label"><span>Batch escrow</span><span id="batchEscrow">Connect allocator to read escrow</span></div>
+            <div class="amount-input"><input id="escrowAmount" inputmode="decimal" value="2500" aria-label="Escrow USDC amount" /><span>USDC</span></div>
+            <div class="quick-amounts">
+              <button class="button button-secondary" id="depositEscrowButton">depositEscrow()</button>
+              <button class="button button-secondary" id="withdrawEscrowButton">withdrawEscrow()</button>
+            </div>
+            <div class="allocation-summary">
+              <div><span>Current epoch</span><b id="batchEpoch">—</b></div>
+              <div><span>This epoch ends</span><b id="batchEpochEnd">—</b></div>
+              <div><span>Settlement window</span><b id="batchDeadline">—</b></div>
+            </div>
+            <div class="field-label"><span>Sign an intent for</span><span id="batchVaultLabel">—</span></div>
+            <div class="amount-input"><input id="intentAmount" inputmode="decimal" value="1000" aria-label="Intent USDC amount" /><span>USDC</span></div>
+            <button id="signIntentButton" class="button button-primary button-large">Sign AllocationIntent</button>
+            <p class="fineprint">Signing is off-chain and free — nothing moves until the batcher settles the epoch. This targets <span id="intentTargetEpoch">—</span>; minShares is set 1% under the current preview.</p>
+          </article>
+          <aside class="allocation-aside">
+            <div class="custody-lock">
+              <span class="lock-icon">◇</span>
+              <p class="eyebrow">BATCHER ROLE</p>
+              <h3>Anyone can settle, once an epoch ends</h3>
+              <p>The batcher only nets verified signed intents into one deposit per vault; it never chooses who gets how many shares — settleEpoch() recomputes the Merkle root from every signature itself. This demo's server plays the batcher, the same role deploy.mjs gives the deployer key on Monad.</p>
+            </div>
+            <button id="settleBatchButton" class="button button-secondary button-large">settleEpoch()</button>
+            <div class="flow-list" id="pendingIntents"></div>
+          </aside>
+        </div>
+        <div class="section-heading">
+          <div><p class="eyebrow">YOUR CLAIMS</p><h2>Settled, unclaimed shares</h2></div>
+        </div>
+        <div id="claimList"></div>
+        <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set.</p>
       </section>
 
       <section class="view" data-view="risk">

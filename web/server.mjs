@@ -89,6 +89,25 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, chain.deployment());
     }
 
+    if (pathname === "/api/batch/status" && req.method === "GET") {
+      return sendJson(res, 200, await chain.batch.status());
+    }
+
+    if (pathname === "/api/batch/intent") {
+      if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      const body = JSON.parse(await readBody(req));
+      return sendJson(res, 200, await chain.batch.submitIntent(body));
+    }
+
+    if (pathname === "/api/batch/settle") {
+      if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      return sendJson(res, 200, await chain.batch.settle());
+    }
+
+    if (pathname === "/api/batch/claims" && req.method === "GET") {
+      return sendJson(res, 200, await chain.batch.claimsFor(url.searchParams.get("address")));
+    }
+
     if (pathname === "/api/control") {
       if (req.method === "GET") return sendJson(res, 200, await chain.control.status());
       if (req.method !== "POST") return sendJson(res, 405, { error: "GET or POST" });

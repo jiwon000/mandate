@@ -8,7 +8,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 
 ## 구현 현황
 
-현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다.
+현재 저장소에는 Vault·Adapter·RiskGuard 핵심 기능과 BatchAllocator가 구현되어 있습니다. 여기에는 marked equity 기반 손실 한도, EIP-712 배분 intent, escrow, 에폭별 순배분, Merkle 지분 claim, intent 취소와 미사용 escrow 환불이 포함됩니다. 2026-09-23 진행 발표 피드백으로 동결 후 reduce-only `unwind()`, 일방향 조건 잠금 `lockTerms()`, 변동성 조항(`StressBreach`)이 추가되었습니다.
 
 현재 프라이버시 경계는 명확합니다. 정산에 포함된 allocation intent와 서명은 정산 calldata에서 공개됩니다. 배치 순정산은 직접 연결을 줄이지만 완전한 익명성을 제공하지 않습니다. 원본 intent가 체인에 전혀 올라가지 않는다는 더 강한 v0.2 문구는 아직 구현되지 않았고, DP Reporter와 비공개 Intent API도 예정 사항입니다.
 
@@ -25,20 +25,24 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - 가격 mark가 오래되면 거래·예치·출금을 막는 `maxMarkAgeSeconds`
 - high-water mark 대비 marked drawdown 검사와 permissionless `poke()`
 - drawdown 초과 시 Vault 동결 및 호출자 bounty 지급
+- 동결 후 누구나 `unwind()`로 포지션을 5회에 걸쳐 20%씩 reduce-only 청산 (venue mark 대비 슬리피지 1% 이내, 호출자 bounty 0.01%), 마지막 단계에서 `Frozen -> Closed`
+- 일방향 조건 잠금 `lockTerms()`: 잠근 뒤에는 한도와 Adapter 허용 목록을 바꿀 수 없고, 잠그기 전에는 예치가 거절되며, `termsHash`가 배분자가 인용하는 조건 값
+- 변동성 조항: guard가 본 mark(거래·`poke()`·부작용 없는 `observe()`)로 실현 변동성을 추정하고, 조건의 horizon 동안 k-sigma 이동이 `maxDrawdownBps`를 넘기면 노출을 늘리는 주문을 `StressBreach`로 거절. 노출을 줄이는 주문은 검사하지 않음
 - 첫 예치 share inflation을 막는 `MIN_SHARES` 잠금
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불
 
-로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 19개가 통과합니다.
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 34개가 통과합니다.
 
 ## 동작 흐름
 
-1. 운영자가 하나의 `VenueAdapter`에 연결된 Vault를 배포하고 `MandateRiskGuard`에 한도를 설정합니다.
+1. 운영자가 하나의 `VenueAdapter`에 연결된 Vault를 배포하고 `MandateRiskGuard`에 한도를 설정한 뒤 `lockTerms()`로 잠급니다. 잠그기 전에는 예치가 거절됩니다.
 2. 배분자가 USDC를 escrow에 예치하고 EIP-712 allocation intent에 서명합니다.
 3. `BatchAllocator`가 에폭 종료 후 Vault별 순액을 한 번 예치하고 사용자가 Merkle proof로 지분을 claim합니다.
 4. 에이전트가 Adapter를 통해 주문을 제출하면 Adapter가 노셔널과 예상 포지션을 계산합니다.
-5. RiskGuard가 외부 호출 전에 한도를 확인합니다. 위반 주문은 venue 상태를 바꾸지 않고 revert됩니다.
+5. RiskGuard가 외부 호출 전에 한도를 확인합니다. 노출을 늘리는 주문은 변동성 조항의 스트레스 검사도 통과해야 합니다. 위반 주문은 venue 상태를 바꾸지 않고 revert됩니다.
 6. 체결 후 가격 mark와 drawdown을 다시 검사합니다. 한도 초과 Vault는 동결되지만 배분자의 출금과 지분 이전은 유지됩니다.
 7. 누구나 `poke()`를 호출해 최신 mark 기준 drawdown을 확인할 수 있습니다.
+8. 동결된 Vault는 누구나 `unwind()`를 5회 호출해 청산할 수 있고, 마지막 단계에서 `Closed`가 되어 출금에 새 mark가 필요 없어집니다.
 
 ## 보안 및 프라이버시 한계
 
@@ -57,7 +61,7 @@ npm run web
 
 브라우저에서 `http://localhost:3000`을 엽니다. 포트가 사용 중이면 `PORT=3001 npm run web`처럼 다른 포트를 지정할 수 있습니다.
 
-데모 화면은 Market, Agent, Allocate, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·동결 후 출금 흐름을 확인할 수 있습니다. 배치 intent 정산은 계약 테스트로 검증되며 현재 웹 화면에는 연결되지 않았습니다.
+데모 화면은 Market, Agent, Allocate, Live Risk로 구성됩니다. Allocate에서 테스트 USDC를 예치하고, Live Risk에서 정상 주문·한도 초과 주문·가격 충격·`poke()` 동결·변동성 조항의 `StressBreach` 거절과 reduce-only 주문 통과·`unwind()` 청산·동결 후 출금 흐름을 확인할 수 있습니다. 배치 intent 정산은 계약 테스트로 검증되며 현재 웹 화면에는 연결되지 않았습니다.
 
 ## 저장소 구조
 

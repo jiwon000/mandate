@@ -67,6 +67,17 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+// The batch allocator and the registry are part of every book the current
+// deploy routine produces; a live server pointed at an older deployment record
+// has neither, and says so instead of failing on an undefined handler.
+function feature(name, label) {
+  const api = chain[name];
+  if (!api) {
+    throw Object.assign(new Error(`this deployment has no ${label}; redeploy it with \`npm run deploy:demo\``), { httpStatus: 404 });
+  }
+  return api;
+}
+
 async function handleRpcCall(call) {
   const id = call?.id ?? null;
   try {
@@ -102,31 +113,34 @@ const server = createServer(async (req, res) => {
     }
 
     if (pathname === "/api/batch/status" && req.method === "GET") {
-      return sendJson(res, 200, await chain.batch.status());
+      return sendJson(res, 200, await feature("batch", "batch allocator").status());
     }
 
     if (pathname === "/api/batch/intent") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
       const body = JSON.parse(await readBody(req));
-      return sendJson(res, 200, await chain.batch.submitIntent(body));
+      chain.touch();
+      return sendJson(res, 200, await feature("batch", "batch allocator").submitIntent(body));
     }
 
     if (pathname === "/api/batch/settle") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
-      return sendJson(res, 200, await chain.batch.settle());
+      chain.touch();
+      return sendJson(res, 200, await feature("batch", "batch allocator").settle());
     }
 
     if (pathname === "/api/batch/claims" && req.method === "GET") {
-      return sendJson(res, 200, await chain.batch.claimsFor(url.searchParams.get("address")));
+      return sendJson(res, 200, await feature("batch", "batch allocator").claimsFor(url.searchParams.get("address")));
     }
 
     if (pathname === "/api/reporter/status" && req.method === "GET") {
-      return sendJson(res, 200, await chain.reporter.status());
+      return sendJson(res, 200, await feature("reporter", "registry").status());
     }
 
     if (pathname === "/api/reporter/publish") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
-      return sendJson(res, 200, await chain.reporter.publish());
+      chain.touch();
+      return sendJson(res, 200, await feature("reporter", "registry").publish());
     }
 
     if (pathname === "/api/control") {
@@ -163,7 +177,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": types[".html"], "cache-control": "no-store" });
       return res.end(body);
     }
-    sendJson(res, 500, { error: error?.message ?? String(error) });
+    sendJson(res, error?.httpStatus ?? 500, { error: error?.message ?? String(error) });
   }
 });
 

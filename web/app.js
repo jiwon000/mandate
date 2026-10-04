@@ -115,6 +115,27 @@ function describeRevert(error) {
 }
 
 // --- boot ---------------------------------------------------------------
+// A book deployed before the batch allocator and the registry existed carries
+// neither. The page still has to boot on it: the two screens that read those
+// contracts are taken out of the navigation instead.
+function optionalContracts(deployment, provider) {
+  const { abis, batch, registry } = deployment;
+  return {
+    batch: batch ? new ethers.Contract(batch.address, abis.batch, provider) : null,
+    registry: registry ? new ethers.Contract(registry.address, abis.registry, provider) : null
+  };
+}
+
+function applyFeatures(deployment) {
+  const present = { batch: Boolean(deployment.batch), privacy: Boolean(deployment.registry) };
+  for (const [name, has] of Object.entries(present)) {
+    const button = document.querySelector(`.nav [data-route="${name}"]`);
+    if (button) button.hidden = !has;
+  }
+  const current = location.hash.slice(1);
+  if (current in present && !present[current]) route("market");
+}
+
 async function boot() {
   const deployment = await (await fetch("/api/deployment")).json();
   state.deployment = deployment;
@@ -134,10 +155,10 @@ async function boot() {
     venue: new ethers.Contract(addresses.venue, abis.venue, provider),
     adapter: new ethers.Contract(addresses.adapter, abis.adapter, provider),
     usdc: new ethers.Contract(addresses.usdc, abis.usdc, provider),
-    batch: new ethers.Contract(deployment.batch.address, abis.batch, provider),
-    registry: new ethers.Contract(deployment.registry.address, abis.registry, provider),
+    ...optionalContracts(deployment, provider),
     vaults: deployment.vaults.map((v) => new ethers.Contract(v.address, abis.vault, provider))
   };
+  applyFeatures(deployment);
   state.eventInterfaces = [
     new ethers.Interface(abis.vault),
     new ethers.Interface(abis.guard),
@@ -934,32 +955,41 @@ function renderPrivacy() {
   $("#pubEpoch").textContent = status.hasReleased ? status.lastEpoch : "—";
   $("#pubCumulative").textContent = `ε ${cumulative.toFixed(2)}`;
   $("#pubCap").textContent = cap > 0 ? `ε ${cap.toFixed(2)}` : "no cap";
-  $("#pubSampleSize").textContent = status.hasReleased
-    ? String(status.lastRelease.published.sampleSize)
+  // The chain keeps a release's digest and its epsilon; the noisy figures
+  // themselves are the reporter's. A server that restarted since the last
+  // release still reports hasReleased (read from the registry) but no longer
+  // holds those figures, so only the onchain digest can be shown.
+  const release = status.lastRelease;
+  $("#pubSampleSize").textContent = release
+    ? String(release.published.sampleSize)
     : `${status.sampleSize} collecting…`;
 
   const badge = $("#publishedBadge");
   if (!status.hasReleased) {
     badge.textContent = "NO RELEASE YET";
     badge.classList.remove("stale");
+  } else if (!release) {
+    badge.textContent = "DIGEST ONCHAIN";
+    badge.classList.remove("stale");
   } else {
-    const verified = state.privacy.onchainDigest === status.lastRelease.statsDigest;
+    const verified = state.privacy.onchainDigest === release.statsDigest;
     badge.textContent = verified ? "VERIFIED ONCHAIN" : "DIGEST MISMATCH";
     badge.classList.toggle("stale", !verified);
   }
 
-  if (status.hasReleased) {
-    const r = status.lastRelease.published;
+  if (release) {
+    const r = release.published;
     $("#pubMean").textContent = pct2(r.noisyMean);
     $("#pubSharpe").textContent = r.noisySharpe.toFixed(2);
     $("#pubMaxDD").textContent = pct2(r.noisyMaxDrawdown);
-    $("#pubDigest").textContent = status.lastRelease.statsDigest;
-    $("#pubDigest").title = `tx ${status.lastRelease.txHash}`;
+    $("#pubDigest").textContent = release.statsDigest;
+    $("#pubDigest").title = `tx ${release.txHash}`;
   } else {
     $("#pubMean").textContent = "—";
     $("#pubSharpe").textContent = "—";
     $("#pubMaxDD").textContent = "—";
-    $("#pubDigest").textContent = "0x…";
+    $("#pubDigest").textContent = (status.hasReleased && state.privacy.onchainDigest) || "0x…";
+    $("#pubDigest").title = "";
   }
 
   const button = $("#publishReleaseButton");
@@ -1312,8 +1342,8 @@ $("#redeployButton").addEventListener("click", (event) =>
     state.contracts.venue = new ethers.Contract(deployment.addresses.venue, deployment.abis.venue, state.provider);
     state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
     state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
-    state.contracts.batch = new ethers.Contract(deployment.batch.address, deployment.abis.batch, state.provider);
-    state.contracts.registry = new ethers.Contract(deployment.registry.address, deployment.abis.registry, state.provider);
+    Object.assign(state.contracts, optionalContracts(deployment, state.provider));
+    applyFeatures(deployment);
     state.contracts.vaults = deployment.vaults.map(
       (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
     );

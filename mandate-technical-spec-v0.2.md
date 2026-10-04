@@ -377,7 +377,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - 별도 rejection evidence와 freeze 경로
 - MockVenue deterministic price, stale/deviation 시나리오
 - Batch escrow, nonce, deadline, cancellation, settlement root, claim, refund
-- Reentrancy 및 malicious adapter/token fuzzing
+- Reentrancy 및 malicious adapter/token fuzzing [구현 기준 2026-10-04]: `contracts/test/Reentrancy.t.sol`이 악의적 ERC20 asset으로 allocate()/withdraw() 상호 재진입을 검증하고, `contracts/test/Mandate.invariant.t.sol`이 Foundry stateful invariant로 §6의 불변식 1, 5, 6, 11, 12를 Vault/RiskGuard/MockVenueAdapter 위에서 임의 호출 순서로 검증한다. Registry/DP Reporter 관련 불변식(8, 9)은 해당 컨트랙트가 없어 범위 밖이다.
 
 ### Reporter
 

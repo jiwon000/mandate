@@ -6,6 +6,7 @@
     "web": "node web/server.mjs",
     "compile": "node contracts/tools/compile.mjs",
     "test:contracts": "node --test contracts/test-js/*.test.mjs",
+    "test:invariant": "forge test",
     "deploy:monad": "node contracts/script/deploy.mjs",
     "keeper:monad": "node contracts/script/keeper.mjs",
     "clean": "hardhat clean"

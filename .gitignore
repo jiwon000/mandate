@@ -4,6 +4,11 @@ contracts/artifacts-local/
 contracts/cache/
 contracts/out/
 contracts/broadcast/
+# Foundry: forge's own build cache (root-level, distinct from contracts/cache
+# above) and fetched dependencies (forge-std) -- reinstalled with `forge install`,
+# same convention as node_modules/ and npm ci.
+/cache/
+contracts/lib/
 .env
 .env.local
 .env.*

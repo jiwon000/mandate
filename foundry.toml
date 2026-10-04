@@ -1,6 +1,8 @@
-# Kept so Foundry tooling (forge build, forge fmt, slither) can be pointed at the
-# sources. The test suite runs on Hardhat 3 / node:test (contracts/test-js), not
-# forge, and there is no contracts/test directory yet.
+# Solidity-level correctness (`preview -> checkBefore -> execute -> validate`
+# atomicity, freeze/unwind state transitions) still lives on Hardhat 3 / node:test
+# (contracts/test-js). Foundry here is for property-based coverage node:test can't
+# express cheaply: fuzzing order sequences and running stateful invariants against
+# the real Vault/RiskGuard/Adapter contracts (contracts/test).
 [profile.default]
 src = "contracts/src"
 test = "contracts/test"
@@ -11,6 +13,10 @@ solc_version = "0.8.37"
 evm_version = "prague"
 optimizer = true
 optimizer_runs = 200
+remappings = [
+    "forge-std/=contracts/lib/forge-std/src/",
+    "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",
+]
 
 [fuzz]
 runs = 256
@@ -18,4 +24,5 @@ runs = 256
 [invariant]
 runs = 128
 depth = 32
+fail_on_revert = false
 

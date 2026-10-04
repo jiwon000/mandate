@@ -7,6 +7,8 @@
 .agent-row.selected{background:rgba(52,125,255,.07);box-shadow:inset 2px 0 0 var(--blue)}
 .agent-cell b[data-cell]{font-variant-numeric:tabular-nums}
 .status.frozen{color:var(--orange)}
+.status.closed{color:var(--muted)}
+.dot.grey{background:var(--muted)}
 .status.warn{color:var(--red)}
 .dot.red{background:var(--red)}
 .agent-cell b.breached{color:var(--red)}

@@ -46,7 +46,7 @@
 
         <div class="section-heading">
           <div><p class="eyebrow">LIVE MARKET</p><h2>Mandate book</h2></div>
-          <div class="legend"><span><i class="dot green"></i>Active</span><span><i class="dot red"></i>Over limit</span><span><i class="dot amber"></i>Frozen</span></div>
+          <div class="legend"><span><i class="dot green"></i>Active</span><span><i class="dot red"></i>Over limit</span><span><i class="dot amber"></i>Frozen</span><span><i class="dot grey"></i>Closed</span></div>
         </div>
         <div class="agent-table" id="leaderboard"></div>
         <p class="disclosure">Sorted by the terms an allocator is asked to accept, not by return. Every cell is a contract read against the chain this page is served from.</p>
@@ -136,6 +136,7 @@
           <div class="control-group">
             <span class="eyebrow">ANYONE</span>
             <button class="button button-primary" id="pokeButton">poke() — prove the breach, take the bounty</button>
+            <button class="button button-secondary" id="unwindButton">unwind() — close a fifth of a frozen position</button>
             <button class="button button-secondary" id="redeployButton">Reset demo</button>
           </div>
         </div>

@@ -157,7 +157,7 @@ async function refresh() {
     state.snapshot = await Promise.all(
       deployment.vaults.map(async (meta, index) => {
         const vault = contracts.vaults[index];
-        const [quote, totalAssets, totalSupply, agentState, position, mark, shares] =
+        const [quote, totalAssets, totalSupply, agentState, position, mark, shares, unwindStepsDone] =
           await Promise.all([
             contracts.guard.quote(meta.address, deployment.addresses.adapter),
             vault.totalAssets(),
@@ -165,7 +165,8 @@ async function refresh() {
             vault.state(),
             contracts.adapter.positionState(meta.address),
             contracts.adapter.markEquity(meta.address),
-            state.wallet ? vault.balanceOf(state.wallet) : Promise.resolve(0n)
+            state.wallet ? vault.balanceOf(state.wallet) : Promise.resolve(0n),
+            vault.unwindStepsDone()
           ]);
 
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
@@ -190,6 +191,7 @@ async function refresh() {
           totalAssets,
           totalSupply,
           agentState: Number(agentState),
+          unwindStepsDone: Number(unwindStepsDone),
           positionNotional: position[0],
           equity6,
           levX100,
@@ -241,6 +243,11 @@ function vaultLabel(address) {
   return match ? match.name : shortAddress(String(address));
 }
 
+// AgentState onchain: 0 Active, 1 Frozen, 2 Closed. Frozen still holds the
+// position; Closed means unwind() took it off the book and only cash is left.
+const STATE_NAMES = ["ACTIVE", "FROZEN", "CLOSED"];
+const stateName = (agentState) => STATE_NAMES[agentState] ?? "UNKNOWN";
+
 function describeLog(log) {
   for (const iface of state.eventInterfaces) {
     let parsed = null;
@@ -286,6 +293,20 @@ function describeLog(log) {
           text: `${vaultLabel(log.address)} · agent frozen, bounty ${usdc(parsed.args.bounty)} mUSDC`,
           tag: "FROZEN",
           kind: "breach"
+        };
+      case "Unwound":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · unwind step ${parsed.args.step}/5 closed ${usd(parsed.args.closedNotional / ASSET_TO_E18)}, realised ${usd(parsed.args.realizedPnl / ASSET_TO_E18)} · bounty ${usdc(parsed.args.bounty)} mUSDC`,
+          tag: "UNWIND",
+          kind: "mark"
+        };
+      case "Closed":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · position fully closed, vault holds cash only`,
+          tag: "CLOSED",
+          kind: "pass"
         };
       case "Allocated":
         return {
@@ -351,10 +372,11 @@ function render() {
 function renderMarket() {
   const totalAum = state.snapshot.reduce((sum, v) => sum + v.totalAssets, 0n);
   const active = state.snapshot.filter((v) => v.agentState === 0).length;
+  const closed = state.snapshot.filter((v) => v.agentState === 2).length;
   $("#statAum").textContent = usd(totalAum);
   $("#statAumSub").textContent = `${state.snapshot.length} vaults, one venue`;
   $("#statMandates").textContent = String(active).padStart(2, "0");
-  $("#statMandatesSub").textContent = `${state.snapshot.length - active} frozen by RiskGuard`;
+  $("#statMandatesSub").textContent = `${state.snapshot.length - active - closed} frozen by RiskGuard${closed ? `, ${closed} closed` : ""}`;
   $("#statPrice").textContent = `$${Number(ethers.formatUnits(state.price, 18)).toFixed(2)}`;
   $("#statPriceSub").textContent = `block #${state.blockNumber} · ${state.blockTimeSeconds}s cadence`;
 
@@ -376,8 +398,9 @@ function renderMarket() {
     // nobody has claimed yet is its own state - and the reason poke() pays.
     const breached = vault.agentState === 0 && (ddOver || levOver);
     const status = cell("state");
-    status.textContent = vault.agentState !== 0 ? "FROZEN" : breached ? "OVER LIMIT" : "ACTIVE";
-    status.classList.toggle("frozen", vault.agentState !== 0);
+    status.textContent = vault.agentState !== 0 ? stateName(vault.agentState) : breached ? "OVER LIMIT" : "ACTIVE";
+    status.classList.toggle("frozen", vault.agentState === 1);
+    status.classList.toggle("closed", vault.agentState === 2);
     status.classList.toggle("warn", breached);
     row.classList.toggle("selected", Number(row.dataset.index) === state.selected);
   }
@@ -386,7 +409,7 @@ function renderMarket() {
 function renderAgent() {
   const vault = state.snapshot[state.selected];
   $("#agentGlyph").textContent = vault.initials;
-  $("#agentEyebrow").textContent = `MANDATE · ${vault.agentState === 0 ? "ACTIVE" : "FROZEN"}`;
+  $("#agentEyebrow").textContent = `MANDATE · ${stateName(vault.agentState)}`;
   $("#agentName").textContent = vault.name;
   $("#agentThesis").textContent = `${vault.thesis} · ETH/USDC on DeterministicMockVenue`;
   $("#agentNav").textContent = nav4(vault.nav);
@@ -488,19 +511,25 @@ function renderAllocate() {
   const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
   const allocateButton = $("#allocateButton");
   allocateButton.disabled = frozen || stale;
-  allocateButton.textContent = stale
-    ? `Mark is ${vault.markAge}s old — nothing prices until it refreshes`
-    : frozen
-      ? "Frozen — allocate() is closed"
-      : "Review allocation";
+  const closed = vault.agentState === 2;
+  allocateButton.textContent = closed
+    ? "Closed — this mandate is over"
+    : stale
+      ? `Mark is ${vault.markAge}s old — nothing prices until it refreshes`
+      : frozen
+        ? "Frozen — allocate() is closed"
+        : "Review allocation";
   const withdrawButton = $("#withdrawButton");
   if (!withdrawButton.dataset.busy) {
-    withdrawButton.disabled = stale;
-    withdrawButton.textContent = stale
-      ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
-      : frozen
-        ? "Withdraw all shares (still open)"
-        : "Withdraw all shares";
+    // A Closed vault holds no position, so withdraw() skips the mark-age check.
+    withdrawButton.disabled = stale && !closed;
+    withdrawButton.textContent = closed
+      ? "Withdraw all shares (cash only, no mark needed)"
+      : stale
+        ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
+        : frozen
+          ? "Withdraw all shares (still open)"
+          : "Withdraw all shares";
   }
 
   updateAmount($("#allocationAmount").value);
@@ -515,32 +544,37 @@ function renderRisk() {
   $("#guardDd").dataset.digits = String(String(vault.drawdownBps).length);
   $("#guardDdLimit").textContent = `/ ${vault.limits.maxDrawdownBps} bps`;
 
-  const frozen = vault.agentState !== 0;
+  const frozen = vault.agentState === 1;
+  const closed = vault.agentState === 2;
   // Breaching a limit does not freeze anything on its own - the vault stays
   // Active until someone calls poke(). That unclaimed window is its own state
   // and the panel has to name it, or the page reads as if nothing happened.
   const ddOver = vault.drawdownBps > vault.limits.maxDrawdownBps;
   const levOver = Number.isFinite(vault.levX100) && vault.levX100 > vault.limits.maxLeverageX100;
-  const breached = !frozen && (ddOver || levOver);
+  const breached = vault.agentState === 0 && (ddOver || levOver);
   const headline = $("#guardHeadline");
-  headline.textContent = frozen
-    ? "Agent frozen"
-    : breached
-      ? "Over the limit"
-      : stale
-        ? "Mark is stale"
-        : "Inside the mandate";
-  headline.classList.toggle("alarm", frozen || stale || breached);
-  $("#guardCopy").textContent = frozen
-    ? "execute() and allocate() are closed. withdraw() is not."
-    : breached
+  headline.textContent = closed
+    ? "Position closed"
+    : frozen
+      ? "Agent frozen"
+      : breached
+        ? "Over the limit"
+        : stale
+          ? "Mark is stale"
+          : "Inside the mandate";
+  headline.classList.toggle("alarm", frozen || (stale && !closed) || breached);
+  $("#guardCopy").textContent = closed
+    ? "unwind() took the whole position off the book. The vault holds cash plus whatever was realised, and withdraw() pays it out without waiting on a mark."
+    : frozen
+      ? `execute() and allocate() are closed. withdraw() is not. Anyone can call unwind() to close the position a fifth at a time (${vault.unwindStepsDone}/5 done) and take 0.01% for the gas.`
+      : breached
       ? `${ddOver ? `Drawdown is ${pct(vault.drawdownBps)} against a ${pct(vault.limits.maxDrawdownBps)} mandate` : `Leverage is ${lev(vault.levX100)} against a ${lev(vault.limits.maxLeverageX100)} mandate`}. Nothing freezes until someone calls poke() - and whoever does is paid for it.`
       : stale
         ? `The last mark is ${vault.markAge}s old and this mandate accepts ${vault.limits.maxMarkAgeSeconds}s. The guard will refuse to act on it.`
         : "Every monitored limit is inside the terms the allocator accepted.";
   const pill = $("#pillMark");
   pill.textContent = `mark ${vault.markAge}s / ${vault.limits.maxMarkAgeSeconds}s`;
-  pill.classList.toggle("stale", stale);
+  pill.classList.toggle("stale", stale && !closed);
 
   const tile = (id, bar, value, used, limit, limitText) => {
     $(id).textContent = value;
@@ -561,6 +595,18 @@ function renderRisk() {
   tile("#tileAge", "#barAge", `${vault.markAge}s`, vault.markAge, vault.limits.maxMarkAgeSeconds, `Limit ${vault.limits.maxMarkAgeSeconds}s`);
 
   $("#pokeButton").textContent = `poke(${vault.name}) — prove the breach, take the bounty`;
+  // unwind() only has work to do on a Frozen vault. Keep the button honest about
+  // that instead of letting it revert with NotFrozen, but never steal it back
+  // from a call that is still in flight.
+  const unwindButton = $("#unwindButton");
+  if (!unwindButton.dataset.busy) {
+    unwindButton.disabled = !frozen;
+    unwindButton.textContent = closed
+      ? `unwind(${vault.name}) — already closed`
+      : frozen
+        ? `unwind(${vault.name}) — step ${vault.unwindStepsDone + 1}/5, close a fifth, take 0.01%`
+        : `unwind(${vault.name}) — needs a frozen vault`;
+  }
 
   const unenforceable = state.snapshot.filter(
     (v) => v.limits.maxMarkAgeSeconds < state.blockTimeSeconds
@@ -739,7 +785,9 @@ $("#withdrawButton").addEventListener("click", (event) =>
         ? `Paid out to the cash on hand — ${usdc(left)} shares stay until the agent frees up more`
         : vault.agentState === 0
           ? "Withdrawn"
-          : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
+          : vault.agentState === 2
+            ? "Withdrawn from a closed vault — cash plus realised PnL, no mark needed"
+            : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
     );
     $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
   })
@@ -782,6 +830,31 @@ $("#pokeButton").addEventListener("click", (event) =>
       after > before
         ? `Breach proved. ${shortAddress(caller)} was paid ${usdc(after - before)} mUSDC and ${vault.name} is frozen.`
         : `${vault.name} re-marked, still inside its mandate. No bounty.`
+    );
+  })
+);
+
+$("#unwindButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "unwind()…", async () => {
+    const vault = state.snapshot[state.selected];
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const before = await state.contracts.usdc.balanceOf(caller);
+    const signer = await state.provider.getSigner(caller);
+    const contract = state.contracts.vaults[state.selected].connect(signer);
+    const receipt = await (await contract.unwind()).wait();
+    const after = await state.contracts.usdc.balanceOf(caller);
+    const closed = receipt.logs.some((log) => {
+      try {
+        return contract.interface.parseLog(log)?.name === "Closed";
+      } catch (ignored) {
+        return false;
+      }
+    });
+    const [remaining] = await state.contracts.adapter.positionState(vault.address);
+    showToast(
+      closed
+        ? `${vault.name} is closed. Nothing is left on the book; ${shortAddress(caller)} took ${usdc(after - before)} mUSDC for the last step.`
+        : `Step done. ${usd(remaining / ASSET_TO_E18)} of ${vault.name} still open; ${shortAddress(caller)} was paid ${usdc(after - before)} mUSDC.`
     );
   })
 );

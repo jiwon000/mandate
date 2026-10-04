@@ -23,11 +23,25 @@ contract MandateVault is ReentrancyGuard {
     error AdapterMismatch();
     error NoMarkedEquity();
     error DepositTooSmall(uint256 minimum);
+    error NotFrozen();
+    error UnwindCooldown();
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
     ///      not rely on the team running a bot for the guarantee to hold.
     uint16 public constant POKE_BOUNTY_BPS = 5;
+
+    /// @notice How many unwind() calls it takes to close a frozen position.
+    /// @dev Each step closes one fifth of the size the vault was frozen with, one step
+    ///      per block, so a close is spread over blocks instead of hitting the venue in
+    ///      one print. Five steps is the cadence Hyperliquid uses when it closes 20% of
+    ///      a vault's positions per round to free withdrawal margin.
+    uint8 public constant UNWIND_STEPS = 5;
+
+    /// @notice Share of idle assets paid to whoever lands an unwind() step.
+    /// @dev 0.01% per step, 0.05% for the full close: the same keeper economics as the
+    ///      poke bounty, so nobody has to be trusted to finish what the freeze started.
+    uint16 public constant UNWIND_BOUNTY_BPS = 1;
 
     /// @notice Shares locked forever out of the first deposit.
     /// @dev Same defence as Uniswap V2's MINIMUM_LIQUIDITY. Without it the first
@@ -49,6 +63,9 @@ contract MandateVault is ReentrancyGuard {
     ///      refuses any other adapter rather than letting the two drift apart.
     IVenueAdapter public immutable venueAdapter;
     AgentState public state = AgentState.Active;
+    /// @notice unwind() steps landed so far; UNWIND_STEPS means the position is gone.
+    uint8 public unwindStepsDone;
+    uint256 public lastUnwindBlock;
 
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
@@ -58,6 +75,8 @@ contract MandateVault is ReentrancyGuard {
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
     event SharesTransferred(address indexed from, address indexed to, uint256 shares);
     event Frozen(address indexed beneficiary, uint256 bounty);
+    event Unwound(address indexed caller, uint8 step, uint256 closedNotional, int256 realizedPnl, uint256 bounty);
+    event Closed();
 
     constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_, IVenueAdapter adapter_) {
         asset = asset_;
@@ -121,7 +140,10 @@ contract MandateVault is ReentrancyGuard {
         if (balanceOf[msg.sender] < shares) revert InsufficientShares();
 
         (uint256 equity, uint256 markedAt) = markedAssets();
-        riskGuard.requireFreshMark(address(this), markedAt);
+        // A Closed vault holds no position, so no price can change what a share is
+        // worth and a stale mark has nothing left to misprice. Everywhere else the
+        // freshness rule stands.
+        if (state != AgentState.Closed) riskGuard.requireFreshMark(address(this), markedAt);
         if (equity == 0) revert NoMarkedEquity();
 
         uint256 supply = totalSupply;
@@ -178,8 +200,10 @@ contract MandateVault is ReentrancyGuard {
     /// @notice Stop the agent and pay the caller who proved the breach.
     /// @dev Only the RiskGuard may call. Withdrawals stay open while Frozen so
     ///      allocators keep their exit; only allocate() and execute() are closed.
-    ///      Deliberately not `nonReentrant`: it is reached from inside execute()'s
-    ///      guarded frame. State is written before the single ERC20 transfer.
+    ///      The position is not touched here: closing it is unwind()'s job, and a
+    ///      freeze must not depend on a fill going through. Deliberately not
+    ///      `nonReentrant`: it is reached from inside execute()'s guarded frame.
+    ///      State is written before the single ERC20 transfer.
     function freeze(address beneficiary) external returns (uint256 bounty) {
         if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
         if (state != AgentState.Active) revert AgentNotActive();
@@ -192,5 +216,42 @@ contract MandateVault is ReentrancyGuard {
             bounty = 0;
         }
         emit Frozen(beneficiary, bounty);
+    }
+
+    /// @notice Close one fifth of a frozen vault's position and pay the caller.
+    /// @dev Permissionless, one step per block. A freeze stops the agent but leaves the
+    ///      position open, and a stopped agent cannot reduce it; without this the loss
+    ///      keeps running and, on a venue that holds margin, allocators can only redeem
+    ///      the cash left in the vault. Steps close 1/5, 1/4, 1/3, 1/2 and then all of
+    ///      what remains, so five steps take the size at freeze off the book in equal
+    ///      slices. When nothing is left the vault moves Frozen -> Closed, which is
+    ///      terminal: no trades, no deposits, withdrawals only.
+    function unwind() external nonReentrant returns (bool closed) {
+        if (state != AgentState.Frozen) revert NotFrozen();
+        if (lastUnwindBlock == block.number) revert UnwindCooldown();
+        lastUnwindBlock = block.number;
+
+        uint256 closedNotional;
+        int256 realizedPnl;
+        uint8 step = unwindStepsDone;
+        (uint256 positionNotional,) = venueAdapter.positionState(address(this));
+        if (positionNotional != 0) {
+            uint256 stepsLeft = step < UNWIND_STEPS ? UNWIND_STEPS - step : 1;
+            (closedNotional, realizedPnl) =
+                venueAdapter.reduce(address(this), uint16(10_000 / stepsLeft));
+            step += 1;
+            unwindStepsDone = step;
+            (positionNotional,) = venueAdapter.positionState(address(this));
+        }
+
+        uint256 bounty = (totalAssets() * UNWIND_BOUNTY_BPS) / 10_000;
+        if (bounty > 0) asset.safeTransfer(msg.sender, bounty);
+        emit Unwound(msg.sender, step, closedNotional, realizedPnl, bounty);
+
+        if (positionNotional == 0) {
+            state = AgentState.Closed;
+            emit Closed();
+            closed = true;
+        }
     }
 }

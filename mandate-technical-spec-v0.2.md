@@ -86,6 +86,8 @@ interface IMandateVault {
     function allocate(uint256 assets, address receiver) external returns (uint256 shares);
     function withdraw(uint256 shares, address receiver) external returns (uint256 assets);
     function execute(address adapter, bytes calldata order) external;
+    /// 동결된 vault의 포지션을 누구나 5단계로 줄인다. 다 줄이면 Closed.
+    function unwind() external returns (bool closed);
 }
 ```
 
@@ -114,6 +116,12 @@ interface IVenueAdapter {
 
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional);
+
+    /// 현재 포지션의 fractionBps만큼을 reduce-only로 닫는다. vault만 호출한다.
+    /// 어댑터가 보이는 포지션에서 닫는 주문을 만들므로 호출자는 venue 단위·방향을 몰라도 된다.
+    /// mark 대비 슬리피지 상한(mock: 1%)보다 나쁜 체결은 revert한다.
+    function reduce(address vault, uint16 fractionBps)
+        external returns (uint256 closedNotional, int256 realizedPnl);
 
     /// 현금 + 미실현 손익을 venue 가격으로 평가한 지분 가치. markedAt은 venue의 가격 시각.
     function markEquity(address vault)
@@ -155,6 +163,7 @@ execute request
 3. 거래 사이의 검사: 누구나 `MandateRiskGuard.poke(vault, adapter)`를 호출할 수 있다. NAV/share가 고점 대비 `maxDrawdownBps`보다 더 떨어져 있으면 vault를 `Frozen`으로 전환하고, vault가 호출자에게 자산의 `POKE_BOUNTY_BPS`(0.05%)를 바운티로 지급한다. 신뢰된 keeper가 필요 없다.
 4. mark age: `block.timestamp > markedAt + maxMarkAgeSeconds`이면 execute·allocate·withdraw·poke 모두 `MarkTooOld`로 revert한다. mark가 갱신되면 풀린다.
 5. Frozen 상태: 신규 execute/allocate는 차단하고 allocator withdrawal과 `transferShares`는 유지한다.
+6. Frozen 이후 청산 [구현 기준 2026-09-23]: 동결은 에이전트를 멈출 뿐 포지션을 닫지 않으므로 손실은 계속 커질 수 있다. 누구나 `MandateVault.unwind()`를 호출할 수 있다. 한 번 호출할 때마다 어댑터의 `reduce()`로 동결 시점 크기의 1/5을 reduce-only로 닫고(잔여분의 2000·2500·3333·5000·10000 bps 순, 마지막은 전량), venue mark 대비 `MAX_UNWIND_SLIPPAGE_BPS`(1%) 안에서만 체결하며, 호출자에게 현금의 `UNWIND_BOUNTY_BPS`(0.01%)를 지급한다. 블록당 한 단계(`UnwindCooldown`). 포지션이 0이 되면 `Frozen -> Closed`로 전이하고 `Closed` 이벤트를 낸다. Closed에서는 execute·allocate·unwind가 모두 revert하고, withdraw는 mark age 검사를 건너뛴다(포지션이 없으니 가격이 지분 가치를 바꾸지 못한다). Hyperliquid가 인출 증거금 부족 시 20%씩 닫는 방식을 따랐다.
 
 [구현 기준 2026-09-22] v0.2의 `recordRejectedOrder`·`maxConsecutiveRejects`·guardian `freezeAgent`·`ExecutionRelay` 경로는 폐기했다. 거부 횟수는 온체인 상태가 아니라 증거 제출 문제를 만들었고, mark-to-market 검사가 같은 목적을 온체인 상태만으로 달성한다.
 
@@ -337,7 +346,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 2. 승인되지 않은 Adapter를 통한 외부 호출은 불가능하다.
 3. 외부 거래 전에 주문·블록·포지션·총노셔널 한도를 검증한다.
 4. Adapter 결과 불일치 시 전체 트랜잭션이 원자적으로 revert된다.
-5. Frozen 이후 execute와 신규 allocate는 차단되며 withdraw는 유지된다.
+5. Frozen 이후 execute와 신규 allocate는 차단되며 withdraw는 유지된다. `unwind()`는 Frozen에서만 동작하고 포지션을 키우거나 뒤집을 수 없다. Closed는 종착 상태다.
 6. 총 발행 shares는 사용자·BatchAllocator claim entitlement와 일치한다.
 7. escrow 자산은 정산 또는 deadline 이후 환불만 가능하다.
 8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다.
@@ -385,7 +394,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - Reporter의 탈중앙화
 - 메인넷 및 실자금 운용
 - 시스템 전역 DP
-- 동결 후 자동 청산. v1의 `Frozen`은 거래·예치만 막고 포지션은 그대로 둔다. 인출은 vault 현금 한도 안에서만 가능하다 (3.4). `Closed` 상태는 정의만 있고 전이가 없다.
+- 동결 후 청산의 자동 실행. `unwind()`는 누구나 부를 수 있고 바운티가 있지만 스스로 실행되지는 않는다(3.4). 아무도 부르지 않으면 포지션은 열린 채로 남고 인출은 현금 한도 안에서만 된다. mock venue는 실현 손익을 토큰으로 정산하지 않으므로 Closed vault의 지분 가치는 현금 + 실현 손익이고 토큰 잔고는 그대로다.
 - 변동성 입력. RiskGuard의 입력은 주문 preview, venue mark(가격·시각), vault 지분·현금뿐이다. 변동성은 어떤 한도에도 들어가지 않는다.
 - 조건 고정. `configure()`는 owner가 지연 없이 재설정할 수 있다. allocator가 읽은 조건이 유지된다는 보장은 아직 없다.
 
@@ -402,7 +411,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 피드백 요지: 매개변수와 범위가 무엇인지, 한도 위반 시 거절인지 동결인지, 동결 뒤에는 어떻게 되는지, 변동성이 체결 전후 어디에 들어가는지. 현재 동작은 3.4(거절 vs 동결)와 README의 "What each term bounds" 표가 답한다. 아래는 그 답에서 비는 부분을 메우는 확장이다.
 
-1. **동결 후 reduce-only 청산.** 동결 시점에 포지션을 닫지 않으면 실제 venue에서는 증거금이 venue에 남고, 동결된 에이전트는 줄일 수도 없다. 확장: 누구나 호출할 수 있는 바운티 있는 `unwind()`가 동결된 포지션을 블록당 일정 비율씩(Hyperliquid는 인출 증거금 부족 시 20%씩 닫는다) 슬리피지 상한 안에서 줄인다. 다 줄이면 `Frozen -> Closed`로 전이하고 allocator는 현금으로 인출한다. `IVenueAdapter`에 reduce-only 진입점이 필요하다. 조건 문구는 "X%에서 에이전트가 멈추고 청산이 시작된다. 확정 손실은 슬리피지와 갭만큼 X%보다 클 수 있다"로 쓴다. 인출 시 비례 청산은 두 번째 경로다.
+1. **동결 후 reduce-only 청산.** [구현 기준 2026-09-23] 3.4의 6번으로 구현했다. 아래는 계획 당시 문안이다. 동결 시점에 포지션을 닫지 않으면 실제 venue에서는 증거금이 venue에 남고, 동결된 에이전트는 줄일 수도 없다. 확장: 누구나 호출할 수 있는 바운티 있는 `unwind()`가 동결된 포지션을 블록당 일정 비율씩(Hyperliquid는 인출 증거금 부족 시 20%씩 닫는다) 슬리피지 상한 안에서 줄인다. 다 줄이면 `Frozen -> Closed`로 전이하고 allocator는 현금으로 인출한다. `IVenueAdapter`에 reduce-only 진입점이 필요하다. 조건 문구는 "X%에서 에이전트가 멈추고 청산이 시작된다. 확정 손실은 슬리피지와 갭만큼 X%보다 클 수 있다"로 쓴다. 인출 시 비례 청산은 두 번째 경로다.
 2. **조건 고정.** mandate 조건 해시를 3.7 Registry release에 앵커하고, 변경은 timelock 뒤에 두거나 새 mandate로만 허용한다.
 3. **체결 전 변동성 검사.** 체결 후 변동성 대응은 1번이 맡고, 여기서는 체결 전만 다룬다. 후보: `Marked`마다 갱신하는 온체인 실현 변동성 추정치(mark 수익률의 EWMA), `preview` 단계 스트레스 테스트(체결 후 포지션에 k-sigma 변동을 가정했을 때 `maxDrawdownBps`를 넘으면 거절), 변동성에 반비례하는 레버리지 상한(`min(maxLeverage, targetVol / sigma)`), 변동성 급등 시 위험을 늘리는 주문만 거절하는 breaker(동결이 아니라 거절). 3.5의 가격 원천에 그대로 의존하므로 mock venue에서는 서버가 밀어 넣는 가격 경로로 시연한다.
 4. **조건 범위 확장.** adapter별 instrument·방향·집중도 whitelist, `FeeTerms` 구현, venue mark와 참조 가격의 편차 상한.

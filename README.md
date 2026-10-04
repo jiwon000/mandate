@@ -108,6 +108,7 @@ The first executable contract milestone is complete:
 - allocator withdrawal after agent activity
 - mark-age limit: a vault whose venue price is older than `maxMarkAgeSeconds` cannot trade, allocate or withdraw until the price is refreshed
 - mark-to-market drawdown against a high-water mark, checked after every trade and by anyone through `poke()`; a breach freezes the vault and pays the caller a bounty
+- reduce-only unwind of a frozen position: anyone can call `unwind()` five times, each closes a fifth of the size at freeze inside a 1% slippage bound and pays 0.01% of cash; the last step moves the vault `Frozen -> Closed`
 - first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
 - epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds
 
@@ -198,6 +199,8 @@ preview order
 
 A revert cannot also preserve a `Frozen` state change, so a rejected order never freezes anything by itself. Instead the guard re-marks the vault after every successful trade, and anyone can call `MandateRiskGuard.poke(vault, adapter)` between trades. If NAV per share sits more than `maxDrawdownBps` below its high-water mark, the guard freezes the vault and the vault pays the caller `POKE_BOUNTY_BPS` (0.05%) of its assets. Frozen vaults cannot trade or accept new allocation; withdrawals and share transfers stay open.
 
+A freeze stops the agent but does not close the position, so the loss can keep growing while the vault waits. Anyone can call `MandateVault.unwind()` on a frozen vault. Each call asks the adapter to close a fifth of the size the position had at the freeze (Hyperliquid uses the same 20% step when a withdrawal needs margin), reduce-only and inside `MAX_UNWIND_SLIPPAGE_BPS` (1%) of the venue mark, and pays the caller `UNWIND_BOUNTY_BPS` (0.01%) of cash. One step per block. When nothing is left on the book the vault moves `Frozen -> Closed`: no trades, no deposits, no more unwinding, and `withdraw()` no longer needs a fresh mark because there is no position left to misprice. The term therefore reads "the agent stops at X% and liquidation starts; the realised loss can exceed X% by slippage and gaps".
+
 Custody and execution permissions are enforced on-chain. Market-value risk limits depend on the configured venue price source; the demo uses a deterministic on-chain mock venue. Production deployments would require a guarded TWAP or validated oracle. Drawdown is mark-to-market against that price source, and `markedAt` is the venue's own price timestamp rather than `block.timestamp`, so a fast chain cannot make a stale feed look fresh.
 
 ### What each term bounds
@@ -211,7 +214,7 @@ Custody and execution permissions are enforced on-chain. Market-value risk limit
 | `minBlocksBetweenTrades` | blocks that must pass between two trades | order reverts |
 | `maxBlockNotional` | notional traded inside one block | order reverts |
 | `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust (0 disables) | trade, allocation, withdrawal and `poke()` revert until the price is refreshed |
-| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open |
+| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
 
 Seven of the eight terms reject one order and stop; only the drawdown term changes the vault's state, and only through a mark. The guard's inputs today are the adapter's order preview, the venue mark (price and its timestamp) and the vault's share supply and cash. Volatility is not an input yet; see the roadmap.
 
@@ -250,15 +253,16 @@ The batch flow (escrow, signed intents, settlement, claims) is covered by contra
 - DP does not hide public blockchain transactions.
 - Batch netting reduces direct linkage but does not provide full allocator anonymity.
 - The v1 Reporter and batcher are centralized, although neither can withdraw vault funds; escrow has an on-chain timeout refund.
-- The deterministic MockVenue proves contract behavior, not production price safety or liquidity.
+- The deterministic MockVenue proves contract behavior, not production price safety or liquidity. It also does not settle: closing a position through `unwind()` books the realised PnL into the venue's cost basis instead of moving tokens, so a `Closed` vault's equity is its cash plus that realised PnL while its token balance is unchanged. A real venue would settle the loss out of margin.
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
 - A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes.
 - A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
 - One vault with a stale mark or in `Frozen` state reverts the whole epoch in `BatchAllocator.settleEpoch()`, since settlement allocates to every vault in a single transaction. The batcher has to leave such vaults out of the batch.
 - The first deposit into a vault permanently locks `MIN_SHARES` (1e3 share units) to a dead address so a first depositor cannot inflate the share price against later allocators. The first depositor pays that dust.
-- `poke()` pays its bounty out of the vault, so a breach costs allocators 0.05% on top of the drawdown. That is the price of not needing a trusted keeper.
+- `poke()` pays its bounty out of the vault, so a breach costs allocators 0.05% on top of the drawdown, and each of the five `unwind()` steps costs another 0.01%. That is the price of not needing a trusted keeper.
+- `unwind()` closes at whatever the venue fills inside a 1% bound of its own mark. In a gap or a thin book the realised loss lands past `maxDrawdownBps`; the term bounds when liquidation starts, not where it ends. If the venue cannot fill inside the bound the step reverts and the position stays open until it can.
 - On a testnet deployment the venue price comes from the deployer's keeper script, so the mark is only as honest as that keeper. A production venue would supply its own price.
-- A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash.
+- A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash or, after a freeze, until `unwind()` has closed the position.
 - FlyGraph is an experimental agent implementation, not part of the protocol's trust model.
 
 ## Repository layout
@@ -280,19 +284,19 @@ Done:
 1. Vault + deterministic MockVenue + one strict Adapter
 2. RiskGuard pre-checks, atomic result validation, mark-to-market drawdown and `poke()` freeze
 3. BatchAllocator escrow, settlement, claims and refunds
+4. Reduce-only `unwind()` after a freeze (from the 2026-09-23 review): permissionless, bountied, five 20% steps with a slippage bound, `Frozen -> Closed`, `IVenueAdapter.reduce()`
 
 Next:
 
-4. Registry release anchor and DP Reporter
-5. Published-release and Privacy Simulator screens; batch flow in the UI
-6. Baseline bot, then FlyGraph as an optional differentiated agent
-7. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
+5. Registry release anchor and DP Reporter
+6. Published-release and Privacy Simulator screens; batch flow in the UI
+7. Baseline bot, then FlyGraph as an optional differentiated agent
+8. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
 
-From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters):
+From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze"; the rest:
 
-8. Reduce-only unwind after a freeze. Today a freeze stops the agent but leaves the position open; on a real venue the margin stays there, so withdrawals are capped by cash and nobody can reduce. Plan: a permissionless, bountied `unwind()` that closes the frozen position in bounded chunks with a slippage bound (Hyperliquid closes 20% per step when a withdrawal needs margin), then moves the vault `Frozen -> Closed` so allocators redeem cash instead of waiting on a stopped agent. Needs a reduce-only entry in `IVenueAdapter`. Term wording becomes "the agent stops at X% and liquidation starts; the realised loss can exceed X% by slippage and gaps".
 9. Locked terms. `configure()` is owner-only and reconfigurable with no delay, so an allocator cannot rely on the terms they read. Plan: anchor the term hash in the Registry release and put term changes behind a timelock or a new mandate.
-10. Volatility-aware pre-trade checks. Pre-trade only; post-trade volatility is item 8. Candidates: an on-chain realised-volatility estimate from the mark series (updated at each `Marked`), a stress test in `preview` that rejects an order if a k-sigma move on the post-trade position would breach `maxDrawdownBps`, and a leverage cap scaled by volatility (`min(maxLeverage, targetVol / sigma)`). A breaker that rejects risk-increasing orders in a volatility spike, rather than freezing.
+10. Volatility-aware pre-trade checks. Pre-trade only; post-trade volatility is item 4. Candidates: an on-chain realised-volatility estimate from the mark series (updated at each `Marked`), a stress test in `preview` that rejects an order if a k-sigma move on the post-trade position would breach `maxDrawdownBps`, and a leverage cap scaled by volatility (`min(maxLeverage, targetVol / sigma)`). A breaker that rejects risk-increasing orders in a volatility spike, rather than freezing.
 11. Term coverage. Per-adapter instrument, direction and concentration whitelist; `FeeTerms`; a bound on how far the venue mark may deviate from a reference price. Recommended ranges for every term, with the sources they come from, are due before the next review.
 
 ## Stack

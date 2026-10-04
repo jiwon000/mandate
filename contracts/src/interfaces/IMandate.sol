@@ -44,6 +44,14 @@ interface IVenueAdapter {
     function positionState(address vault)
         external view returns (uint256 positionNotional, uint256 totalNotional);
 
+    /// @notice Close `fractionBps` of the vault's open position at the venue, reduce-only.
+    /// @dev Vault-only. The adapter derives the closing order from the position it can
+    ///      see, so the caller never has to know the venue's units or direction. Fills
+    ///      worse than the adapter's slippage bound against the current mark revert.
+    ///      `closedNotional` is what came off the book at the fill price.
+    function reduce(address vault, uint16 fractionBps)
+        external returns (uint256 closedNotional, int256 realizedPnl);
+
     /// @notice Vault equity marked to the venue's current price, in asset decimals.
     /// @dev equity = idle asset balance + unrealised PnL on the open position.
     ///      `markedAt` is the venue's own price timestamp, not block.timestamp, so a

@@ -42,3 +42,10 @@
 #eventFeed{max-height:424px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 #eventFeed .feed-item:last-child{border-bottom:0}
 .button:disabled{opacity:.45;cursor:not-allowed;transform:none;border-color:var(--line)}
+
+/* live mode: the chain sets its own block time and only the operator resets */
+.live-only{display:none;font-size:10px;letter-spacing:.04em;align-self:center}
+body.live .blocktime-toggle{display:none}
+body.live:not(.admin) #redeployButton{display:none}
+body.live .live-only{display:inline}
+.feed-item time a{color:inherit;text-decoration:underline dotted}

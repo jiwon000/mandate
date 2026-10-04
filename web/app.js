@@ -24,7 +24,13 @@ const state = {
   navSeries: new Map(),
   feed: [],
   lastScannedBlock: 0,
-  busy: false
+  busy: false,
+  // Live mode: the chain is a real network, the server signs for the demo
+  // accounts, and the oracle paces itself to whether anyone is watching.
+  live: false,
+  network: null,
+  oracle: null,
+  adminToken: new URLSearchParams(location.search).get("admin") ?? ""
 };
 
 // --- formatting ---------------------------------------------------------
@@ -121,20 +127,39 @@ async function boot() {
     new ethers.Interface(abis.venue)
   ];
 
-  $("#chainLabel").textContent = `Local EDR · chain ${deployment.chainId}`;
+  state.live = Boolean(deployment.live);
+  state.network = deployment.network ?? null;
+  $("#chainLabel").textContent = state.live
+    ? `${state.network?.label ?? "Live"} · chain ${deployment.chainId}`
+    : `Local EDR · chain ${deployment.chainId}`;
+  document.body.classList.toggle("live", state.live);
+  document.body.classList.toggle("admin", state.live && Boolean(state.adminToken));
   state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
 
   // Block cadence lives on the server, so a reload has to ask for it. Without
   // this the toggle snaps back to 1s while the chain is still mining every 12.
   const status = await (await fetch("/api/control")).json();
   state.blockTimeSeconds = status.blockTimeSeconds;
+  state.oracle = status.oracle ?? null;
   $$("[data-blocktime]").forEach((button) =>
     button.classList.toggle("active", Number(button.dataset.blocktime) === state.blockTimeSeconds)
   );
 
   buildLeaderboardSkeleton();
   await refresh();
-  setInterval(() => refresh().catch(reportError), 900);
+  // A public RPC meters eth_call per request and a refresh is ~40 of them, so
+  // the live page polls at a third of the local pace.
+  setInterval(() => refresh().catch(reportError), state.live ? 2500 : 900);
+  if (state.live) {
+    setInterval(async () => {
+      try {
+        const next = await (await fetch("/api/control")).json();
+        state.oracle = next.oracle ?? null;
+      } catch (ignored) {
+        // the next refresh reports the outage
+      }
+    }, 5000);
+  }
 }
 
 function reportError(error) {
@@ -244,7 +269,7 @@ async function scanLogs() {
 
   for (const log of logs) {
     const item = describeLog(log);
-    if (item) state.feed.unshift(item);
+    if (item) state.feed.unshift({ ...item, hash: log.transactionHash });
   }
   if (state.feed.length > 40) state.feed.length = 40;
 }
@@ -391,7 +416,9 @@ function renderMarket() {
   $("#statMandates").textContent = String(active).padStart(2, "0");
   $("#statMandatesSub").textContent = `${state.snapshot.length - active - closed} frozen by RiskGuard${closed ? `, ${closed} closed` : ""}`;
   $("#statPrice").textContent = `$${Number(ethers.formatUnits(state.price, 18)).toFixed(2)}`;
-  $("#statPriceSub").textContent = `block #${state.blockNumber} · ${state.blockTimeSeconds}s cadence`;
+  $("#statPriceSub").textContent = state.live
+    ? `block #${state.blockNumber} · oracle every ${state.oracle?.cadenceSeconds ?? "–"}s`
+    : `block #${state.blockNumber} · ${state.blockTimeSeconds}s cadence`;
 
   for (const row of $$("#leaderboard .agent-row")) {
     const vault = state.snapshot[Number(row.dataset.index)];
@@ -659,8 +686,9 @@ function renderRisk() {
   const unenforceable = state.snapshot.filter(
     (v) => v.limits.maxMarkAgeSeconds < state.blockTimeSeconds
   );
-  $("#blocktimeNote").textContent =
-    state.blockTimeSeconds === 1
+  $("#blocktimeNote").textContent = state.live
+    ? liveNote()
+    : state.blockTimeSeconds === 1
       ? "Block cadence 1s. Every mandate on this page can be re-marked inside its own mark-age limit."
       : `Block cadence 12s: the oracle cannot re-stamp a mark more often than a block arrives. ${
           unenforceable.length
@@ -668,11 +696,14 @@ function renderRisk() {
             : "Mandates with short mark-age limits become unenforceable."
         }`;
 
+  const explorer = state.network?.explorer;
   $("#eventFeed").innerHTML = state.feed
     .slice(0, 14)
     .map(
       (item) =>
-        `<div class="feed-item ${item.kind}"><time>${item.at}</time><span>${item.text}</span><b>${item.tag}</b></div>`
+        `<div class="feed-item ${item.kind}"><time>${
+          explorer && item.hash ? `<a href="${explorer}/tx/${item.hash}" target="_blank" rel="noopener">${item.at}</a>` : item.at
+        }</time><span>${item.text}</span><b>${item.tag}</b></div>`
     )
     .join("");
 }
@@ -753,7 +784,7 @@ $("#walletButton").addEventListener("click", async (event) => {
   await refresh();
   const balance = await state.contracts.usdc.balanceOf(address);
   $("#walletBalance").textContent = `Balance ${usdc(balance)} mUSDC`;
-  showToast(`Allocator ${shortAddress(address)} connected to the local chain`);
+  showToast(`Allocator ${shortAddress(address)} connected to ${state.live ? state.network?.label ?? "the live chain" : "the local chain"}`);
 });
 
 // --- allocation ---------------------------------------------------------
@@ -921,12 +952,26 @@ $("#unwindButton").addEventListener("click", (event) =>
   })
 );
 
+function liveNote() {
+  const oracle = state.oracle;
+  const where = state.network?.label ?? "a live network";
+  if (!oracle) return `Live on ${where}. Blocks arrive at the chain's own pace; the oracle is a transaction, not a block hook.`;
+  const spent = Number(oracle.spentMon ?? 0).toFixed(2);
+  return (
+    `Live on ${where}. Every click here is a real transaction signed by a demo key the server holds; nothing to install. ` +
+    `The oracle re-marks every ${oracle.cadenceSeconds}s right now (${
+      oracle.active ? "someone is watching" : "idle pace"
+    }; ${oracle.pushes} marks, ${spent} MON of gas so far)` +
+    (oracle.lastError ? `. Last oracle error: ${oracle.lastError}` : ".")
+  );
+}
+
 // --- chain controls -----------------------------------------------------
 async function control(op, value) {
   const response = await fetch("/api/control", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ op, value })
+    body: JSON.stringify({ op, value, token: state.adminToken })
   });
   if (!response.ok) throw new Error((await response.json()).error);
   return response.json();

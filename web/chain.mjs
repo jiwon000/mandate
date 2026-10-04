@@ -3,91 +3,12 @@
 //
 // This is the demo's chain. Nothing here is mocked at the UI layer: the browser
 // talks to these contracts over JSON-RPC and every number it renders is read back
-// from contract state.
+// from contract state. The mandates themselves, and the routine that deploys and
+// seeds them, live in ./mandates.mjs and are shared with the live-RPC deploy.
 import hre from "hardhat";
-import { AbiCoder, BrowserProvider, ContractFactory, parseUnits, formatUnits } from "ethers";
+import { BrowserProvider, Contract, ContractFactory, formatUnits } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
-
-const coder = AbiCoder.defaultAbiCoder();
-const E18 = (n) => parseUnits(String(n), 18);
-const USDC = (n) => parseUnits(String(n), 6);
-
-const START_PRICE = E18(2000);
-
-// Four vaults, one venue, one adapter. They differ only in the mandate their
-// allocators signed - that is the entire point of the screen.
-const MANDATES = [
-  {
-    key: "steady",
-    name: "Steady Basis",
-    initials: "SB",
-    thesis: "Low-leverage basis carry",
-    deposit: USDC(12_000),
-    openSizeE18: E18(3),
-    limits: {
-      maxLeverageX100: 150, maxDrawdownBps: 800, maxMarkAgeSeconds: 60,
-      volWindowSeconds: 300, stressHorizonSeconds: 300, stressSigmasX10: 30
-    }
-  },
-  {
-    key: "range",
-    name: "Range Carry",
-    initials: "RC",
-    thesis: "Mean-reversion inside a band",
-    deposit: USDC(8_000),
-    openSizeE18: E18(6),
-    limits: {
-      maxLeverageX100: 300, maxDrawdownBps: 1200, maxMarkAgeSeconds: 30,
-      volWindowSeconds: 120, stressHorizonSeconds: 120, stressSigmasX10: 30
-    }
-  },
-  {
-    key: "momentum",
-    name: "Momentum Vector",
-    initials: "MV",
-    thesis: "Levered trend following",
-    deposit: USDC(5_000),
-    openSizeE18: E18(10),
-    limits: {
-      maxLeverageX100: 500, maxDrawdownBps: 2000, maxMarkAgeSeconds: 30,
-      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 20
-    }
-  },
-  {
-    key: "tight",
-    name: "Tight Mandate",
-    initials: "TM",
-    thesis: "3% drawdown, 4s mark age",
-    deposit: USDC(6_000),
-    openSizeE18: E18(6),
-    limits: {
-      maxLeverageX100: 300, maxDrawdownBps: 300, maxMarkAgeSeconds: 4,
-      volWindowSeconds: 60, stressHorizonSeconds: 60, stressSigmasX10: 30
-    }
-  }
-];
-// The last three terms are the volatility clause (roadmap item 10): a realised
-// volatility estimate over `volWindowSeconds` of marks, and any order that adds
-// exposure must survive a `stressSigmasX10/10`-sigma move over
-// `stressHorizonSeconds` without breaching maxDrawdownBps. Zero window = no clause.
-
-// Generous notional caps across the board so leverage and drawdown are what
-// actually bind. A cap that never binds teaches nobody anything.
-const NOTIONAL_LIMITS = {
-  minBlocksBetweenTrades: 0,
-  maxOrderNotional: E18(25_000),
-  maxPositionNotional: E18(40_000),
-  maxTotalNotional: E18(40_000),
-  maxBlockNotional: E18(25_000)
-};
-
-// JSON has no BigInt, and the notional caps are 1e18-scaled. Ship them as decimal
-// strings so the browser can BigInt() them back without losing precision.
-function serialiseLimits(limits) {
-  return Object.fromEntries(
-    Object.entries(limits).map(([key, value]) => [key, typeof value === "bigint" ? value.toString() : value])
-  );
-}
+import { START_PRICE, deployDemoSystem } from "./mandates.mjs";
 
 export async function startChain() {
   const compiled = compileContracts();
@@ -102,7 +23,7 @@ export async function startChain() {
   const owner = await provider.getSigner(0);
   const allocator = await provider.getSigner(1);
   const keeper = await provider.getSigner(9);
-  const agents = await Promise.all(MANDATES.map((_, i) => provider.getSigner(2 + i)));
+  const agents = await Promise.all([2, 3, 4, 5].map((i) => provider.getSigner(i)));
 
   const deploy = async (source, name, args = []) => {
     const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
@@ -115,84 +36,13 @@ export async function startChain() {
   let deployment = null;
   let venue = null;
   let guard = null;
-  let adapterAddress = null;
 
   async function setup() {
-    // The vaults' own allocation and opening trades are the first entries the
-    // execution feed shows, so the browser needs to know where to start reading.
-    const startBlock = await provider.getBlockNumber();
-    const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
-    guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
-    venue = await deploy("mocks/DeterministicMockVenue", "DeterministicMockVenue", [basePriceE18]);
-    const adapter = await deploy("MockVenueAdapter", "MockVenueAdapter", [await venue.getAddress()]);
-    adapterAddress = await adapter.getAddress();
-    await (await venue.setAdapter(adapterAddress, true)).wait();
-
-    const allocatorAddress = await allocator.getAddress();
-    const totalDeposits = MANDATES.reduce((sum, m) => sum + m.deposit, 0n);
-    await (await usdc.mint(allocatorAddress, totalDeposits + USDC(20_000))).wait();
-
-    const vaults = [];
-    for (const [index, mandate] of MANDATES.entries()) {
-      const agentAddress = await agents[index].getAddress();
-      const vault = await deploy("MandateVault", "MandateVault", [
-        await usdc.getAddress(),
-        await guard.getAddress(),
-        agentAddress,
-        await adapter.getAddress()
-      ]);
-      const vaultAddress = await vault.getAddress();
-
-      await (await guard.setAdapter(vaultAddress, await adapter.getAddress(), true)).wait();
-      await (await guard.configure(vaultAddress, { ...NOTIONAL_LIMITS, ...mandate.limits })).wait();
-      // Terms are final before the first deposit; the vault would refuse it otherwise.
-      await (await guard.lockTerms(vaultAddress)).wait();
-
-      // Seed the vault, then let its agent open the position its mandate allows.
-      await (await usdc.connect(allocator).approve(vaultAddress, mandate.deposit)).wait();
-      await (await vault.connect(allocator).allocate(mandate.deposit, allocatorAddress)).wait();
-      // Deploying and configuring burns blocks, and every block burns chain time.
-      // Re-stamp the mark first or a tight maxMarkAgeSeconds rejects the opening
-      // trade - which is the guard working, just not what we want at seed time.
-      await (await venue.setPrice(basePriceE18)).wait();
-      const order = coder.encode(["int256", "uint256"], [mandate.openSizeE18, basePriceE18 * 2n]);
-      await (await vault.connect(agents[index]).execute(await adapter.getAddress(), order)).wait();
-
-      vaults.push({
-        ...mandate,
-        address: vaultAddress,
-        agent: agentAddress,
-        termsHash: await guard.termsHash(vaultAddress),
-        deposit: mandate.deposit.toString(),
-        openSizeE18: mandate.openSizeE18.toString(),
-        limits: serialiseLimits({ ...NOTIONAL_LIMITS, ...mandate.limits })
-      });
-    }
-
-    deployment = {
-      chainId: Number((await provider.getNetwork()).chainId),
-      addresses: {
-        usdc: await usdc.getAddress(),
-        guard: await guard.getAddress(),
-        venue: await venue.getAddress(),
-        adapter: await adapter.getAddress()
-      },
-      accounts: {
-        owner: await owner.getAddress(),
-        allocator: allocatorAddress,
-        keeper: await keeper.getAddress()
-      },
-      abis: {
-        vault: abiOf("MandateVault", "MandateVault"),
-        guard: abiOf("MandateRiskGuard", "MandateRiskGuard"),
-        adapter: abiOf("MockVenueAdapter", "MockVenueAdapter"),
-        venue: abiOf("mocks/DeterministicMockVenue", "DeterministicMockVenue"),
-        usdc: abiOf("mocks/MockUSDC", "MockUSDC")
-      },
-      vaults,
-      startBlock,
-      startedAt: Date.now()
-    };
+    deployment = await deployDemoSystem({
+      deploy, abiOf, provider, owner, allocator, agents, keeper, basePriceE18
+    });
+    venue = new Contract(deployment.addresses.venue, deployment.abis.venue, owner);
+    guard = new Contract(deployment.addresses.guard, deployment.abis.guard, keeper);
     return deployment;
   }
 
@@ -241,7 +91,7 @@ export async function startChain() {
       for (const vault of deployment.vaults) {
         if (Number(vault.limits.volWindowSeconds) === 0) continue;
         try {
-          await (await guard.connect(keeper).observe(vault.address, adapterAddress)).wait();
+          await (await guard.observe(vault.address, deployment.addresses.adapter)).wait();
         } catch (error) {
           console.error("[observe]", vault.key, error.shortMessage || error.message);
         }
@@ -258,6 +108,7 @@ export async function startChain() {
   const control = {
     async status() {
       return {
+        live: false,
         blockTimeSeconds,
         priceE18: (await venue.priceE18()).toString(),
         markedAt: Number(await venue.updatedAt()),
@@ -297,6 +148,7 @@ export async function startChain() {
     provider: chain.provider,
     deployment: () => deployment,
     control,
+    touch() {},
     async close() {
       clearInterval(timer);
       await chain.close();

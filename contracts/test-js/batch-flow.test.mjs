@@ -37,7 +37,14 @@ async function fixture(t) {
     );
   }
   vaults.sort((a, b) => BigInt(a.target) < BigInt(b.target) ? -1 : 1);
+  // A vault takes no deposit, batched or not, until its terms are configured and locked.
+  const limits = {
+    maxLeverageX100: 100, maxDrawdownBps: 2_000, minBlocksBetweenTrades: 0, maxMarkAgeSeconds: 0,
+    maxOrderNotional: 10n ** 22n, maxPositionNotional: 10n ** 22n, maxTotalNotional: 10n ** 22n, maxBlockNotional: 10n ** 22n
+  };
   for (const vault of vaults) {
+    await (await guard.configure(vault.target, limits)).wait();
+    await (await guard.lockTerms(vault.target)).wait();
     await (await usdc.mint(owner.address, SEED)).wait();
     await (await usdc.approve(vault.target, SEED)).wait();
     await (await vault.allocate(SEED, owner.address)).wait();

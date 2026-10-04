@@ -70,4 +70,7 @@ interface IRiskGuard {
 
     /// @notice Revert unless a mark taken at `markedAt` is still fresh enough to price against.
     function requireFreshMark(address vault, uint256 markedAt) external view;
+
+    /// @notice True once the vault's limits and adapter allowlist can no longer change.
+    function termsLocked(address vault) external view returns (bool);
 }

@@ -25,6 +25,7 @@ contract MandateVault is ReentrancyGuard {
     error DepositTooSmall(uint256 minimum);
     error NotFrozen();
     error UnwindCooldown();
+    error TermsNotLocked();
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -100,6 +101,9 @@ contract MandateVault is ReentrancyGuard {
     function allocate(uint256 assets, address receiver) external nonReentrant returns (uint256 shares) {
         if (receiver == address(0)) revert InvalidReceiver();
         if (state != AgentState.Active) revert AgentNotActive();
+        // Money only goes in behind terms the owner can no longer rewrite. This is the
+        // line that turns "read the terms" into "the terms you read are the terms".
+        if (!riskGuard.termsLocked(address(this))) revert TermsNotLocked();
         if (assets == 0) revert ZeroAmount();
 
         uint256 supply = totalSupply;

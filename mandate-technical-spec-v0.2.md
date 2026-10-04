@@ -83,6 +83,7 @@ interface IMandateVault {
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
     event PerfFeeAccrued(uint256 amount, uint256 highWater);
 
+    /// RiskGuard에서 조건이 잠기기 전에는 TermsNotLocked로 revert한다 (3.4의 7번).
     function allocate(uint256 assets, address receiver) external returns (uint256 shares);
     function withdraw(uint256 shares, address receiver) external returns (uint256 assets);
     function execute(address adapter, bytes calldata order) external;
@@ -164,6 +165,7 @@ execute request
 4. mark age: `block.timestamp > markedAt + maxMarkAgeSeconds`이면 execute·allocate·withdraw·poke 모두 `MarkTooOld`로 revert한다. mark가 갱신되면 풀린다.
 5. Frozen 상태: 신규 execute/allocate는 차단하고 allocator withdrawal과 `transferShares`는 유지한다.
 6. Frozen 이후 청산 [구현 기준 2026-09-23]: 동결은 에이전트를 멈출 뿐 포지션을 닫지 않으므로 손실은 계속 커질 수 있다. 누구나 `MandateVault.unwind()`를 호출할 수 있다. 한 번 호출할 때마다 어댑터의 `reduce()`로 동결 시점 크기의 1/5을 reduce-only로 닫고(잔여분의 2000·2500·3333·5000·10000 bps 순, 마지막은 전량), venue mark 대비 `MAX_UNWIND_SLIPPAGE_BPS`(1%) 안에서만 체결하며, 호출자에게 현금의 `UNWIND_BOUNTY_BPS`(0.01%)를 지급한다. 블록당 한 단계(`UnwindCooldown`). 포지션이 0이 되면 `Frozen -> Closed`로 전이하고 `Closed` 이벤트를 낸다. Closed에서는 execute·allocate·unwind가 모두 revert하고, withdraw는 mark age 검사를 건너뛴다(포지션이 없으니 가격이 지분 가치를 바꾸지 못한다). Hyperliquid가 인출 증거금 부족 시 20%씩 닫는 방식을 따랐다.
+7. 조건 잠금 [구현 기준 2026-09-23]: `MandateRiskGuard.lockTerms(vault)`는 owner만 부를 수 있고 되돌릴 수 없다. 잠긴 뒤에는 `configure()`와 `setAdapter()`가 `LimitsLocked`로 revert하고, 잠기기 전에는 `MandateVault.allocate()`가 `TermsNotLocked`로 revert한다. 돈은 owner가 더는 고칠 수 없는 조건 뒤로만 들어간다. `termsHash(vault)`는 `RiskLimits`를 필드 순서대로 `abi.encode`한 keccak256이고 `TermsLocked(vault, termsHash)` 이벤트에 실린다. timelock이나 수정 경로는 없다. 조건이 다르면 새 vault다. 3.7 Registry release가 생기면 이 해시를 앵커한다.
 
 [구현 기준 2026-09-22] v0.2의 `recordRejectedOrder`·`maxConsecutiveRejects`·guardian `freezeAgent`·`ExecutionRelay` 경로는 폐기했다. 거부 횟수는 온체인 상태가 아니라 증거 제출 문제를 만들었고, mark-to-market 검사가 같은 목적을 온체인 상태만으로 달성한다.
 
@@ -352,6 +354,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 8. cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다.
 9. 동일 epoch/pinnedBlock/statsVersion의 digest는 변경할 수 없다.
 10. malicious token/venue callback이 Vault 회계에 reentrancy를 일으킬 수 없다.
+11. allocate는 조건이 잠긴 vault에만 들어가고, 잠긴 조건(한도와 adapter allowlist)은 이후 바뀌지 않는다.
 
 ## 7. 테스트 전략
 
@@ -396,7 +399,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - 시스템 전역 DP
 - 동결 후 청산의 자동 실행. `unwind()`는 누구나 부를 수 있고 바운티가 있지만 스스로 실행되지는 않는다(3.4). 아무도 부르지 않으면 포지션은 열린 채로 남고 인출은 현금 한도 안에서만 된다. mock venue는 실현 손익을 토큰으로 정산하지 않으므로 Closed vault의 지분 가치는 현금 + 실현 손익이고 토큰 잔고는 그대로다.
 - 변동성 입력. RiskGuard의 입력은 주문 preview, venue mark(가격·시각), vault 지분·현금뿐이다. 변동성은 어떤 한도에도 들어가지 않는다.
-- 조건 고정. `configure()`는 owner가 지연 없이 재설정할 수 있다. allocator가 읽은 조건이 유지된다는 보장은 아직 없다.
+- 조건 수정 경로. 잠긴 조건은 timelock으로도 바꿀 수 없다(3.4의 7번). 조건을 바꾸려면 새 vault를 띄운다. 잠금은 한도와 adapter allowlist를 덮고 venue 가격 원천은 덮지 않는다. owner가 `lockTerms()`를 부르지 않으면 아무도 예치할 수 없는 vault로 남는다. Registry release 앵커는 3.7이 구현될 때.
 
 ## 9. 이후 확장
 
@@ -412,7 +415,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 피드백 요지: 매개변수와 범위가 무엇인지, 한도 위반 시 거절인지 동결인지, 동결 뒤에는 어떻게 되는지, 변동성이 체결 전후 어디에 들어가는지. 현재 동작은 3.4(거절 vs 동결)와 README의 "What each term bounds" 표가 답한다. 아래는 그 답에서 비는 부분을 메우는 확장이다.
 
 1. **동결 후 reduce-only 청산.** [구현 기준 2026-09-23] 3.4의 6번으로 구현했다. 아래는 계획 당시 문안이다. 동결 시점에 포지션을 닫지 않으면 실제 venue에서는 증거금이 venue에 남고, 동결된 에이전트는 줄일 수도 없다. 확장: 누구나 호출할 수 있는 바운티 있는 `unwind()`가 동결된 포지션을 블록당 일정 비율씩(Hyperliquid는 인출 증거금 부족 시 20%씩 닫는다) 슬리피지 상한 안에서 줄인다. 다 줄이면 `Frozen -> Closed`로 전이하고 allocator는 현금으로 인출한다. `IVenueAdapter`에 reduce-only 진입점이 필요하다. 조건 문구는 "X%에서 에이전트가 멈추고 청산이 시작된다. 확정 손실은 슬리피지와 갭만큼 X%보다 클 수 있다"로 쓴다. 인출 시 비례 청산은 두 번째 경로다.
-2. **조건 고정.** mandate 조건 해시를 3.7 Registry release에 앵커하고, 변경은 timelock 뒤에 두거나 새 mandate로만 허용한다.
+2. **조건 고정.** [구현 기준 2026-09-23] 3.4의 7번으로 구현했다(`lockTerms`, 잠금 전 예치 거부, `termsHash`). Registry 앵커는 3.7과 함께, timelock은 두지 않았다. 아래는 계획 당시 문안이다. mandate 조건 해시를 3.7 Registry release에 앵커하고, 변경은 timelock 뒤에 두거나 새 mandate로만 허용한다.
 3. **체결 전 변동성 검사.** 체결 후 변동성 대응은 1번이 맡고, 여기서는 체결 전만 다룬다. 후보: `Marked`마다 갱신하는 온체인 실현 변동성 추정치(mark 수익률의 EWMA), `preview` 단계 스트레스 테스트(체결 후 포지션에 k-sigma 변동을 가정했을 때 `maxDrawdownBps`를 넘으면 거절), 변동성에 반비례하는 레버리지 상한(`min(maxLeverage, targetVol / sigma)`), 변동성 급등 시 위험을 늘리는 주문만 거절하는 breaker(동결이 아니라 거절). 3.5의 가격 원천에 그대로 의존하므로 mock venue에서는 서버가 밀어 넣는 가격 경로로 시연한다.
 4. **조건 범위 확장.** adapter별 instrument·방향·집중도 whitelist, `FeeTerms` 구현, venue mark와 참조 가격의 편차 상한.
 5. **다음 발표 전 검증 과제.** 8개 조건 각각의 권장 범위와 근거. 확인할 자료: 거래소의 변동성 연동 증거금 구간, DeFi 위험 매개변수 설정 관행, vol-targeting 문헌, 온체인 변동성 원천. 아직 확인하지 않은 항목은 발표에서 "확인 중"으로 표시한다.

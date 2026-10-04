@@ -19,7 +19,7 @@ export const BASE_LIMITS = {
 
 /// One vault funded with 1,000 mUSDC, one venue at $2,000, one agent, one keeper,
 /// and a 0.5 ETH order that lands exactly on 1.00x leverage.
-export async function fixture(t, limitOverrides = {}) {
+export async function fixture(t, limitOverrides = {}, { lockTerms = true } = {}) {
   const chain = await hre.network.create();
   t.after(() => chain.close());
   const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
@@ -54,10 +54,16 @@ export async function fixture(t, limitOverrides = {}) {
   await (await guard.setAdapter(vaultAddress, adapterAddress, true)).wait();
   await (await guard.configure(vaultAddress, { ...BASE_LIMITS, ...limitOverrides })).wait();
 
+  // Deposits need final terms, so the seed deposit comes after the lock. A test that
+  // wants to watch the lock itself, or change the terms first, opts out of both and
+  // locks and funds on its own.
   const deposit = parseUnits("1000", 6);
-  await (await usdc.mint(await allocator.getAddress(), deposit)).wait();
-  await (await usdc.connect(allocator).approve(vaultAddress, deposit)).wait();
-  await (await vault.connect(allocator).allocate(deposit, await allocator.getAddress())).wait();
+  if (lockTerms) {
+    await (await guard.lockTerms(vaultAddress)).wait();
+    await (await usdc.mint(await allocator.getAddress(), deposit)).wait();
+    await (await usdc.connect(allocator).approve(vaultAddress, deposit)).wait();
+    await (await vault.connect(allocator).allocate(deposit, await allocator.getAddress())).wait();
+  }
 
   // 0.5 ETH @ $2000 = $1000 notional against $1000 equity: exactly 1.00x.
   const order = coder.encode(["int256", "uint256"], [parseUnits("0.5", 18), parseUnits("2100", 18)]);

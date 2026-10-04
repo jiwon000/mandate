@@ -422,6 +422,10 @@ function renderAgent() {
   $("#agentAumSub").textContent = `${usdc(vault.totalSupply)} shares outstanding`;
   $("#agentAddress").textContent = vault.address;
   $("#agentKey").textContent = vault.agent;
+  // The hash the allocator is asked to accept. Locked onchain before the first
+  // deposit, so it cannot drift from what this page showed.
+  $("#agentTerms").textContent = `locked ${vault.termsHash.slice(0, 10)}…${vault.termsHash.slice(-6)}`;
+  $("#agentTerms").title = vault.termsHash;
 
   const rows = [
     ["Leverage", vault.levX100, vault.limits.maxLeverageX100, lev(vault.levX100), lev(vault.limits.maxLeverageX100)],

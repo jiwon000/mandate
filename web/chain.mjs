@@ -122,6 +122,8 @@ export async function startChain() {
 
       await (await guard.setAdapter(vaultAddress, await adapter.getAddress(), true)).wait();
       await (await guard.configure(vaultAddress, { ...NOTIONAL_LIMITS, ...mandate.limits })).wait();
+      // Terms are final before the first deposit; the vault would refuse it otherwise.
+      await (await guard.lockTerms(vaultAddress)).wait();
 
       // Seed the vault, then let its agent open the position its mandate allows.
       await (await usdc.connect(allocator).approve(vaultAddress, mandate.deposit)).wait();
@@ -137,6 +139,7 @@ export async function startChain() {
         ...mandate,
         address: vaultAddress,
         agent: agentAddress,
+        termsHash: await guard.termsHash(vaultAddress),
         deposit: mandate.deposit.toString(),
         openSizeE18: mandate.openSizeE18.toString(),
         limits: serialiseLimits({ ...NOTIONAL_LIMITS, ...mandate.limits })

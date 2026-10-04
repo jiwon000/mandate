@@ -24,6 +24,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     error LimitsNotConfigured();
     error MarkTooOld(uint256 markedAt, uint256 maxAge);
     error VaultNotActive();
+    error LimitsLocked();
 
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
@@ -39,6 +40,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     mapping(address => RiskLimits) public limitsOf;
     mapping(address => bool) public configured;
+    /// @notice Vaults whose terms are final. MandateVault refuses deposits until then.
+    mapping(address => bool) public termsLocked;
     mapping(address => mapping(address => bool)) public adapterAllowed;
     mapping(address => BlockUsage) public blockUsageOf;
     mapping(address => uint256) public lastTradeBlock;
@@ -46,6 +49,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     event LimitsConfigured(address indexed vault);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
+    event TermsLocked(address indexed vault, bytes32 termsHash);
     event RiskConsumed(address indexed vault, bytes32 indexed orderHash, uint256 notional);
     event Marked(address indexed vault, uint256 navPerShare, uint256 highWaterNavPerShare, uint256 drawdownBps);
     event DrawdownBreach(
@@ -59,6 +63,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     constructor() Ownable(msg.sender) {}
 
     function configure(address vault, RiskLimits calldata limits) external onlyOwner {
+        if (termsLocked[vault]) revert LimitsLocked();
         limitsOf[vault] = limits;
         configured[vault] = true;
         // Seed the high-water mark at par. Shares are minted 1:1 against the first
@@ -71,8 +76,27 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     }
 
     function setAdapter(address vault, address adapter, bool allowed) external onlyOwner {
+        if (termsLocked[vault]) revert LimitsLocked();
         adapterAllowed[vault][adapter] = allowed;
         emit AdapterAllowed(vault, adapter, allowed);
+    }
+
+    /// @notice Make the vault's terms final. One way: after this neither the limits nor
+    ///         the adapter allowlist can change, and a different mandate means a new vault.
+    /// @dev The vault refuses deposits until this has happened, so an allocator never
+    ///      funds terms the owner could still rewrite. `termsHash` is what a UI quotes
+    ///      and what a registry release would anchor.
+    function lockTerms(address vault) external onlyOwner {
+        if (!configured[vault]) revert LimitsNotConfigured();
+        if (termsLocked[vault]) revert LimitsLocked();
+        termsLocked[vault] = true;
+        emit TermsLocked(vault, termsHash(vault));
+    }
+
+    /// @notice keccak256 of the vault's configured limits, in RiskLimits field order.
+    function termsHash(address vault) public view returns (bytes32) {
+        RiskLimits memory limits = limitsOf[vault];
+        return keccak256(abi.encode(limits));
     }
 
     function checkAndConsumeBefore(

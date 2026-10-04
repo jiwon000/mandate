@@ -86,6 +86,10 @@ await (await guard.configure(vaultAddress, {
   maxTotalNotional: parseUnits("1500", 18),
   maxBlockNotional: parseUnits("750", 18)
 })).wait();
+// Deposits are refused until the terms are locked, and after the lock neither the
+// limits nor the adapter allowlist can change. Different terms mean a new vault.
+await (await guard.lockTerms(vaultAddress)).wait();
+const termsHash = await guard.termsHash(vaultAddress);
 
 const addresses = {
   chainId: network.chainId.toString(),
@@ -95,7 +99,8 @@ const addresses = {
   DeterministicMockVenue: await venue.getAddress(),
   MockVenueAdapter: adapterAddress,
   MandateVault: vaultAddress,
-  BatchAllocator: await batch.getAddress()
+  BatchAllocator: await batch.getAddress(),
+  termsHash
 };
 fs.writeFileSync(
   path.join(root, "contracts/deployments.latest.json"),

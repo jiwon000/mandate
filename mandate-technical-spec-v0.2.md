@@ -385,6 +385,9 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - Reporter의 탈중앙화
 - 메인넷 및 실자금 운용
 - 시스템 전역 DP
+- 동결 후 자동 청산. v1의 `Frozen`은 거래·예치만 막고 포지션은 그대로 둔다. 인출은 vault 현금 한도 안에서만 가능하다 (3.4). `Closed` 상태는 정의만 있고 전이가 없다.
+- 변동성 입력. RiskGuard의 입력은 주문 preview, venue mark(가격·시각), vault 지분·현금뿐이다. 변동성은 어떤 한도에도 들어가지 않는다.
+- 조건 고정. `configure()`는 owner가 지연 없이 재설정할 수 있다. allocator가 읽은 조건이 유지된다는 보장은 아직 없다.
 
 ## 9. 이후 확장
 
@@ -394,4 +397,14 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 - shielded batch funding 또는 privacy pool
 - delayed RFQ execution
 - RDP accountant와 multi-epoch scheduler
+
+### 2026-09-23 진행 발표 피드백 반영
+
+피드백 요지: 매개변수와 범위가 무엇인지, 한도 위반 시 거절인지 동결인지, 동결 뒤에는 어떻게 되는지, 변동성이 체결 전후 어디에 들어가는지. 현재 동작은 3.4(거절 vs 동결)와 README의 "What each term bounds" 표가 답한다. 아래는 그 답에서 비는 부분을 메우는 확장이다.
+
+1. **동결 후 reduce-only 청산.** 동결 시점에 포지션을 닫지 않으면 실제 venue에서는 증거금이 venue에 남고, 동결된 에이전트는 줄일 수도 없다. 확장: 누구나 호출할 수 있는 바운티 있는 `unwind()`가 동결된 포지션을 블록당 일정 비율씩(Hyperliquid는 인출 증거금 부족 시 20%씩 닫는다) 슬리피지 상한 안에서 줄인다. 다 줄이면 `Frozen -> Closed`로 전이하고 allocator는 현금으로 인출한다. `IVenueAdapter`에 reduce-only 진입점이 필요하다. 조건 문구는 "X%에서 에이전트가 멈추고 청산이 시작된다. 확정 손실은 슬리피지와 갭만큼 X%보다 클 수 있다"로 쓴다. 인출 시 비례 청산은 두 번째 경로다.
+2. **조건 고정.** mandate 조건 해시를 3.7 Registry release에 앵커하고, 변경은 timelock 뒤에 두거나 새 mandate로만 허용한다.
+3. **체결 전 변동성 검사.** 체결 후 변동성 대응은 1번이 맡고, 여기서는 체결 전만 다룬다. 후보: `Marked`마다 갱신하는 온체인 실현 변동성 추정치(mark 수익률의 EWMA), `preview` 단계 스트레스 테스트(체결 후 포지션에 k-sigma 변동을 가정했을 때 `maxDrawdownBps`를 넘으면 거절), 변동성에 반비례하는 레버리지 상한(`min(maxLeverage, targetVol / sigma)`), 변동성 급등 시 위험을 늘리는 주문만 거절하는 breaker(동결이 아니라 거절). 3.5의 가격 원천에 그대로 의존하므로 mock venue에서는 서버가 밀어 넣는 가격 경로로 시연한다.
+4. **조건 범위 확장.** adapter별 instrument·방향·집중도 whitelist, `FeeTerms` 구현, venue mark와 참조 가격의 편차 상한.
+5. **다음 발표 전 검증 과제.** 8개 조건 각각의 권장 범위와 근거. 확인할 자료: 거래소의 변동성 연동 증거금 구간, DeFi 위험 매개변수 설정 관행, vol-targeting 문헌, 온체인 변동성 원천. 아직 확인하지 않은 항목은 발표에서 "확인 중"으로 표시한다.
 

@@ -200,6 +200,21 @@ A revert cannot also preserve a `Frozen` state change, so a rejected order never
 
 Custody and execution permissions are enforced on-chain. Market-value risk limits depend on the configured venue price source; the demo uses a deterministic on-chain mock venue. Production deployments would require a guarded TWAP or validated oracle. Drawdown is mark-to-market against that price source, and `markedAt` is the venue's own price timestamp rather than `block.timestamp`, so a fast chain cannot make a stale feed look fresh.
 
+### What each term bounds
+
+| Term | What it bounds | On violation |
+| --- | --- | --- |
+| `maxOrderNotional` | notional of a single order at the mark price | order reverts, nothing else changes |
+| `maxPositionNotional` | notional of the position the order would leave | order reverts |
+| `maxTotalNotional` | total exposure after the order (equal to position notional on the single-market mock venue) | order reverts |
+| `maxLeverageX100` | total exposure divided by marked equity (cash plus unrealised PnL), at order time only | order reverts |
+| `minBlocksBetweenTrades` | blocks that must pass between two trades | order reverts |
+| `maxBlockNotional` | notional traded inside one block | order reverts |
+| `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust (0 disables) | trade, allocation, withdrawal and `poke()` revert until the price is refreshed |
+| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open |
+
+Seven of the eight terms reject one order and stop; only the drawdown term changes the vault's state, and only through a mark. The guard's inputs today are the adapter's order preview, the venue mark (price and its timestamp) and the vault's share supply and cash. Volatility is not an input yet; see the roadmap.
+
 ## FlyGraph demo agent
 
 FlyGraph is an optional connectome-topology-inspired graph policy used to demonstrate that Mandate can constrain unusual autonomous models. It is not implemented yet; the demo agents are scripted.
@@ -272,6 +287,13 @@ Next:
 5. Published-release and Privacy Simulator screens; batch flow in the UI
 6. Baseline bot, then FlyGraph as an optional differentiated agent
 7. Invariant/fuzz tests, Slither review, external audit and a published Monad testnet deployment
+
+From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters):
+
+8. Reduce-only unwind after a freeze. Today a freeze stops the agent but leaves the position open; on a real venue the margin stays there, so withdrawals are capped by cash and nobody can reduce. Plan: a permissionless, bountied `unwind()` that closes the frozen position in bounded chunks with a slippage bound (Hyperliquid closes 20% per step when a withdrawal needs margin), then moves the vault `Frozen -> Closed` so allocators redeem cash instead of waiting on a stopped agent. Needs a reduce-only entry in `IVenueAdapter`. Term wording becomes "the agent stops at X% and liquidation starts; the realised loss can exceed X% by slippage and gaps".
+9. Locked terms. `configure()` is owner-only and reconfigurable with no delay, so an allocator cannot rely on the terms they read. Plan: anchor the term hash in the Registry release and put term changes behind a timelock or a new mandate.
+10. Volatility-aware pre-trade checks. Pre-trade only; post-trade volatility is item 8. Candidates: an on-chain realised-volatility estimate from the mark series (updated at each `Marked`), a stress test in `preview` that rejects an order if a k-sigma move on the post-trade position would breach `maxDrawdownBps`, and a leverage cap scaled by volatility (`min(maxLeverage, targetVol / sigma)`). A breaker that rejects risk-increasing orders in a volatility spike, rather than freezing.
+11. Term coverage. Per-adapter instrument, direction and concentration whitelist; `FeeTerms`; a bound on how far the venue mark may deviate from a reference price. Recommended ranges for every term, with the sources they come from, are due before the next review.
 
 ## Stack
 

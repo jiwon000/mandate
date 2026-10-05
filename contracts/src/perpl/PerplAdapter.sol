@@ -40,6 +40,7 @@ contract PerplAdapter is IVenueAdapter {
     error UnknownMarket(uint256 marketId);
     error LotNotRepresentable(uint256 lotUnitE18);
     error NoMarkets();
+    error BelowAccountMinimum(uint256 minimumCNS, uint256 cashCNS);
 
     uint256 private constant ASSET_TO_E18 = 1e12;
     uint8 private constant OPEN_LONG = 0;
@@ -238,7 +239,7 @@ contract PerplAdapter is IVenueAdapter {
         if (_abs(sizeDeltaE18) % m.lotUnit != 0) revert LotNotRepresentable(m.lotUnit);
 
         (int256 size,,) = _position(vault, m);
-        PerplSubaccount sub = _fund(vault, _marginFor(size, sizeDeltaE18, limitPriceE18));
+        PerplSubaccount sub = _fund(vault, _marginFor(size, sizeDeltaE18, limitPriceE18, m.markE18));
         _place(vault, sub, m, sizeDeltaE18, limitPriceE18);
         _release(vault);
         // Perpl reports the fill in events, not return values. The vault compares the
@@ -249,6 +250,10 @@ contract PerplAdapter is IVenueAdapter {
     /// @inheritdoc IVenueAdapter
     /// @dev Takes the same fraction off every Perpl position the vault holds, with
     ///      Perpl's reduce-only close orders, so a step can never flip or grow one.
+    ///      Close orders may fill in part. A market Perpl refuses (paused, stale mark,
+    ///      no liquidity within the slippage bound, a slice under its minimum) is
+    ///      tried once more for the whole position and otherwise skipped, so one
+    ///      stuck market never holds up the others.
     function reduce(address vault, uint16 fractionBps)
         external returns (uint256 closedNotional, int256 realizedPnl)
     {
@@ -256,25 +261,43 @@ contract PerplAdapter is IVenueAdapter {
         if (fractionBps == 0 || fractionBps > 10_000) revert BadFraction();
         uint256 count = perpIds.length;
         for (uint256 i; i < count; ++i) {
-            Market memory m = _market(i);
-            (int256 size, uint256 entryE18,) = _position(vault, m);
-            if (size == 0) continue;
-            uint256 lots = _abs(size) / m.lotUnit;
-            uint256 slice = (lots * fractionBps) / 10_000;
-            if (slice == 0) slice = 1;
-            bool long = size > 0;
-            uint256 limit = long
-                ? Math.mulDiv(m.markE18, 10_000 - MAX_UNWIND_SLIPPAGE_BPS, 10_000) / m.priceUnit
-                : Math.ceilDiv(Math.mulDiv(m.markE18, 10_000 + MAX_UNWIND_SLIPPAGE_BPS, 10_000), m.priceUnit);
-            subaccountOf[vault].order(_desc(vault, m.perpId, long ? CLOSE_LONG : CLOSE_SHORT, limit, slice));
-
-            (int256 after_,,) = _position(vault, m);
-            uint256 closedE18 = _abs(size) - _abs(after_);
-            closedNotional += Math.mulDiv(closedE18, m.markE18, 1e18);
-            int256 pnlE18 = ((int256(m.markE18) - int256(entryE18)) * size) / 1e18;
-            realizedPnl += (pnlE18 * int256(closedE18)) / int256(_abs(size));
+            (uint256 closed, int256 pnl) = _reduceMarket(vault, _market(i), fractionBps);
+            closedNotional += closed;
+            realizedPnl += pnl;
         }
         _release(vault);
+    }
+
+    function _reduceMarket(address vault, Market memory m, uint16 fractionBps)
+        private returns (uint256 closedNotional, int256 realizedPnl)
+    {
+        (int256 size, uint256 entryE18,) = _position(vault, m);
+        if (size == 0) return (0, 0);
+        if (!_close(vault, m, size, fractionBps)) return (0, 0);
+        (int256 after_,,) = _position(vault, m);
+        uint256 closedE18 = _abs(size) - _abs(after_);
+        closedNotional = Math.mulDiv(closedE18, m.markE18, 1e18);
+        int256 pnlE18 = ((int256(m.markE18) - int256(entryE18)) * size) / 1e18;
+        realizedPnl = (pnlE18 * int256(closedE18)) / int256(_abs(size));
+    }
+
+    /// @dev One reduce-only close for `fractionBps` of the position, at most
+    ///      MAX_UNWIND_SLIPPAGE_BPS through the mark; if Perpl refuses it, one more
+    ///      try for the whole position. False when both are refused.
+    function _close(address vault, Market memory m, int256 size, uint16 fractionBps) private returns (bool) {
+        uint256 lots = _abs(size) / m.lotUnit;
+        uint256 slice = (lots * fractionBps) / 10_000;
+        if (slice == 0) slice = 1;
+        bool long = size > 0;
+        uint8 closeType = long ? CLOSE_LONG : CLOSE_SHORT;
+        uint256 limit = long
+            ? Math.mulDiv(m.markE18, 10_000 - MAX_UNWIND_SLIPPAGE_BPS, 10_000) / m.priceUnit
+            : Math.ceilDiv(Math.mulDiv(m.markE18, 10_000 + MAX_UNWIND_SLIPPAGE_BPS, 10_000), m.priceUnit);
+        PerplSubaccount sub = subaccountOf[vault];
+        try sub.order(_desc(vault, m.perpId, closeType, limit, slice, false)) { return true; } catch {}
+        if (slice == lots) return false;
+        try sub.order(_desc(vault, m.perpId, closeType, limit, lots, false)) { return true; } catch {}
+        return false;
     }
 
     /// @notice Send the free collateral in a vault's Perpl account back to the vault.
@@ -285,15 +308,21 @@ contract PerplAdapter is IVenueAdapter {
         _release(vault);
     }
 
-    /// @dev Collateral an order needs at Perpl: margin for the exposure it adds at the
-    ///      venue leverage plus a buffer, and a float for the taker fee.
-    function _marginFor(int256 size, int256 sizeDeltaE18, uint256 limitPriceE18)
+    /// @dev Collateral an order needs at Perpl in the worst fill the limit allows:
+    ///      margin for the exposure it adds at the venue leverage plus a buffer, the
+    ///      loss against the mark that Perpl makes an entry collateralise one for one,
+    ///      and a float for the taker fee. Whatever the fill leaves free comes back to
+    ///      the vault in the same call.
+    function _marginFor(int256 size, int256 sizeDeltaE18, uint256 limitPriceE18, uint256 markE18)
         private view returns (uint256 needCNS)
     {
+        uint256 priceE18 = limitPriceE18 > markE18 ? limitPriceE18 : markE18;
         uint256 addedE18 = _addedExposure(size, size + sizeDeltaE18);
-        needCNS = Math.mulDiv(addedE18, limitPriceE18, 1e18) / ASSET_TO_E18;
+        needCNS = Math.mulDiv(addedE18, priceE18, 1e18) / ASSET_TO_E18;
         needCNS = Math.mulDiv(needCNS, 100 * (10_000 + uint256(MARGIN_BUFFER_BPS)), venueLeverageHdths * 10_000);
-        uint256 orderCNS = Math.mulDiv(_abs(sizeDeltaE18), limitPriceE18, 1e18) / ASSET_TO_E18;
+        uint256 gapE18 = limitPriceE18 > markE18 ? limitPriceE18 - markE18 : markE18 - limitPriceE18;
+        needCNS += Math.mulDiv(_abs(sizeDeltaE18), gapE18, 1e18) / ASSET_TO_E18;
+        uint256 orderCNS = Math.mulDiv(_abs(sizeDeltaE18), priceE18, 1e18) / ASSET_TO_E18;
         needCNS += (orderCNS * FEE_FLOAT_BPS) / 10_000 + 1;
     }
 
@@ -302,10 +331,10 @@ contract PerplAdapter is IVenueAdapter {
     {
         bool buy = sizeDeltaE18 > 0;
         uint256 pricePNS = buy ? limitPriceE18 / m.priceUnit : Math.ceilDiv(limitPriceE18, m.priceUnit);
-        sub.order(_desc(vault, m.perpId, buy ? OPEN_LONG : OPEN_SHORT, pricePNS, _abs(sizeDeltaE18) / m.lotUnit));
+        sub.order(_desc(vault, m.perpId, buy ? OPEN_LONG : OPEN_SHORT, pricePNS, _abs(sizeDeltaE18) / m.lotUnit, true));
     }
 
-    function _desc(address vault, uint256 perpId, uint8 orderType, uint256 pricePNS, uint256 lotLNS)
+    function _desc(address vault, uint256 perpId, uint8 orderType, uint256 pricePNS, uint256 lotLNS, bool fillOrKill)
         private returns (IPerplExchange.OrderDesc memory d)
     {
         d.orderDescId = ++descIds[vault];
@@ -313,7 +342,7 @@ contract PerplAdapter is IVenueAdapter {
         d.orderType = orderType;
         d.pricePNS = pricePNS;
         d.lotLNS = lotLNS;
-        d.fillOrKill = true;
+        d.fillOrKill = fillOrKill;
         d.immediateOrCancel = true;
         d.leverageHdths = venueLeverageHdths;
         // The price bound is the agent's limit (and the guard's deviation term on it),
@@ -325,16 +354,21 @@ contract PerplAdapter is IVenueAdapter {
         sub = subaccountOf[vault];
         bool open = address(sub) == address(0);
         uint256 free;
+        uint256 cash = collateral.balanceOf(vault);
         if (open) {
+            uint256 minOpen = exchange.getMinAccountOpenCNS();
+            if (cash < minOpen) revert BelowAccountMinimum(minOpen, cash);
             sub = new PerplSubaccount{salt: bytes32(uint256(uint160(vault)))}(vault, exchange, collateral);
             subaccountOf[vault] = sub;
-            uint256 minOpen = exchange.getMinAccountOpenCNS();
             if (needCNS < minOpen) needCNS = minOpen;
         } else {
             free = exchange.getAccountByAddr(address(sub)).balanceCNS;
         }
         if (needCNS > free) {
+            // Never more than the vault holds; an order its cash cannot carry is then
+            // refused by Perpl and the whole call reverts.
             uint256 pull = needCNS - free;
+            if (pull > cash) pull = cash;
             collateral.safeTransferFrom(vault, address(sub), pull);
             sub.fund(pull, open);
         }

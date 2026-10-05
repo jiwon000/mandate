@@ -12,7 +12,8 @@ import { BASE_LIMITS, DEFAULT_TRADE, NO_FEES, coder } from "./fixture.mjs";
 //
 // Perpl refuses orders against a mark older than 60s and the guard does the same, so
 // the test pins each block's timestamp a second after the last instead of letting
-// wall-clock time run while the fork fetches state.
+// wall-clock time run while the fork fetches state. The whole run spends about 25 of
+// those 60 seconds, so it forks only once the testnet mark is at most 10s old.
 
 const RPC = process.env.PERPL_FORK_RPC ?? "https://testnet-rpc.monad.xyz";
 const EXCHANGE = "0x1964C32f0bE608E7D29302AFF5E61268E72080cc";
@@ -28,21 +29,32 @@ const ERC20 = [
   "function approve(address,uint256) returns (bool)"
 ];
 
+/// Fork Monad testnet at a block whose BTC mark is at most 10s old, trying again
+/// for up to two minutes.
+async function forkWithFreshMark(abi) {
+  for (let i = 0; i < 40; i++) {
+    const chain = await hre.network.create({ override: { forking: { url: RPC, enabled: true } } });
+    const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
+    provider.pollingInterval = 10;
+    const exchange = new Contract(EXCHANGE, abi, provider);
+    const [latest, info] = await Promise.all([provider.getBlock("latest"), exchange.getPerpetualInfoV2(16)]);
+    if (latest.timestamp - Number(info.markTimestamp) <= 10) return { chain, provider, exchange, latest, info };
+    await chain.close();
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  throw new Error("Perpl's testnet BTC mark stayed older than 10s for two minutes");
+}
+
 test("a Perpl-backed mandate trades, is refused past its cap, freezes and unwinds on Perpl", {
   skip: process.env.PERPL_FORK !== "1" && "set PERPL_FORK=1 to run against a Monad testnet fork",
   timeout: 600_000
 }, async (t) => {
   const compiled = compileContracts();
-  const chain = await hre.network.create({ override: { forking: { url: RPC, enabled: true } } });
+  const exchangeAbi = artifact(compiled, "contracts/src/perpl/IPerplExchange.sol", "IPerplExchange").abi;
+  const { chain, provider, exchange, latest, info } = await forkWithFreshMark(exchangeAbi);
   t.after(() => chain.close());
   const rpc = (method, params = []) => chain.provider.request({ method, params });
-  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
-  provider.pollingInterval = 10;
   const [owner, allocator, agent, keeper] = await Promise.all([0, 1, 2, 3].map((i) => provider.getSigner(i)));
-
-  const exchange = new Contract(EXCHANGE, artifact(compiled, "contracts/src/perpl/IPerplExchange.sol", "IPerplExchange").abi, provider);
-  const info = await exchange.getPerpetualInfoV2(16);
-  const latest = await provider.getBlock("latest");
   let now = Math.max(latest.timestamp, Number(info.markTimestamp)) + 1;
   const tick = (seconds = 1) => { now += seconds; return rpc("evm_setNextBlockTimestamp", [now]); };
   const send = async (txPromiseFactory, seconds) => { await tick(seconds); return (await txPromiseFactory()).wait(); };
@@ -119,9 +131,11 @@ test("a Perpl-backed mandate trades, is refused past its cap, freezes and unwind
   );
 
   // Selling 0.002 takes the long through flat into a 0.001 short, which Perpl
-  // records as positionType 1.
+  // records as positionType 1. The limit is 10% under the mark: the adapter funds the
+  // worst fill it allows, so a wide limit is not refused for want of collateral.
   await send(() => vault.connect(agent).execute(adapterAddress,
-    coder.encode(["int256", "uint256"], [-e18("0.002"), (mark * 99n) / 100n])));
+    coder.encode(["int256", "uint256"], [-e18("0.002"), (mark * 90n) / 100n])));
+  assert.ok((await ausd.balanceOf(vault.target)) < usd(500) - usd(40), "excess collateral came back");
   const [flipped] = await exchange.getPositionV2(16, account.accountId);
   assert.equal(flipped.lotLNS, 100n);
   assert.equal(flipped.positionType, 1n);

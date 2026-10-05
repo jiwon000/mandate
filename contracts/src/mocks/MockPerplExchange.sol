@@ -15,7 +15,8 @@ import {IPerplExchange} from "../perpl/IPerplExchange.sol";
 ///      against an opposite position and flip through flat, reduce-only closes, and
 ///      a 60-second mark age limit. Each perpetual can be paused, given a fill price
 ///      off the mark, or limited to so many lots per order, to reach the paths a
-///      fork cannot. Funding, liquidation and the order book are not modelled.
+///      fork cannot. Funding is booked by hand with setPremium; liquidation and the order book
+///      are not modelled.
 contract MockPerplExchange {
     using SafeERC20 for IERC20;
 
@@ -48,6 +49,7 @@ contract MockPerplExchange {
         uint256 lotLNS;
         uint256 pricePNS;
         uint256 depositCNS;
+        int256 premiumCNS;
     }
 
     IERC20 public immutable collateral;
@@ -83,6 +85,11 @@ contract MockPerplExchange {
 
     function setPaused(uint256 perpId, bool paused) external {
         perps[perpId].paused = paused;
+    }
+
+    /// @notice Book funding against a position, as Perpl's premium PnL.
+    function setPremium(uint256 perpId, uint256 accountId, int256 premiumCNS) external {
+        positions[perpId][accountId].premiumCNS = premiumCNS;
     }
 
     function setWithdrawBlocked(bool blocked) external {
@@ -180,7 +187,9 @@ contract MockPerplExchange {
             ? int256(price) - int256(pos.pricePNS)
             : int256(pos.pricePNS) - int256(price);
         int256 pnl = (move * int256(lots) * 1e6) / int256(10 ** (p.priceDecimals + p.lotDecimals));
-        int256 back = int256(released) + pnl;
+        int256 premium = (pos.premiumCNS * int256(lots)) / int256(pos.lotLNS);
+        pos.premiumCNS -= premium;
+        int256 back = int256(released) + pnl + premium;
         pos.depositCNS -= released;
         pos.lotLNS -= lots;
         if (back > 0) balanceOf[id] += uint256(back);
@@ -219,6 +228,7 @@ contract MockPerplExchange {
         info.lotLNS = pos.lotLNS;
         info.pricePNS = pos.pricePNS;
         info.depositCNS = pos.depositCNS;
+        info.premiumPnlCNS = pos.premiumCNS;
         markPricePNS = p.markPNS;
         markPriceValid = block.timestamp <= p.markTimestamp + MAX_AGE_SEC;
     }

@@ -186,3 +186,18 @@ test("a withdrawal Perpl holds back stays in equity and sweep returns it later",
   const [same] = await s.adapter.markEquity(s.vault.target);
   assert.equal(same, equity);
 });
+
+test("funding Perpl books against a position moves equity and settles on close", async (t) => {
+  const s = await setup(t);
+  await s.trade(0, "0.005", "60600");
+  const [before] = await s.adapter.markEquity(s.vault.target);
+  const id = await s.adapter.accountIdOf(s.vault.target);
+  await s.wait(s.exchange.setPremium(BTC, id, -usd(5)));
+  await s.fresh();
+  const [paid] = await s.adapter.markEquity(s.vault.target);
+  assert.equal(before - paid, usd(5));
+  // Closing the whole long realises it: the cash that comes back is short by the same 5.
+  await s.trade(0, "-0.005", "59400");
+  const cash = await s.usdc.balanceOf(s.vault.target);
+  assert.equal(cash, paid - 105_000n);
+});

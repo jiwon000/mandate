@@ -26,9 +26,9 @@ import {PerplSubaccount} from "./PerplSubaccount.sol";
 ///      it moves 0.05% or nears expiry, so markedAt is Perpl's clock, never
 ///      block.timestamp, and the guard's freshness check reads a real age.
 ///
-///      Not modelled: funding payments (premiumPnlCNS) are left out of equity, and
-///      fees paid at the fill reduce equity only once they leave the account. Both are
-///      small next to price PnL over a mandate's horizon but are not zero.
+///      Funding counts in equity as Perpl reports it in each position's
+///      premiumPnlCNS, the same term Perpl's SDK adds to delta PnL. Taker fees count
+///      once Perpl takes them from the account or the position's margin.
 contract PerplAdapter is IVenueAdapter {
     using SafeERC20 for IERC20;
 
@@ -130,14 +130,17 @@ contract PerplAdapter is IVenueAdapter {
     function _position(address vault, Market memory m)
         private view returns (int256 sizeE18, uint256 entryE18, uint256 depositCNS)
     {
-        uint256 accountId = accountIdOf[vault];
-        if (accountId == 0) return (0, 0, 0);
-        (IPerplExchange.PositionInfo memory p,,) = exchange.getPositionV2(m.perpId, accountId);
+        IPerplExchange.PositionInfo memory p = _info(vault, m);
         if (p.lotLNS == 0) return (0, 0, 0);
         int256 size = int256(p.lotLNS * m.lotUnit);
         sizeE18 = p.positionType == 0 ? size : -size;
         entryE18 = p.pricePNS * m.priceUnit;
         depositCNS = p.depositCNS;
+    }
+
+    function _info(address vault, Market memory m) private view returns (IPerplExchange.PositionInfo memory p) {
+        uint256 accountId = accountIdOf[vault];
+        if (accountId != 0) (p,,) = exchange.getPositionV2(m.perpId, accountId);
     }
 
     function preview(address vault, bytes calldata order) public view returns (TradePreview memory p) {
@@ -193,7 +196,8 @@ contract PerplAdapter is IVenueAdapter {
 
     /// @inheritdoc IVenueAdapter
     /// @dev Idle cash in the vault, free collateral in the Perpl account, and for each
-    ///      open position its margin plus price PnL at Perpl's mark. `markedAt` is the
+    ///      open position its margin, price PnL at Perpl's mark and the funding Perpl
+    ///      reports against it (premiumPnlCNS). `markedAt` is the
     ///      oldest mark among the markets held; a flat vault is marked by market 0.
     function markEquity(address vault) public view returns (uint256 equity, uint256 markedAt) {
         int256 equityE18 = int256(IMandateVaultView(vault).totalAssets() * ASSET_TO_E18);
@@ -203,10 +207,14 @@ contract PerplAdapter is IVenueAdapter {
             uint256 count = perpIds.length;
             for (uint256 i; i < count; ++i) {
                 Market memory m = _market(i);
-                (int256 size, uint256 entryE18, uint256 depositCNS) = _position(vault, m);
-                if (size == 0) continue;
-                equityE18 += int256(depositCNS * ASSET_TO_E18);
-                equityE18 += ((int256(m.markE18) - int256(entryE18)) * size) / 1e18;
+                IPerplExchange.PositionInfo memory p = _info(vault, m);
+                if (p.lotLNS == 0) continue;
+                // Perpl's own split of a position's value: margin, delta PnL at the
+                // mark and premium PnL, the funding it has paid or received.
+                int256 size = int256(p.lotLNS * m.lotUnit);
+                if (p.positionType != 0) size = -size;
+                equityE18 += int256(p.depositCNS * ASSET_TO_E18) + p.premiumPnlCNS * int256(ASSET_TO_E18);
+                equityE18 += ((int256(m.markE18) - int256(p.pricePNS * m.priceUnit)) * size) / 1e18;
                 if (markedAt == 0 || m.markedAt < markedAt) markedAt = m.markedAt;
             }
         }

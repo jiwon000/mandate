@@ -40,7 +40,7 @@ Proposed:
 | Stage | Proposed behaviour | Today | Reason |
 |---|---|---|---|
 | Freeze | `execute()` and `allocate()` close; `withdraw()` and share transfers stay open; the caller who proved the breach is paid `POKE_BOUNTY_BPS` (0.05%). | Same. | |
-| Unwind | Anyone calls `unwind()` once per block; five steps close the position in equal slices, each paying `UNWIND_BOUNTY_BPS` (0.01%). | Same. | The step count and pace are protocol constants for now. Revisit them against real slippage once the Perpl adapter exists. |
+| Unwind | Anyone calls `unwind()` once per block; five steps close the position in equal slices, each paying `UNWIND_BOUNTY_BPS` (0.01%); a call that finds the position already flat closes the vault and pays nothing. | Same. | The step count and pace are protocol constants for now. Revisit them against real slippage once the Perpl adapter exists. |
 | Close | Position at zero moves the vault to `Closed`. Terminal. | Same. | Principle 1. |
 | Funds | Each allocator withdraws their own share. No automatic payout. | Same. | A push to every allocator has unbounded gas and one failing receiver blocks all of them. A pull fails only for the one caller. |
 | Fees | Management fee stops accruing at the freeze. Performance fee is charged only above the high-water mark, so a frozen vault accrues none. | Fees are declared in `FeeTerms` and never charged. | These rules are part of implementing fee deduction, not a separate patch. |

@@ -437,7 +437,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       log(`[reset] skipped: ${frozen} vaults frozen but owner holds ${formatEther(balance)} MON`);
       return;
     }
-    log(`[reset] ${frozen} vaults frozen and nobody watching: redeploying`);
+    log(`[reset] ${frozen} vaults frozen: redeploying`);
     await redeploy("auto");
   }
 
@@ -447,8 +447,11 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     try {
       const active = isActive();
       const justLeft = wasActive && !active;
+      // Vaults can also be frozen while nobody watches (freezeUnobservable after
+      // an idle stretch), so check on arrival too, not only after a departure.
+      const justArrived = !wasActive && active;
       wasActive = active;
-      if (justLeft && config.autoReset) await whileReset(maybeAutoReset);
+      if ((justLeft || justArrived) && config.autoReset) await whileReset(maybeAutoReset);
       if (pendingShockBps !== 0) runJob("shock", applyShock);
       if (active && Date.now() - lastFundCheckAt >= FUND_CHECK_MS) runJob("gas", topUpAccounts);
 

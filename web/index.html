@@ -153,7 +153,7 @@
           <div><p class="eyebrow">YOUR CLAIMS</p><h2>Settled, unclaimed shares</h2></div>
         </div>
         <div id="claimList"></div>
-        <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set.</p>
+        <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set. The demo server keeps the claim proofs in memory, so claim soon after settlement: a server restart loses proofs not yet claimed.</p>
       </section>
 
       <section class="view" data-view="privacy">

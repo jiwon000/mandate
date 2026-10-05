@@ -15,6 +15,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 기준 `949d258` 빌드를 서빙합니다. Batch·Privacy 화면이 떠 있고, 체인에서 찾은 최신 장부(BatchAllocator·MandateRegistry 포함, genesis 2026-10-05 07:08:55 UTC)로 부팅했습니다. README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`도 이 장부로 갱신했습니다. 남은 일 1~3번은 끝났습니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
 - 제출 폼 Description 문구를 저장소 `description.txt`와 다시 맞추는 일(남은 일 3-1)은 아직 남아 있습니다.
+- 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
 
 ## 이 폴더의 파일
 
@@ -73,6 +74,8 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~1~~ | ~~브랜치 `docs/roadmap-feedback-0923`의 main 대상 PR 리뷰와 머지~~ | @jiwon000 | 완료 (PR #9 머지됨) |
 | ~~2~~ | ~~Render에 새 커밋 배포~~ | @jiwon000 | 완료 (`949d258` 배포, `ORACLE_IDLE_SECONDS=3600` 설정) |
 | ~~3~~ | ~~README 주소 표에 BatchAllocator·MandateRegistry 행 추가, `10143.json` 갱신~~ | @jiwon000 | 완료 (2026-10-05 07:08:55 UTC 장부로 갱신) |
+| ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
+| 2-2 | 공개 데모를 새 컨트랙트로 전환 (정해야 할 것 11, 2026-10-05 진행 결정). ① 2-1 머지 뒤 또는 이 브랜치 그대로 Render에서 최신 커밋 배포. 빌드가 컨트랙트를 새로 컴파일하지만 부팅은 체인의 최신 장부(옛 컨트랙트)를 그대로 씁니다. ② 페이지를 `?admin=<DEMO_ADMIN_TOKEN>`으로 열어 `Reset demo`를 한 번 누릅니다. 서버가 새 컨트랙트로 장부를 배포합니다(배포와 데모 계정 충전 약 4.2 MON 추정, 10-05 배포 계정 잔액 약 18 MON). 이후 재시작은 이 장부로 부팅합니다. ③ README 주소 표와 `10143.json` 갱신 | Render 권한자 | 대기 |
 | 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 10-05 오후에 테스트 수(43 → 46)와 Batch·Privacy 문장을 고쳤고, 폼에는 그 전 문안이 저장돼 있음 | 팀 | 대기 |
 | 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
@@ -132,6 +135,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 8. Sponsor bounty를 추가할지 (웹 검색으로 확인, 2026-10-05). Perpl "Best use of Perpl's API"($5,000)와 "Best Analytics / Risk Tool"($3,000) 이름·금액·마감(10-13)은 맞습니다. 다만 "Best use of Perpl's API"는 지금 코드(mock venue, 실제 Perpl 연동 없음 — "실사용을 위해 남은 것" 3번 항목)로는 요건을 못 채울 가능성이 큽니다. "Best Analytics / Risk Tool"은 RiskGuard·DP Reporter가 원칙적으로 맞을 수 있지만, 세부 요건(Perpl 실데이터 연동이 필수인지 등)은 검색만으로 확실히 확인 못 했으니 대시보드에서 직접 확인 필요. 검색 중 "메인넷 배포 필수"라는 요약도 나왔는데, 이건 제출 요건 표에 이미 있는 "메인넷 또는 테스트넷" 확인 내용과 다릅니다 — 추측성 요약이라 신뢰 안 함. 테스트넷 제출이 실제로 요건을 충족하는지 대시보드 원문을 한 번 더 확인하는 걸 권장합니다.
 9. ~~Go-to-market 초안의 가정~~ — 검토함 (2026-10-05): Step 2에 "baseline agent bot을 로드맵에서 가져와 배포"라는 문장이 있었는데, 2026-10-04에 baseline 에이전트를 프로토콜 범위에서 뺀 결정과 어긋나서 "우리가 직접 locking 가능한 간단한 전략으로 첫 볼트를 운영한다"로 고쳤습니다. 나머지 가정(거래소 어댑터 우선순위, 직접 운영 후 개방, 운용자 성과보수 공유 미확정)은 기술적으로 현재 구현과 일치해서 그대로 받아들여도 됩니다.
 10. 데모 영상에 Batch·Privacy 장면을 넣을지. 본편이 이미 2분 50초라 넣으려면 다른 장면을 줄여야 합니다 (`demo-video-script.md`의 선택 장면).
+11. 공개 데모를 새 컨트랙트(동결 규칙 구현)로 재배포할지. 재배포하지 않으면 동결 규칙은 코드와 문서에만 있고 공개 데모는 기존 동작 그대로입니다. 재배포하면 배포 비용(약 1.8 MON 추정)이 들고, 접속자가 없을 때 오라클이 `ORACLE_IDLE_SECONDS=3600`마다만 가격을 갱신하므로 마지막 접속 뒤 몇 분이면 누구나 데모 볼트를 `freezeUnobservable()`로 동결할 수 있습니다. 이 경우 (a) 접속자가 없어도 가장 짧은 유효시간(4초 mandate 기준 12초) 안에 갱신해 MON을 더 쓰거나, (b) 동결을 받아들이고 기존 자동 재배포로 복구되게 둡니다. 영상 녹화(남은 일 4) 전에 정해야 화면이 맞습니다.
 
 ## 글과 영상에서 지킬 것
 

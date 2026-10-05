@@ -39,7 +39,7 @@ async function fixture(t) {
   vaults.sort((a, b) => BigInt(a.target) < BigInt(b.target) ? -1 : 1);
   // A vault takes no deposit, batched or not, until its terms are configured and locked.
   const limits = {
-    maxLeverageX100: 100, maxDrawdownBps: 2_000, minBlocksBetweenTrades: 0, maxMarkAgeSeconds: 0,
+    maxLeverageX100: 100, maxDrawdownBps: 2_000, minBlocksBetweenTrades: 0, maxMarkAgeSeconds: 60,
     maxOrderNotional: 10n ** 22n, maxPositionNotional: 10n ** 22n, maxTotalNotional: 10n ** 22n, maxBlockNotional: 10n ** 22n,
     volWindowSeconds: 0, stressHorizonSeconds: 0, stressSigmasX10: 0
   };
@@ -80,7 +80,13 @@ async function fixture(t) {
     await chain.provider.request({ method: "evm_setNextBlockTimestamp", params: [Number(timestamp)] });
     await chain.provider.request({ method: "evm_mine", params: [] });
   }
+  // Settlement prices shares off the venue mark, and a mandate's mark age is at most
+  // 60 seconds; re-stamp the flat venue first, as a live keeper would.
+  async function remark() {
+    await (await venue.setPrice(10n ** 21n)).wait();
+  }
   async function settle(data) {
+    await remark();
     return (await batch.settleEpoch(0, data.root, data.nets, { gasLimit: 8_000_000 })).wait();
   }
   async function pristine() {
@@ -95,7 +101,7 @@ async function fixture(t) {
       assert.equal(await usdc.allowance(batch.target, vault.target), 0n);
     }
   }
-  return { chain, provider, owner, alice, bob, agent, usdc, guard, vaults, batch, domain, end, deadline, signed, build, at, settle, pristine };
+  return { chain, provider, owner, alice, bob, agent, usdc, guard, vaults, batch, domain, end, deadline, signed, build, at, remark, settle, pristine };
 }
 
 test("multi-user, multi-vault netting; public proofs; permissionless claims; withdrawal", async (t) => {
@@ -133,6 +139,7 @@ test("multi-user, multi-vault netting; public proofs; permissionless claims; wit
     assert.equal(await vault.balanceOf(intent.allocator), intent.amount);
     await assert.rejects(batch.claimShares.staticCall(intent, data.proofs[i]));
   }
+  await f.remark();
   for (const vault of vaults) {
     assert.equal(await vault.balanceOf(batch.target), 0n);
     assert.equal(await batch.outstandingShares(vault.target), 0n);
@@ -253,6 +260,7 @@ test("spent nonces cannot be reused across vaults or later epochs", async (t) =>
   const replay = f.build([await f.signed(f.alice, {
     epoch: 1n, vault: f.vaults[1].target, deadline: deadline1,
   })]);
+  await f.remark();
   await assert.rejects(async () => (await f.batch.settleEpoch(1, replay.root, replay.nets, { gasLimit: 8_000_000 })).wait());
   assert.equal(await f.batch.escrowOf(f.alice.address), 900n);
   assert.equal(await f.batch.settled(1), false);

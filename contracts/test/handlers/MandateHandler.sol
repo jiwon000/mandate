@@ -193,9 +193,16 @@ contract MandateHandler is Test {
         venue.setPrice(newPrice);
     }
 
+    /// @dev Up to two mark ages per step: most sequences keep a usable mark, and a
+    ///      run of warps without a price update can still reach the unobservable
+    ///      window (three mark ages) for tryFreezeUnobservable.
     function warp(uint256 secs) external track {
-        secs = bound(secs, 0, 600);
+        secs = bound(secs, 0, 120);
         vm.warp(block.timestamp + secs);
+    }
+
+    function tryFreezeUnobservable() external track {
+        try guard.freezeUnobservable(address(vault)) {} catch {}
     }
 
     function tryReconfigure(uint16 maxLev) external track {

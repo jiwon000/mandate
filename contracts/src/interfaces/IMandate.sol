@@ -58,6 +58,15 @@ interface IMandateVaultView {
     ///      argument, so a caller cannot point registration at a fake guard that
     ///      just answers every check with "yes" (2026-10-04 security review).
     function riskGuard() external view returns (IRiskGuard);
+
+    /// @notice Cash plus unrealised PnL, with the venue's timestamp for the mark.
+    function markedAssets() external view returns (uint256 assets, uint256 markedAt);
+
+    /// @notice The one account allowed to trade the vault, fixed at construction.
+    function agent() external view returns (address);
+
+    /// @notice 0 Active, 1 Frozen, 2 Closed (MandateVault.AgentState).
+    function state() external view returns (uint8);
 }
 
 interface IMandateVaultFreeze {
@@ -114,4 +123,8 @@ interface IRiskGuard {
 
     /// @notice True if `adapter` may be used to trade `vault`.
     function adapterAllowed(address vault, address adapter) external view returns (bool);
+
+    /// @notice Why and when this guard froze `vault`: reason 0 none, 1 drawdown past
+    ///         the cap, 2 no fresh mark for UNOBSERVABLE_MARK_AGES times the mark age.
+    function freezeOf(address vault) external view returns (uint8 reason, uint64 frozenAt);
 }

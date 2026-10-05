@@ -76,3 +76,49 @@ export function clientIp(req) {
   const hops = String(req.headers?.["x-forwarded-for"] ?? "").split(",").map((h) => h.trim()).filter(Boolean);
   return hops.at(-1) || req.socket?.remoteAddress || "unknown";
 }
+
+// An error the client may read: its message is safe to send and its status says
+// whose fault it is. Anything without an httpStatus is answered as "internal error".
+export class HttpError extends Error {
+  constructor(message, httpStatus = 400) {
+    super(message);
+    this.httpStatus = httpStatus;
+  }
+}
+
+// One token bucket per client IP, so a single visitor cannot spend the shared
+// budget. The map is bounded: buckets that have refilled to full carry no
+// information and are dropped first, then the oldest.
+export class IpLimiter {
+  constructor(perMinute, { maxClients = 5000, now = () => Date.now() } = {}) {
+    this.perMinute = perMinute;
+    this.maxClients = maxClients;
+    this.now = now;
+    this.buckets = new Map(); // ip -> { tokens, updated }
+  }
+
+  // Returns 0 when the call may go ahead, else the seconds to wait.
+  take(ip = "unknown") {
+    const now = this.now();
+    let bucket = this.buckets.get(ip);
+    if (!bucket) {
+      if (this.buckets.size >= this.maxClients) this.evict(now);
+      bucket = { tokens: this.perMinute, updated: now };
+    } else {
+      bucket.tokens = Math.min(this.perMinute, bucket.tokens + ((now - bucket.updated) / 60_000) * this.perMinute);
+      bucket.updated = now;
+    }
+    this.buckets.delete(ip); // re-insert so Map order is least recently used first
+    this.buckets.set(ip, bucket);
+    if (bucket.tokens < 1) return Math.max(1, Math.ceil(((1 - bucket.tokens) / this.perMinute) * 60));
+    bucket.tokens -= 1;
+    return 0;
+  }
+
+  evict(now) {
+    for (const [ip, bucket] of this.buckets) {
+      if (bucket.tokens + ((now - bucket.updated) / 60_000) * this.perMinute >= this.perMinute) this.buckets.delete(ip);
+    }
+    while (this.buckets.size >= this.maxClients) this.buckets.delete(this.buckets.keys().next().value);
+  }
+}

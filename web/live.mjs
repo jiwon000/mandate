@@ -12,7 +12,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Contract, ContractFactory, JsonRpcProvider, NonceManager, formatEther, formatUnits, getAddress, parseEther } from "ethers";
 import { loadArtifact } from "../contracts/script/artifacts.mjs";
 import { CONTRACT_SOURCES, START_BTC_PRICE, START_PRICE, deployDemoSystem } from "./mandates.mjs";
-import { FAUCET_USDC, FaucetError, FaucetLimiter } from "./faucet.mjs";
+import { FAUCET_USDC, FaucetError, FaucetLimiter, HttpError } from "./faucet.mjs";
 import { demoWallets } from "./accounts.mjs";
 import { authorise, authoriseTypedData, buildPolicy } from "./live-policy.mjs";
 import { RollingBudget, gasLimitFor, perKeyQueue, planTopUps } from "./live-gas.mjs";
@@ -714,7 +714,8 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
         if (forward.some((index) => calls[index].method === "eth_getTransactionReceipt" && results[index].result)) reads.clear();
         for (const index of forward) reads.put(calls[index], results[index]);
       } catch (error) {
-        for (const index of forward) results[index] = rpcFailure(calls[index].id ?? null, -32603, error.message);
+        console.error("upstream relay failed:", error);
+        for (const index of forward) results[index] = rpcFailure(calls[index].id ?? null, -32603, "upstream error");
       }
     }
     return Array.isArray(payload) ? results : results[0];
@@ -780,18 +781,18 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       };
     },
     setBlockTime() {
-      throw new Error("block time is the chain's own on a live network");
+      throw new HttpError("block time is the chain's own on a live network");
     },
     shock(bps) {
-      if (!controlBucket.take()) throw new Error("too many market moves; wait a minute");
+      if (!controlBucket.take()) throw new HttpError("too many market moves; wait a minute", 429);
       const value = Math.trunc(Number(bps));
-      if (!Number.isFinite(value) || Math.abs(value) > 3000) throw new Error("shock out of range");
+      if (!Number.isFinite(value) || Math.abs(value) > 3000) throw new HttpError("shock out of range");
       touch();
       pendingShockBps = value;
       return { pendingShockBps };
     },
     restorePrice() {
-      if (!controlBucket.take()) throw new Error("too many market moves; wait a minute");
+      if (!controlBucket.take()) throw new HttpError("too many market moves; wait a minute", 429);
       touch();
       basePriceE18 = START_PRICE;
       pendingShockBps = 0;
@@ -800,12 +801,12 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     },
     async redeploy(token) {
       if (!adminToken || !timingSafeStringEqual(token, adminToken)) {
-        throw new Error("reset needs the admin token on a live network");
+        throw new HttpError("reset needs the admin token on a live network", 403);
       }
       return whileReset(async () => {
         while (busy) await pause(50); // the mark in flight lands first
         if (Date.now() - lastResetAt < config.resetCooldownSeconds * 1000) {
-          throw new Error(`reset cooldown: ${Math.ceil((lastResetAt + config.resetCooldownSeconds * 1000 - Date.now()) / 1000)}s left`);
+          throw new HttpError(`reset cooldown: ${Math.ceil((lastResetAt + config.resetCooldownSeconds * 1000 - Date.now()) / 1000)}s left`, 429);
         }
         await redeploy("admin");
         return { ok: true, startedAt: deployment.startedAt };

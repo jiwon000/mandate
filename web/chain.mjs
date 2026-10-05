@@ -18,7 +18,7 @@ import {
   START_PRICE,
   deployDemoSystem
 } from "./mandates.mjs";
-import { FAUCET_USDC, FaucetLimiter } from "./faucet.mjs";
+import { FAUCET_USDC, FaucetLimiter, HttpError } from "./faucet.mjs";
 import { parseEther } from "ethers";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 import { DPReporter } from "../reporter/reporter.mjs";
@@ -227,13 +227,13 @@ export async function startChain() {
     },
     setBlockTime(seconds) {
       const value = Number(seconds);
-      if (![1, 12].includes(value)) throw new Error("blockTime must be 1 or 12");
+      if (![1, 12].includes(value)) throw new HttpError("blockTime must be 1 or 12");
       blockTimeSeconds = value;
       return { blockTimeSeconds };
     },
     shock(bps) {
       const value = Math.trunc(Number(bps));
-      if (!Number.isFinite(value) || Math.abs(value) > 3000) throw new Error("shock out of range");
+      if (!Number.isFinite(value) || Math.abs(value) > 3000) throw new HttpError("shock out of range");
       pendingShockBps = value;
       return { pendingShockBps };
     },
@@ -280,18 +280,18 @@ export async function startChain() {
     // that actually matters. This just keeps an obviously-bad intent (wrong
     // signer, unknown vault) out of a batch that would otherwise revert whole.
     async submitIntent({ intent, signature } = {}) {
-      if (!intent || !signature) throw new Error("missing intent or signature");
+      if (!intent || !signature) throw new HttpError("missing intent or signature");
       for (const key of ["allocator", "vault", "amount", "minShares", "epoch", "nonce", "deadline"]) {
-        if (intent[key] === undefined || intent[key] === null) throw new Error(`intent missing ${key}`);
+        if (intent[key] === undefined || intent[key] === null) throw new HttpError(`intent missing ${key}`);
       }
       const recovered = verifyTypedData(batchDomain, intentTypes, intent, signature);
       if (recovered.toLowerCase() !== String(intent.allocator).toLowerCase()) {
-        throw new Error("signature does not match intent.allocator");
+        throw new HttpError("signature does not match intent.allocator");
       }
       const vaultKnown = deployment.vaults.some(
         (v) => v.address.toLowerCase() === String(intent.vault).toLowerCase()
       );
-      if (!vaultKnown) throw new Error("vault is not part of this demo");
+      if (!vaultKnown) throw new HttpError("vault is not part of this demo");
       const digest = hashIntent(batchDomain, intent);
       if (pendingIntents.some((p) => p.digest === digest)) {
         return { accepted: true, digest, duplicate: true };
@@ -310,9 +310,9 @@ export async function startChain() {
       const epoch = candidates.find((e) => now >= batchEpochEnd(e) && now <= batchDeadline(e));
       if (epoch === undefined) {
         const next = candidates[0];
-        if (next === undefined) throw new Error("no pending intents to settle");
+        if (next === undefined) throw new HttpError("no pending intents to settle");
         const wait = Math.max(0, batchEpochEnd(next) - now);
-        throw new Error(
+        throw new HttpError(
           wait > 0
             ? `epoch ${next} is not settleable yet — ${wait}s left before it ends`
             : `epoch ${next} is past its settlement window`
@@ -413,7 +413,7 @@ export async function startChain() {
     // same relay-friendly shape as BatchAllocator.claimShares().
     async publish() {
       if (pooledReturns.length < 3) {
-        throw new Error(
+        throw new HttpError(
           `need at least 3 sampled returns to release, have ${pooledReturns.length} -- wait for a few more price ticks`
         );
       }

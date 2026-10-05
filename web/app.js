@@ -196,6 +196,12 @@ async function boot() {
         const next = await (await fetch("/api/control")).json();
         state.oracle = next.oracle ?? null;
         state.gas = next.gas ?? null;
+        // Someone else reset the demo, or the server did it on its own: this
+        // page is still holding the contracts that were replaced.
+        const guard = next.reset?.guard;
+        if (guard && guard !== state.deployment.addresses.guard && (await adoptDeployment())) {
+          showToast("The demo was reset. Fresh contracts loaded.");
+        }
       } catch (ignored) {
         // the next refresh reports the outage
       }
@@ -1336,29 +1342,37 @@ $("#restorePrice").addEventListener("click", (event) =>
   })
 );
 
+// Point the page at the book the server holds now. A reset replaces every
+// contract, so whatever the page drew or cached from the old ones goes with it.
+async function adoptDeployment() {
+  const deployment = await (await fetch("/api/deployment")).json();
+  if (deployment.addresses.guard === state.deployment.addresses.guard) return false;
+  state.deployment = deployment;
+  state.contracts.guard = new ethers.Contract(deployment.addresses.guard, deployment.abis.guard, state.provider);
+  state.contracts.venue = new ethers.Contract(deployment.addresses.venue, deployment.abis.venue, state.provider);
+  state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
+  state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
+  Object.assign(state.contracts, optionalContracts(deployment, state.provider));
+  applyFeatures(deployment);
+  state.contracts.vaults = deployment.vaults.map(
+    (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
+  );
+  state.navSeries.clear();
+  state.feed = [];
+  state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
+  // A redeploy is a fresh BatchAllocator/MandateRegistry at fresh addresses;
+  // anything signed or settled against the old ones no longer applies.
+  state.batch = { status: null, escrow: 0n, claims: [] };
+  state.privacy = { status: null, onchainDigest: null };
+  buildLeaderboardSkeleton();
+  updateSimulator();
+  return true;
+}
+
 $("#redeployButton").addEventListener("click", (event) =>
   withButton(event.currentTarget, "redeploying…", async () => {
     await control("redeploy");
-    const deployment = await (await fetch("/api/deployment")).json();
-    state.deployment = deployment;
-    state.contracts.guard = new ethers.Contract(deployment.addresses.guard, deployment.abis.guard, state.provider);
-    state.contracts.venue = new ethers.Contract(deployment.addresses.venue, deployment.abis.venue, state.provider);
-    state.contracts.adapter = new ethers.Contract(deployment.addresses.adapter, deployment.abis.adapter, state.provider);
-    state.contracts.usdc = new ethers.Contract(deployment.addresses.usdc, deployment.abis.usdc, state.provider);
-    Object.assign(state.contracts, optionalContracts(deployment, state.provider));
-    applyFeatures(deployment);
-    state.contracts.vaults = deployment.vaults.map(
-      (v) => new ethers.Contract(v.address, deployment.abis.vault, state.provider)
-    );
-    state.navSeries.clear();
-    state.feed = [];
-    state.lastScannedBlock = Math.max(0, (deployment.startBlock ?? 1) - 1);
-    // A redeploy is a fresh BatchAllocator/MandateRegistry at fresh addresses;
-    // anything signed or settled against the old ones no longer applies.
-    state.batch = { status: null, escrow: 0n, claims: [] };
-    state.privacy = { status: null, onchainDigest: null };
-    buildLeaderboardSkeleton();
-    updateSimulator();
+    await adoptDeployment();
     showToast("Fresh contracts deployed. Four mandates live again.");
   })
 );

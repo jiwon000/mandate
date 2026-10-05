@@ -761,7 +761,9 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
           warning: gasWarning
         },
         proxy: { forwarded, packed, cached: reads.hits, cacheMs: config.readCacheMs, packing: canPack },
-        reset: { admin: Boolean(adminToken), auto: config.autoReset, lastResetAt }
+        // The guard is deployed anew by every reset: a page compares it with the
+        // one it booted on to notice a reset it did not ask for.
+        reset: { admin: Boolean(adminToken), auto: config.autoReset, lastResetAt, guard: deployment?.addresses.guard ?? null }
       };
     },
     setBlockTime() {

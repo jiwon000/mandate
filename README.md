@@ -78,6 +78,8 @@ npm run test:invariant
 
 같은 화면을 Monad 테스트넷 위에서 띄울 수 있습니다. 서버가 네 개 Vault를 한 번 배포한 뒤, 방문자의 클릭을 서버가 보관한 테스트넷 전용 데모 키로 서명하고 가스를 대신 냅니다. 방문자는 지갑 확장도 faucet도 필요 없고, 피드의 각 항목은 monadscan 트랜잭션으로 연결됩니다.
 
+공개 인스턴스: <https://mandate-e4kb.onrender.com> (Monad 테스트넷, chainId 10143)
+
 ```bash
 cp .env.example .env        # MONAD_RPC_URL, DEMO_MNEMONIC(테스트넷 전용), DEMO_ADMIN_TOKEN
 npm run compile
@@ -107,7 +109,7 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 ## 다음 작업
 
-외부 감사(제3자 진행 중)와 라이브 데모의 공개 호스팅이 남아 있습니다. baseline/FlyGraph 에이전트는 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
+외부 감사(제3자 진행 중)가 남아 있습니다. 라이브 데모는 공개 호스팅했습니다([라이브 테스트넷 데모](#라이브-테스트넷-데모)). baseline 에이전트 구현은 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
@@ -354,7 +356,7 @@ Done:
 
 Next:
 
-12. An external, independent security audit (in progress with a third party) and publicly hosting the live demo (the testnet deployment itself is already published under "Recorded run on Monad testnet"). A baseline agent and FlyGraph are explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
+12. An external, independent security audit (in progress with a third party). The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
@@ -387,6 +389,8 @@ Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the 
 ## Live testnet demo
 
 The same screens can run against Monad testnet, with no wallet extension and no faucet trip for the visitor. The server deploys the book once, then signs every click with demo keys it holds and pays the gas. Every number is still a contract read against the live chain, every button still a transaction with an explorer link in the feed.
+
+A public instance runs at <https://mandate-e4kb.onrender.com> (Monad testnet, chain 10143).
 
 ```bash
 cp .env.example .env        # MONAD_RPC_URL, DEMO_MNEMONIC (testnet-only), DEMO_ADMIN_TOKEN

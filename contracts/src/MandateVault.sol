@@ -36,8 +36,8 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     /// @notice How many unwind() calls it takes to close a frozen position.
     /// @dev Each step closes one fifth of the size the vault was frozen with, one step
     ///      per block, so a close is spread over blocks instead of hitting the venue in
-    ///      one print. Five steps is the cadence Hyperliquid uses when it closes 20% of
-    ///      a vault's positions per round to free withdrawal margin.
+    ///      one print. Five is a starting point, to be revisited against real fills
+    ///      once a production venue adapter exists.
     uint8 public constant UNWIND_STEPS = 5;
 
     /// @notice Share of idle assets paid to whoever lands an unwind() step.
@@ -212,9 +212,10 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     /// @dev Only the RiskGuard may call. Withdrawals stay open while Frozen so
     ///      allocators keep their exit; only allocate() and execute() are closed.
     ///      The position is not touched here: closing it is unwind()'s job, and a
-    ///      freeze must not depend on a fill going through. Deliberately not
-    ///      `nonReentrant`: it is reached from inside execute()'s guarded frame.
-    ///      State is written before the single ERC20 transfer.
+    ///      freeze must not depend on a fill going through. Not `nonReentrant`:
+    ///      it is reached from inside execute()'s guarded frame, and also from
+    ///      poke() and freezeUnobservable(), which are not. State is written
+    ///      before the single ERC20 transfer, so a second bounty is impossible.
     function freeze(address beneficiary) external returns (uint256 bounty) {
         if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
         if (state != AgentState.Active) revert AgentNotActive();
@@ -255,7 +256,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
             (positionNotional,) = venueAdapter.positionState(address(this));
         }
 
-        uint256 bounty = (totalAssets() * UNWIND_BOUNTY_BPS) / 10_000;
+        // Paid for closing size only: a call that finds the book already flat just
+        // moves the vault to Closed and earns nothing.
+        uint256 bounty = closedNotional == 0 ? 0 : (totalAssets() * UNWIND_BOUNTY_BPS) / 10_000;
         if (bounty > 0) asset.safeTransfer(msg.sender, bounty);
         emit Unwound(msg.sender, step, closedNotional, realizedPnl, bounty);
 

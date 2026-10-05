@@ -153,7 +153,7 @@
           <div><p class="eyebrow">YOUR CLAIMS</p><h2>Settled, unclaimed shares</h2></div>
         </div>
         <div id="claimList"></div>
-        <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set.</p>
+        <p class="disclosure">Anyone may relay a claim; shares always go to the signed allocator, never the caller. Included intents and signatures become public in settlement calldata — this is a public batcher, not an anonymity set. The demo server keeps the claim proofs in memory, so claim soon after settlement: a server restart loses proofs not yet claimed.</p>
       </section>
 
       <section class="view" data-view="privacy">
@@ -200,9 +200,9 @@
       <section class="view" data-view="risk">
         <div class="live-head">
           <div><p class="eyebrow"><i class="live-dot"></i> LIVE EXECUTION</p><h1>RiskGuard control room</h1></div>
-          <div class="blocktime-toggle" role="group" aria-label="Block time">
-            <button data-blocktime="1" class="active">Monad · 1s blocks</button>
-            <button data-blocktime="12">Ethereum · 12s blocks</button>
+          <div class="blocktime-toggle" role="group" aria-label="Mark cadence">
+            <button data-blocktime="1" class="active">1s marks · Monad</button>
+            <button data-blocktime="12">12s marks · 12s-block chain</button>
           </div>
         </div>
 

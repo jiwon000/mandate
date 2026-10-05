@@ -9,7 +9,7 @@ struct RiskLimits {
     ///      trades via poke(), not only when a position is closed.
     uint16 maxDrawdownBps;
     uint32 minBlocksBetweenTrades;
-    /// @notice Reject any mark older than this many seconds. 0 disables the check.
+    /// @notice Reject any mark older than this many seconds. Must be in (0, MAX_MARK_AGE_CAP].
     /// @dev This is the limit a slow chain cannot honour: a 2s cap is unreachable
     ///      when blocks are 12s apart, so the guard would revert every trade.
     uint32 maxMarkAgeSeconds;
@@ -64,6 +64,9 @@ interface IMandateVaultView {
 
     /// @notice The one account allowed to trade the vault, fixed at construction.
     function agent() external view returns (address);
+
+    /// @notice The one venue adapter the vault trades and is priced through, fixed at construction.
+    function venueAdapter() external view returns (address);
 
     /// @notice 0 Active, 1 Frozen, 2 Closed (MandateVault.AgentState).
     function state() external view returns (uint8);

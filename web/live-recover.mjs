@@ -3,7 +3,7 @@
 // host that wipes the disk on restart (Render's free plan does) brings the
 // server back on the committed record, which can be several books behind the
 // chain. When that old book has frozen vaults, the first visitor to leave sets
-// off yet another full redeploy, about 2.5 MON on Monad testnet.
+// off yet another full redeploy, about 1.8 MON on Monad testnet.
 //
 // latestBook() finds the owner's newest complete book on chain instead, so a
 // restart picks up where the last instance left off. It only reads: it walks

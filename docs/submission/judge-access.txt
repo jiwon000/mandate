@@ -9,10 +9,10 @@ A five-minute pass:
 5. Press "−2% shock". Tight Mandate runs at about 2x, so it is now about 4% under its high-water mark, past its 3% limit. It reads OVER LIMIT but is not frozen yet.
 6. Press "poke()". The vault freezes and the caller is paid the bounty. Press "Send order inside mandate" again: the agent is refused with AgentNotActive.
 7. Press "unwind()" up to five times, a few seconds apart. Each call closes a fifth of the position. After the fifth the vault is Closed.
-8. Back on Allocate, press "Withdraw all shares". Withdrawals stay open through the freeze.
+8. Back on Allocate, press "Withdraw all shares". Withdrawals stay open through the freeze, paid from the vault's cash at a fresh mark.
 9. Optional: select Range Carry after the shock and press "Send order inside mandate". Its drawdown is inside the mandate, but the volatility clause refuses new exposure with StressBreach until the market has been quiet for about a minute. "Send reduce-only order" still passes.
 
-Two more screens, Batch and Privacy, appear in the menu when the book the server runs includes BatchAllocator and MandateRegistry. If the hosted page does not show them yet, they run in the local build (see the last note below).
+Two more screens, Batch and Privacy, are in the menu; they run against BatchAllocator and MandateRegistry in the same book.
 
 10. Batch. With the allocator connected, press "depositEscrow()", then "Sign AllocationIntent" for the selected vault. Signing is off-chain. The intent targets an epoch, and epochs are 20 seconds long in the demo. When that epoch has ended, press "settleEpoch()". The batcher nets the queued intents into one deposit per vault. Your shares appear under "Settled, unclaimed shares"; press "claimShares()" to receive them with a Merkle proof.
 11. Privacy. Press "postLeaderboard()". The server publishes a signed, noised release of vault statistics to MandateRegistry, and the page re-reads the digest from the contract before it shows VERIFIED ONCHAIN. The registry adds the epsilon the release spends to a running total and refuses a release past the cap. The slider beside it is arithmetic in your browser and sends nothing.
@@ -22,10 +22,10 @@ When you finish, "Restore $2000" puts the price back for the next visitor.
 Things you may notice:
 
 - If the first click after loading reports MarkTooOld, wait about five seconds and try again. The price oracle slows down while nobody is watching and speeds up when a page opens.
-- The server redeploys a fresh set of vaults after a visitor leaves two or more frozen, so vault addresses on the live page can be newer than the ones in the README. The README's addresses and recorded transactions stay on chain.
+- The server redeploys a fresh set of vaults when two or more are frozen, checked as a visitor arrives and as one leaves. If the page opens on a reset, the vaults are back in a minute or two. Vault addresses on the live page can be newer than the ones in the README. The README's addresses and recorded transactions stay on chain.
 - The venue and the USDC are mocks, and the price is set by our own keeper. The contracts under test are MandateVault, MandateRiskGuard, BatchAllocator and MandateRegistry.
 - The statistics on the Privacy screen are computed from public vault marks. The screen demonstrates the release mechanism and the on-chain epsilon ledger, not protection of private data.
 - On the live page the server acts as batcher and reporter and pays for settlements and releases inside an hourly gas allowance. A release can be published at most once every two minutes. If a button reports a limit, wait and try again.
-- The local build has every screen and one thing the live page cannot have: the 12-second-block comparison (a 4-second mark-age mandate reverting with MarkTooOld), because a live chain's block cadence is its own. To run it: clone the repository, then run npm ci and npm run web with Node 22.14 or newer, open http://localhost:3000, and use the block-time switch on Live Risk.
+- The local build has every screen and one thing the live page cannot have: the 12-second comparison (the oracle held to one mark per 12 seconds, as a 12-second chain would force, against a 4-second mark-age mandate that then reverts with MarkTooOld), because a live chain's cadence is its own. To run it: clone the repository, then run npm ci and npm run web with Node 22.14 or newer, open http://localhost:3000, and use the mark-cadence switch on Live Risk.
 
 Contract addresses, a recorded run with transaction links, the AI tool disclosure and the third-party code list are in the repository README.

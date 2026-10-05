@@ -74,6 +74,14 @@ export class DPReporter {
       pinnedBlock,
       statsVersion: this.statsVersion
     });
+    // This scale is derived from the mean's own sensitivity (2*clipBound/N) and
+    // reused for all three draws below. The stated epsilon is an exact, provable
+    // DP guarantee for the mean only -- Sharpe's and max-drawdown's own global
+    // sensitivity under clipped inputs has not been derived, so their noise is
+    // indicative, not independently epsilon-accounted. Documented in README's
+    // "Published ε vs Privacy Simulator" section; not treated as a bug to fix
+    // under time pressure, since a wrong hand-derived sensitivity bound would be
+    // worse than an honestly scoped one.
     const scale = laplaceScaleForMean(this.clipBound, clipped.length, this.epsilon);
     const [meanNoise, sharpeNoise, drawdownNoise] = laplaceSamples(seed, 3, scale);
 

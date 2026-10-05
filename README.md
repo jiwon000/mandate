@@ -125,6 +125,8 @@ DP Reporter [구현 기준 2026-10-04]: `reporter/` 모듈이 실제 통계를 �
 
 Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개 vault를 모두 `MandateRegistry`에 등록하고, 매 가격 tick마다 vault별 NAV 수익률을 모읍니다. 웹의 Privacy 화면에서 `postLeaderboard()`를 클릭하면 서버가 release를 만들어 서명·게시하고, 페이지는 서버 응답을 그대로 믿지 않고 `registry.releaseOf()`를 직접 읽어 digest가 일치하는지 대조해서 "VERIFIED ONCHAIN"을 표시합니다. Privacy Simulator 슬라이더는 같은 scale 공식을 쓰되 체인 호출이나 ledger 접근이 전혀 없는 순수 클라이언트 계산입니다.
 
+실사용을 위해 남은 것 [2026-10-05 정리]: 지금 데모는 서버가 데모 계정 6개로 대신 서명하고, 자산은 mock USDC, 거래소는 mock venue이며, 에이전트는 배포 스크립트가 만든 4개뿐입니다. 남은 순서는 (1) 지갑 연결: 사용자가 자기 키로 서명하고 테스트용 mock USDC를 받아 예치·배분·인출, (2) 에이전트 온보딩: 외부 운영자가 볼트를 만들고 한도를 잠가 레지스트리에 등록하는 화면과 절차(운영자 승인 방식인지 무허가인지 결정 포함), (3) 실제 거래소 어댑터: mock venue 대신 실제 DEX에 주문, (4) 외부 감사 뒤 실제 USDC로 메인넷 배포입니다. 영문 Roadmap 14~17번이 같은 내용입니다.
+
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
 ---
@@ -363,6 +365,13 @@ Next:
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
 13. Term coverage. Per-adapter instrument, direction and concentration whitelist; a bound on how far the venue mark may deviate from a reference price. `FeeTerms` exists as of 2026-10-04 but only as declared metadata on `MandateRegistry` — `MandateVault` has no fee-deduction mechanism to enforce it against. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
+
+From demo to real use (2026-10-05). Today the live demo signs for its visitors with six demo keys, the asset is a mock USDC, the venue is the deterministic MockVenue and the four agents are the ones the deploy script creates. In order:
+
+14. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
+15. Agent onboarding. An outside operator deploys a vault, sets and locks its limits and registers it in `MandateRegistry` from a page instead of the deploy script. Whether onboarding needs the guard owner's approval (as `configure()`, `lockTerms()` and `registerAgent()` do today) or is permissionless with a guard per operator is the open design question.
+16. A real venue adapter. An `IVenueAdapter` for a live DEX in place of MockVenue, so a mandate bounds real fills, real slippage and a price the operator does not control.
+17. Mainnet with real USDC, only after item 12's external audit.
 
 ## Stack
 

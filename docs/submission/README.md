@@ -114,13 +114,23 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 1. ~~테스트넷 재배포를 누가 언제 할지~~ — 해결됨: `web/live-recover.mjs` 배포로 서버가 체인에서 스스로 최신 장부를 찾으므로 더 이상 수동 재배포가 필요 없습니다.
 2. ~~Render 재시작마다 재배포 비용이 나가는 문제~~ — 해결됨: `949d258` 배포로 재시작 재배포가 멈췄고, 부팅이 약 40초 늘어나는 것은 확인됐습니다(Render가 그 사이 포트를 기다려 줬습니다 — 배포가 정상 완료됨). `ORACLE_IDLE_SECONDS=3600`도 적용해서 대기 비용을 하루 약 0.13 MON으로 낮췄습니다. 문제가 생기면 `RECOVER_BOOK=0`으로 옛 방식(커밋된 파일 신뢰)으로 되돌릴 수 있습니다.
-3. 외부 감사 문구 (2026-10-05 정리). README 세 군데(한국어 "다음 작업", 영문 구현 현황 문단, 영문 Roadmap 12번)를 "외부 감사는 아직 받지 않았습니다"로 맞췄습니다. 제출 Description의 "No external audit has been completed."와 같은 뜻입니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰입니다. 진행 중인 외부 감사가 있다면 맡은 곳과 범위를 README에 적습니다. (@jiwon000 확인)
-4. Batch 화면 제목 (2026-10-05 정리). "Anyone can settle, once an epoch ends"는 컨트랙트와 달랐습니다. `settleEpoch()`는 batcher 주소만 부를 수 있습니다. 제목을 "Anyone can ask for settlement; only the batcher sends it"로 바꿨습니다. 누구나 버튼을 누를 수 있고 서버가 batcher로서 보낸다는 실제 동작과 같습니다.
-5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 트레일러 없이 AI 도구를 쓴 커밋이 있으면 그 절에 한 줄을 더합니다. (@jiwon000 확인)
-6. 한 줄 설명의 뒷부분 "market signals published with scoped differential privacy"를 그대로 둘지. 지금 게시하는 것은 공개된 볼트 통계라서 "market signals"가 더 넓게 읽힐 수 있습니다. 대안: "Back autonomous trading agents without custody: the agent can only execute, and every order must pass on-chain risk terms locked before the first deposit."
-7. DP 리포터는 Laplace 스케일 하나를 평균, Sharpe, 최대 낙폭에 같이 씁니다. 그래서 화면의 ε는 평균에 대해서만 정확합니다. 제출 글에는 그렇게 적었습니다. 코드를 고칠지 지금 문구로 둘지 정합니다.
-8. Sponsor bounty를 추가할지. 주제가 가까운 것은 Perpl "Best Analytics / Risk Tool", Perpl "Best use of Perpl's API", Monad Foundation "Best Community Team Project"입니다. 각 bounty의 요건은 아직 확인하지 않았습니다.
-9. Go-to-market 초안의 가정을 받아들일지. 첫 단계는 Monad의 실제 무기한선물 거래소 한 곳의 어댑터, 초기 볼트는 팀이 직접 운영, 수익 모델은 운용자 성과보수의 일부이고 미확정이라고 적었습니다.
+3. ~~외부 감사 문구~~ — 해결됨: 진행 중인 외부 감사 없음 확인. README 세 군데(한국어 "다음 작업", 영문 구현 현황 문단, 영문 Roadmap 12번)는 "외부 감사는 아직 받지 않았습니다"로 이미 일치합니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰뿐입니다. 별도로 만든 발표 슬라이드(claude.ai 아티팩트)에 "외부 감사 진행 중"이라고 잘못 적혀 있던 걸 발견해 같은 문구로 고쳤습니다.
+4. ~~Batch 화면 제목~~ — 완료 확인: `web/index.html`에 "Anyone can ask for settlement; only the batcher sends it"로 이미 반영돼 있습니다.
+5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 트레일러가 없는 커밋 18개 중 병합 커밋 10개를 뺀 나머지 8개를 찾았습니다 (git log로 확인, 2026-10-05):
+   - `fed3608` docs: add Korean MIT license translation
+   - `21e2602` docs: add Korean README before English documentation
+   - `4bcbc9e` chore: include frontend milestone project snapshot
+   - `f43e042` fix: label synthetic privacy preview and update epsilon display
+   - `545b850` feat(risk): mark-to-market equity, permissionless poke(), and mark-age limits (@yahamang)
+   - `df8100d` feat: add interactive frontend demo
+   - `65213b6` fix: remove vulnerable Ganache dependency from contract tests
+   - `1d23d34` Initial import: Mandate mock core and batch allocator draft
+
+   커밋 기록만으로는 이 8개에 AI 도구를 썼는지 알 수 없습니다 — 트레일러 관행이 2026-10-04부터 생겼을 뿐, 그 전에 AI를 안 썼다는 뜻은 아닙니다. 각 커밋을 쓴 사람(@jiwon000, @yahamang)이 직접 확인해서, AI를 썼다면 "AI tool disclosure" 절에 한 줄을 추가해야 합니다.
+6. ~~한 줄 설명의 "market signals" 문구~~ — 해결됨 (2026-10-05): "시장 신호"가 실제로 게시하는 것(공개된 볼트 성과 통계)보다 넓게 읽혀서, README 한국어·영문 첫 줄을 "published performance stats carry a verifiable, on-chain differential-privacy budget" (공개된 성과 통계는 온체인에서 검증 가능한 차등 프라이버시 예산 안에서 게시됩니다)로 바꿨습니다. 폼의 "One-line description"도 이 문구로 다시 붙여넣어야 합니다 (영문 172자, 한도 200자).
+7. ~~DP 리포터의 단일 Laplace 스케일 문제~~ — 결정됨 (2026-10-05): 코드는 그대로 둡니다. Sharpe와 최대 낙폭은 clip된 입력에서의 실제 민감도(sensitivity)가 아직 유도되지 않았는데, 지금 시간 압박 속에서 직접 새 수식을 유도하면 틀릴 위험이 검증 안 된 주장을 하나 더 만드는 것과 같습니다 — "평균에 대해서만 정확하다"고 솔직하게 범위를 좁히는 쪽이 더 안전합니다. 이미 `description.txt`에 정확히 그렇게 적혀 있었고, README "Published ε vs Privacy Simulator" 절과 `reporter/reporter.mjs`의 코드 주석에도 같은 설명을 추가해 세 곳이 일치하도록 맞췄습니다.
+8. Sponsor bounty를 추가할지 (웹 검색으로 확인, 2026-10-05). Perpl "Best use of Perpl's API"($5,000)와 "Best Analytics / Risk Tool"($3,000) 이름·금액·마감(10-13)은 맞습니다. 다만 "Best use of Perpl's API"는 지금 코드(mock venue, 실제 Perpl 연동 없음 — "실사용을 위해 남은 것" 3번 항목)로는 요건을 못 채울 가능성이 큽니다. "Best Analytics / Risk Tool"은 RiskGuard·DP Reporter가 원칙적으로 맞을 수 있지만, 세부 요건(Perpl 실데이터 연동이 필수인지 등)은 검색만으로 확실히 확인 못 했으니 대시보드에서 직접 확인 필요. 검색 중 "메인넷 배포 필수"라는 요약도 나왔는데, 이건 제출 요건 표에 이미 있는 "메인넷 또는 테스트넷" 확인 내용과 다릅니다 — 추측성 요약이라 신뢰 안 함. 테스트넷 제출이 실제로 요건을 충족하는지 대시보드 원문을 한 번 더 확인하는 걸 권장합니다.
+9. ~~Go-to-market 초안의 가정~~ — 검토함 (2026-10-05): Step 2에 "baseline agent bot을 로드맵에서 가져와 배포"라는 문장이 있었는데, 2026-10-04에 baseline 에이전트를 프로토콜 범위에서 뺀 결정과 어긋나서 "우리가 직접 locking 가능한 간단한 전략으로 첫 볼트를 운영한다"로 고쳤습니다. 나머지 가정(거래소 어댑터 우선순위, 직접 운영 후 개방, 운용자 성과보수 공유 미확정)은 기술적으로 현재 구현과 일치해서 그대로 받아들여도 됩니다.
 10. 데모 영상에 Batch·Privacy 장면을 넣을지. 본편이 이미 2분 50초라 넣으려면 다른 장면을 줄여야 합니다 (`demo-video-script.md`의 선택 장면).
 
 ## 글과 영상에서 지킬 것

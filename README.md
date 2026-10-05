@@ -1,6 +1,6 @@
 # Mandate
 
-**수탁 권한 없이 자율 트레이딩 에이전트를 지원합니다. 실행 권한은 온체인에서 제한하고, 시장 신호는 범위를 명시한 차등 프라이버시로 공개합니다.**
+**수탁 권한 없이 자율 트레이딩 에이전트를 지원합니다: 실행 권한은 온체인에서 제한되고, 공개된 성과 통계는 온체인에서 검증 가능한 차등 프라이버시 예산 안에서 게시됩니다.**
 
 Mandate는 Monad에서 자율 트레이딩 에이전트에 자본을 배분하는 온체인 시장입니다. 배분자는 출금 권한을 유지하고, 에이전트는 거래 실행 권한만 받습니다. 모든 주문은 거래 venue에 도달하기 전에 전용 Adapter와 온체인 `RiskGuard` 검사를 통과해야 합니다.
 
@@ -133,7 +133,7 @@ Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개
 
 # Mandate (English)
 
-**Back autonomous trading agents without custody — execution constrained on-chain, market signals published with scoped differential privacy.**
+**Back autonomous trading agents without custody: execution is constrained on-chain, and published performance stats carry a verifiable, on-chain differential-privacy budget.**
 
 Mandate is a live capital-allocation market for autonomous trading agents on Monad. Allocators hold withdrawal rights no agent or operator can revoke, agents receive execution-only permissions, and every order must pass an adapter-specific on-chain `RiskGuard` before it reaches a venue.
 
@@ -226,7 +226,7 @@ Mandate deliberately distinguishes private inputs from public settlement data.
 
 `BatchAllocator` reduces direct allocator-to-agent transactions by netting an epoch before vault settlement. It does not provide complete anonymity: escrow deposits and public settlement remain observable.
 
-As of 2026-10-04, `reporter/` computes and signs DP releases for the two rows above that are already public data — mean return, Sharpe and marked max drawdown, clipped to `[-c, c]` and noised with the Laplace mechanism (`scale = 2c / (N·ε)`, the standard report-noisy-mean sensitivity). The two private-signal rows have no implementation: inventing a watchlist feature just to have something to anonymize would be privacy theater, so v1 only protects data that is genuinely sensitive and genuinely collected.
+As of 2026-10-04, `reporter/` computes and signs DP releases for the two rows above that are already public data — mean return, Sharpe and marked max drawdown, clipped to `[-c, c]` and noised with the Laplace mechanism (`scale = 2c / (N·ε)`, the standard report-noisy-mean sensitivity). That scale is derived from the mean's own sensitivity and reused for all three released numbers; the stated ε is therefore an exact, provable DP guarantee for the mean only, and the noisy Sharpe and max-drawdown figures should be read as indicative rather than independently budgeted — neither statistic's own sensitivity under clipped inputs has been derived. The two private-signal rows have no implementation: inventing a watchlist feature just to have something to anonymize would be privacy theater, so v1 only protects data that is genuinely sensitive and genuinely collected.
 
 ### Published ε vs Privacy Simulator
 

@@ -201,3 +201,14 @@ test("funding Perpl books against a position moves equity and settles on close",
   const cash = await s.usdc.balanceOf(s.vault.target);
   assert.equal(cash, paid - 105_000n);
 });
+
+test("a close reports its price PnL at Perpl's mark in Executed", async (t) => {
+  const s = await setup(t);
+  await s.trade(0, "0.005", "60600");
+  // Up 1%: selling 0.003 of the 0.005 long realises 0.003 * $600.
+  await s.fresh(BTC_PNS * 101n / 100n, ETH_PNS);
+  const receipt = await s.wait(s.vault.connect(s.agent).execute(s.adapter.target, s.order(0, "-0.003", "59400")));
+  const executed = receipt.logs.map((log) => { try { return s.vault.interface.parseLog(log); } catch { return null; } })
+    .find((parsed) => parsed?.name === "Executed");
+  assert.equal(executed.args.realizedPnl, e18("1.8"));
+});

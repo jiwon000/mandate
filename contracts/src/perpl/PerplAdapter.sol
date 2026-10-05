@@ -246,13 +246,28 @@ contract PerplAdapter is IVenueAdapter {
         Market memory m = _market(marketId);
         if (_abs(sizeDeltaE18) % m.lotUnit != 0) revert LotNotRepresentable(m.lotUnit);
 
-        (int256 size,,) = _position(vault, m);
+        (int256 size, uint256 entryE18,) = _position(vault, m);
         PerplSubaccount sub = _fund(vault, _marginFor(size, sizeDeltaE18, limitPriceE18, m.markE18));
         _place(vault, sub, m, sizeDeltaE18, limitPriceE18);
         _release(vault);
         // Perpl reports the fill in events, not return values. The vault compares the
-        // position this leaves against preview() and reverts on any partial fill.
-        return (0, limitPriceE18);
+        // position this leaves against preview() and reverts on any partial fill. The
+        // PnL reported for the part closed is at Perpl's mark, not the fill price.
+        realizedPnl = _closedPnl(size, size + sizeDeltaE18, entryE18, m.markE18);
+        amountOut = limitPriceE18;
+    }
+
+    /// @dev Price PnL on the part of `before` that `after_` no longer holds, at `markE18`.
+    function _closedPnl(int256 before, int256 after_, uint256 entryE18, uint256 markE18)
+        private pure returns (int256)
+    {
+        if (before == 0) return 0;
+        uint256 closedE18 = (after_ == 0 || (before > 0) != (after_ > 0))
+            ? _abs(before)
+            : (_abs(after_) < _abs(before) ? _abs(before) - _abs(after_) : 0);
+        if (closedE18 == 0) return 0;
+        int256 signed = before > 0 ? int256(closedE18) : -int256(closedE18);
+        return ((int256(markE18) - int256(entryE18)) * signed) / 1e18;
     }
 
     /// @inheritdoc IVenueAdapter

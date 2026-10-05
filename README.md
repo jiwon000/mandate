@@ -470,7 +470,18 @@ One pass through the demo against that earlier book, every step sent through the
 | Agent sends an order on frozen Range Carry | refused with `AgentNotActive` | none, nothing was signed |
 | `unwind()` step 1 of 5 on Range Carry | mined, a fifth of the position closed | [`0x598d53b5…1f5e16`](https://testnet.monadscan.com/tx/0x598d53b5f45845f07a1178d83c6a63926e5af8dc246d9fc7d29dbc8fcb1f5e16) |
 
-Each transaction was confirmed 1.1 to 1.6 seconds after the request reached the server. In the same session eight consecutive `poke()` calls on Tight Mandate, 4.5 seconds apart on a quiet market, all passed its 10-second mark-age term; not one reverted with `MarkTooOld`.
+Each transaction was confirmed 1.1 to 1.6 seconds after the request reached the server. In the same session eight consecutive `poke()` calls on Tight Mandate, 5 to 7 seconds apart by block timestamp on a quiet market, all passed its 10-second mark-age term; not one reverted with `MarkTooOld`. The table gives the age of the mark each call was checked against: the call's block timestamp minus the venue's `updatedAt` from the last `PriceSet` before it, read back from the chain (`eth_getLogs` and block headers on the public RPC). The ages run from 1 to 5 seconds, which is the 5-second oracle interval; the block interval adds under a second.
+
+| Block | `poke()` | Mark age at execution |
+| --- | --- | --- |
+| 68074867 | [`0x04217deb…ce6862`](https://testnet.monadscan.com/tx/0x04217deb6002384253131ed497b4cfc4da86bdd78842e74885508852c8ce6862) | 2 s |
+| 68074886 | [`0xf2617986…8141bb`](https://testnet.monadscan.com/tx/0xf26179867945cbad50ed85d0fa0c41bbd114ef6fc52eb8a8eb9516b43d8141bb) | 3 s |
+| 68074905 | [`0x5a78cef3…13a2c2`](https://testnet.monadscan.com/tx/0x5a78cef33f55e2eb871657da8594a86c0a2f6aebfe68c75e8f0b9cc6a813a2c2) | 3 s |
+| 68074924 | [`0xd5918f46…78c766`](https://testnet.monadscan.com/tx/0xd5918f46829a0a6e743d0663382e8dae94cf35e471252b48ee513494ae78c766) | 4 s |
+| 68074942 | [`0x0c09903a…0b9fb5`](https://testnet.monadscan.com/tx/0x0c09903ab50859705038278642e86c962dbab0c801070314e34e98306c0b9fb5) | 5 s |
+| 68074963 | [`0xdf5f731c…57f3a4`](https://testnet.monadscan.com/tx/0xdf5f731c81fd3aaa9a5688fd57840b3512c51ca59a644ee0d0ae7d7d4657f3a4) | 1 s |
+| 68074981 | [`0x6b5274a4…9d5b90`](https://testnet.monadscan.com/tx/0x6b5274a4df14d83f08081061af22cf1af01e72c1b36b96e7905eca96f89d5b90) | 1 s |
+| 68075001 | [`0x4cbbb5ba…ff068b`](https://testnet.monadscan.com/tx/0x4cbbb5ba9629650e9c2dbea9e627b9e217705f2945c3ebc2965a8aca72ff068b) | 3 s |
 
 ## Deploying to a live RPC
 

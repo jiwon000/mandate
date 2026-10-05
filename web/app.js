@@ -1111,12 +1111,16 @@ function renderAllocate() {
         : "Review allocation";
   const withdrawButton = $("#withdrawButton");
   if (!withdrawButton.dataset.busy) {
-    // A Closed vault holds no position, so withdraw() skips the mark-age check.
-    withdrawButton.disabled = stale && !closed;
+    // A Closed vault holds no position, so withdraw() skips the mark-age check. A
+    // Frozen vault whose mark has stopped offers withdrawUnpriced(): the stake's
+    // share of the cash, capped at the last mark, without the part at the venue.
+    withdrawButton.disabled = stale && !closed && !frozen;
     withdrawButton.textContent = closed
       ? "Withdraw all shares (cash only, no mark needed)"
-      : stale
-        ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
+      : stale && frozen
+        ? "Take the cash-only exit (leaves the venue part to those who stay)"
+        : stale
+          ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
         : frozen
           ? "Withdraw all shares (still open)"
           : "Withdraw all shares";
@@ -1894,6 +1898,18 @@ $("#withdrawButton").addEventListener("click", (event) =>
     if (vault.userShares === 0n) throw new Error("no shares in this vault");
     const signer = await signerFor(state.wallet);
     const vaultContract = state.contracts.vaults[state.selected].connect(signer);
+    const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
+    if (vault.agentState === 1 && stale) {
+      if (!vaultContract.interface.getFunction("withdrawUnpriced")) {
+        throw new Error("this deployment predates the cash-only exit; wait for the mark or the unwind");
+      }
+      // Ask the chain what it pays now and refuse anything less when it lands.
+      const assets = await vaultContract.withdrawUnpriced.staticCall(vault.userShares, state.wallet, 0n);
+      await (await vaultContract.withdrawUnpriced(vault.userShares, state.wallet, assets)).wait();
+      showToast(`Cash-only exit: ${usdc(assets)} mUSDC paid; the venue part stays with the vault`);
+      $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
+      return;
+    }
     await (await vaultContract.withdraw(vault.userShares, state.wallet)).wait();
     // The vault pays at the marked price out of the cash it holds, so a stake
     // backed by an open position can come out in parts. Report what is left

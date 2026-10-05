@@ -110,7 +110,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 1. 테스트넷 재배포를 누가 언제 할지 (남은 일 3번).
 2. Render가 push마다 자동 배포하는지, 요금제가 무접속 시 서버를 재우는지. 재운다면 심사위원의 첫 접속이 느리고, 깨어날 때 메모리 상태가 초기화됩니다. (@jiwon000 확인)
-3. 외부 감사 문구. README는 "외부 감사(제3자 진행 중)"이라고 적고, 제출 Description은 "No external audit has been completed."라고 적습니다. `docs/security-review-2026-10-04.md`는 내부 리뷰이고 외부 감사가 아니라고 밝히고 있습니다. 감사를 맡은 곳과 범위를 README에 적거나, 그런 곳이 없으면 README 두 군데(한국어 "다음 작업", 영문 Roadmap 12번)를 "외부 감사는 아직 받지 않았습니다"로 고칩니다. (@jiwon000 확인)
+3. 외부 감사 문구 (2026-10-05 정리). README 세 군데(한국어 "다음 작업", 영문 구현 현황 문단, 영문 Roadmap 12번)를 "외부 감사는 아직 받지 않았습니다"로 맞췄습니다. 제출 Description의 "No external audit has been completed."와 같은 뜻입니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰입니다. 진행 중인 외부 감사가 있다면 맡은 곳과 범위를 README에 적습니다. (@jiwon000 확인)
 4. Batch 화면의 문구 "Anyone can settle, once an epoch ends" (`web/index.html`). 컨트랙트에서는 batcher만 `settleEpoch()`를 부를 수 있고, 데모에서는 누가 버튼을 눌러도 서버가 batcher로서 대신 보냅니다. 문구를 이 동작에 맞출지 정합니다.
 5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 트레일러 없이 AI 도구를 쓴 커밋이 있으면 그 절에 한 줄을 더합니다. (@jiwon000 확인)
 6. 한 줄 설명의 뒷부분 "market signals published with scoped differential privacy"를 그대로 둘지. 지금 게시하는 것은 공개된 볼트 통계라서 "market signals"가 더 넓게 읽힐 수 있습니다. 대안: "Back autonomous trading agents without custody: the agent can only execute, and every order must pass on-chain risk terms locked before the first deposit."

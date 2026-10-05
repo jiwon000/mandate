@@ -111,7 +111,7 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 
 해커톤 제출까지 남은 일과 담당, 제출 폼에 넣은 글, 영상 대본 초안은 [`docs/submission/`](docs/submission/README.md)에 있습니다.
 
-외부 감사(제3자 진행 중)가 남아 있습니다. 라이브 데모는 공개 호스팅했습니다([라이브 테스트넷 데모](#라이브-테스트넷-데모)). baseline 에이전트 구현은 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
+외부 감사가 남아 있습니다. 아직 받지 않았고, 실제 자금을 다루는 배포 전에 받아야 합니다(지금까지의 검토는 아래 "보안 리뷰"의 내부 리뷰입니다). 라이브 데모는 공개 호스팅했습니다([라이브 테스트넷 데모](#라이브-테스트넷-데모)). baseline 에이전트 구현은 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
@@ -143,7 +143,7 @@ The sections below describe the target v1 product. The current repository implem
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no private Intent API, and `reporter/` is scoped to public data only (2026-10-04): it DP-releases settlement amounts and trade returns, which are already on-chain, rather than the private watchlist/pre-settlement-intent signals the v0.2 spec sketches — those have no corresponding feature in this demo, so there is nothing yet to protect.
 
-Fee accounting is pending (`FeeTerms` exists only as declared metadata on `MandateRegistry`, with no deduction mechanism behind it). The demo book is deployed on Monad testnet; addresses and a recorded run are under [Recorded run on Monad testnet](#recorded-run-on-monad-testnet). The six-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)); an external audit is in progress with a third party.
+Fee accounting is pending (`FeeTerms` exists only as declared metadata on `MandateRegistry`, with no deduction mechanism behind it). The demo book is deployed on Monad testnet; addresses and a recorded run are under [Recorded run on Monad testnet](#recorded-run-on-monad-testnet). The six-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)); no external audit has been done yet.
 
 ## Build status
 
@@ -358,7 +358,7 @@ Done:
 
 Next:
 
-12. An external, independent security audit (in progress with a third party). The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
+12. An external, independent security audit. None has been done yet; the review in item 11 is internal, and an external audit is a prerequisite before any real-money deployment. The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 

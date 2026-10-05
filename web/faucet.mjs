@@ -1,7 +1,7 @@
 // Test-token faucet limits, shared by the local chain and the live server.
 //
 // The faucet mints mock USDC, which costs the owner gas on a live chain, and
-// may also send native gas when the operator sets FAUCET_NATIVE_AMOUNT. Both
+// may also send native gas when the operator sets FAUCET_NATIVE_WEI. Both
 // are bounded here: one drip per address per window, and a few per client IP
 // per window, so one visitor cannot drain the deployer by rotating addresses.
 import { isAddress } from "ethers";

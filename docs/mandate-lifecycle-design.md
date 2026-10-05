@@ -1,6 +1,6 @@
 # Mandate lifecycle and terms: design
 
-Status: proposed, 2026-10-05. Nothing in this note is implemented unless a line says "today". Where it says "today" it describes the code as of commit `2359347`. Three decisions are open and listed at the end; the numbers in this note are placeholders until they are made.
+Status: decisions confirmed 2026-10-05; items 2 to 4 of the order of work are implemented, see "Implemented" below. Where a line says "today" it describes the code as of commit `2359347`, before that work. Items 5 to 9 are not implemented.
 
 This note answers three questions together, because they share one answer: what makes a vault freeze, who sets the freeze threshold, and what happens after a freeze. It also sets the structure for adding more kinds of terms later.
 
@@ -73,9 +73,9 @@ Registration moves with it. Today `configure()`, `lockTerms()` and `registerAgen
 Before the hackathon deadline, inside the current structure and kept afterwards:
 
 1. This note.
-2. `configure()` requires non-zero `maxDrawdownBps` and `maxMarkAgeSeconds` within the version's range.
-3. Unobservable freeze: a permissionless call that freezes a vault whose mark is older than the set multiple of `maxMarkAgeSeconds`.
-4. `recordOutcome(vault)` on the registry, plus an index of vaults by agent.
+2. Done. `configure()` requires non-zero `maxDrawdownBps` and `maxMarkAgeSeconds` within the version's range.
+3. Done. Unobservable freeze: a permissionless call that freezes a vault whose mark is older than the set multiple of `maxMarkAgeSeconds`.
+4. Done. `recordOutcome(vault)` on the registry, plus an index of vaults by agent (agent-linked, see below).
 
 After the hackathon:
 
@@ -85,13 +85,24 @@ After the hackathon:
 8. Perpl adapter (roadmap 16), then revisit the unwind schedule against real fills. Whether Perpl can liquidate a vault's position on its own, and how that interacts with `unwind()`, is not yet checked.
 9. The stale-mark withdrawal rule from the open tension above.
 
-## Open decisions
+## Implemented
 
-Recommendations below; the team confirms them.
+Items 2 to 4, on the current contracts. They take effect on the next deployment; the hosted demo keeps running the contracts it was deployed with until it is redeployed.
 
-1. Forbid vaults without a freeze (`maxDrawdownBps = 0`). Recommended: yes. A vault with no loss bound offers nothing a plain vault does not, and the product is the bound.
-2. No restriction on an agent returning after a freeze, beyond starting a new vault. Recommended: yes, for the reason in section 3.
-3. The ranges. Recommended, with the demo's four mandates (`web/mandates.mjs`) as the check that real terms fit inside:
+- `MandateRiskGuard.configure()` reverts `InvalidLossTerms` unless `maxDrawdownBps` is in (0, `MAX_DRAWDOWN_BPS_CAP` = 5000] and `maxMarkAgeSeconds` is in (0, `MAX_MARK_AGE_CAP` = 60]. The check runs after the lock check, so locked terms still revert `LimitsLocked`.
+- `MandateRiskGuard.freezeUnobservable(vault)`: anyone may call it once the vault's own mark (`markedAssets()`) is older than `UNOBSERVABLE_MARK_AGES` (3) times `maxMarkAgeSeconds`. It pays the same bounty as a drawdown freeze and emits `Unobservable`. It reverts `StillObservable` before that point and `NothingToProtect` for a vault with no shares, so a vault cannot be frozen between deployment and its first deposit. The guard records why and when it froze each vault in `freezeOf(vault)`: reason 1 drawdown, 2 unobservable.
+- `MandateRegistry.recordOutcome(vault)`: anyone may call it for a registered vault that is Frozen or Closed. It reads `state()` from the vault and `freezeOf()` from the vault's guard and stores state, reason, freeze time and record time in `outcomeOf(vault)`. It only moves forward (Frozen, then Closed), and the freeze reason is kept after the vault closes. It does not store the final mark; the freeze event already carries it.
+- Index by agent: `linkVault(vault)` lists a registered vault under its agent's address, read with `vaultsOf(agent)`. This differs from section 3, which had the registry index every vault by `vault.agent()` automatically. Only the vault's own agent may link. Registration is done by the guard owner, and an automatic index on `vault.agent()` would let anyone deploy a vault naming someone else's address and attach a bad outcome to it. The cost: an agent can choose not to link a vault. An allocator should treat an unlinked vault as one with no history, and the factory (item 6) can link at deployment once the agent signs it.
+
+Tests: `contracts/test-js/lifecycle.test.mjs`. The Foundry invariant handler also calls `freezeUnobservable`; it is type-checked locally and runs in CI.
+
+## Decisions
+
+Confirmed by the team on 2026-10-05.
+
+1. Vaults without a freeze (`maxDrawdownBps = 0`) are forbidden. A vault with no loss bound offers nothing a plain vault does not, and the product is the bound.
+2. No restriction on an agent returning after a freeze, beyond starting a new vault, for the reason in section 3.
+3. The ranges, with the demo's four mandates (`web/mandates.mjs`) as the check that real terms fit inside:
 
 | Value | Range | Demo mandates today | Reason |
 |---|---|---|---|
@@ -99,4 +110,4 @@ Recommendations below; the team confirms them.
 | `maxMarkAgeSeconds` | above 0, at most 60 | 4, 30, 30, 60 | The guarantee is a cap checked against a recent price. Perpl's index price updates every 1 to 5 seconds, so 60 leaves room for slow markets without turning the check into a minute-scale one. |
 | Unobservable after | 3 x `maxMarkAgeSeconds` | 12 to 180 seconds | One missed update is noise; three in a row means the feed is not arriving. A fixed multiple keeps the rule proportional to what the registrant promised. |
 
-One consequence for the hosted demo: its oracle marks every 5 seconds while someone is watching and every 300 seconds when nobody is (`ORACLE_IDLE_SECONDS`). Under the third row an idle demo would freeze every mandate within minutes. With the Perpl adapter the venue keeps its own index fresh and this goes away; until then the demo oracle has to mark within the shortest window whether or not anyone is watching, or the unobservable freeze stays off in the mock setup only.
+One consequence for the hosted demo, still open: its oracle marks every 5 seconds while someone is watching and every 300 seconds when nobody is (`ORACLE_IDLE_SECONDS`). Once the demo is redeployed on these contracts, anyone could freeze an idle demo vault within minutes; the demo server itself never calls `freezeUnobservable`. With the Perpl adapter the venue keeps its own index fresh and this goes away. Until then the team chooses between marking within the shortest window whether or not anyone is watching, and accepting that idle demo vaults can be frozen and are reset by the existing auto-redeploy.

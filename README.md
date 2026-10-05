@@ -127,7 +127,7 @@ Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개
 
 실사용을 위해 남은 것 [2026-10-05 정리]: 지금 데모는 서버가 데모 계정 6개로 대신 서명하고, 자산은 mock USDC, 거래소는 mock venue이며, 에이전트는 배포 스크립트가 만든 4개뿐입니다. 남은 순서는 (1) 지갑 연결: 사용자가 자기 키로 서명하고 테스트용 mock USDC를 받아 예치·배분·인출, (2) 에이전트 온보딩: 외부 운영자가 볼트를 만들고 한도를 잠가 레지스트리에 등록하는 화면과 절차(운영자 승인 방식인지 무허가인지 결정 포함), (3) 실제 거래소 어댑터: mock venue 대신 Monad의 perp 거래소 Perpl 테스트넷에 주문하고 Perpl 인덱스 가격으로 평가, (4) 외부 감사 뒤 실제 USDC로 메인넷 배포입니다. 영문 Roadmap 14~17번이 같은 내용입니다.
 
-동결 조건과 동결 이후 처리 [2026-10-05 설계안, 미구현]: 무엇이 동결을 일으키는지, 동결 기준값을 누가 정하는지, 동결 뒤 정리·인출·기록·복귀를 어떻게 하는지, 조건 종류를 어떻게 늘리는지를 [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)에 정리했습니다. 팀 결정 3가지가 남아 있습니다.
+동결 조건과 동결 이후 처리 [2026-10-05 결정, 1단계 구현]: 무엇이 동결을 일으키는지, 동결 기준값을 누가 정하는지, 동결 뒤 정리·인출·기록·복귀를 어떻게 하는지, 조건 종류를 어떻게 늘리는지를 [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)에 정리했습니다. 구현된 것: `configure()`가 `maxDrawdownBps`를 0 초과 5000 이하, `maxMarkAgeSeconds`를 0 초과 60초 이하로 강제(동결 없는 볼트 금지), mark가 `maxMarkAgeSeconds`의 3배 넘게 갱신되지 않으면 누구나 동결하는 `freezeUnobservable()`, 동결·종료 결과를 체인에서 읽어 기록하는 `MandateRegistry.recordOutcome()`과 에이전트 본인이 연결하는 볼트 이력 `linkVault()`/`vaultsOf()`. 다음 배포부터 적용되며, 호스팅 데모는 재배포 전까지 기존 컨트랙트로 돕니다. 조건 카탈로그·팩토리·수수료 차감은 해커톤 이후입니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
@@ -277,13 +277,13 @@ Custody and execution permissions are enforced on-chain. Market-value risk limit
 | `maxLeverageX100` | total exposure divided by marked equity (cash plus unrealised PnL), at order time only | order reverts |
 | `minBlocksBetweenTrades` | blocks that must pass between two trades | order reverts |
 | `maxBlockNotional` | notional traded inside one block | order reverts |
-| `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust (0 disables) | trade, allocation, withdrawal and `poke()` revert until the price is refreshed |
-| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
+| `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust; required, at most 60 seconds | trade, allocation, withdrawal and `poke()` revert until the price is refreshed; past three times this age anyone can freeze the vault with `freezeUnobservable()` |
+| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market; required, at most 5000 (50%) | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
 | `volWindowSeconds` | memory of the realised-volatility estimate: how many seconds of marks one squared return is averaged over (0 disables the clause) | no violation of its own; sets how fast the estimate reacts and decays |
 | `stressHorizonSeconds` | the horizon the estimate is scaled to before the stress move is taken | no violation of its own |
 | `stressSigmasX10` | the move, in tenths of a standard deviation over the horizon, an exposure-adding order must survive without breaching `maxDrawdownBps` (30 = 3 sigma) | order reverts with `StressBreach`; reducing orders are exempt; nothing freezes |
 
-Ten of the eleven terms reject one order and stop (the three volatility fields are one check); only the drawdown term changes the vault's state, and only through a mark. The guard's inputs are the adapter's order preview, the venue mark (price and its timestamp), the vault's share supply and cash, and the variance the guard itself has accumulated from those marks. No external volatility oracle is involved.
+Nine of the eleven terms reject one order and stop (the three volatility fields are one check). Two change the vault's state: the drawdown term through a mark, and the mark-age term when no mark arrives for three times its length. `configure()` refuses a mandate that leaves either at zero or past its range, so every vault can freeze. The guard's inputs are the adapter's order preview, the venue mark (price and its timestamp), the vault's share supply and cash, and the variance the guard itself has accumulated from those marks. No external volatility oracle is involved.
 
 Suggested ranges for the volatility clause, with the reasoning. `volWindowSeconds`: at least a few dozen marks long, so one print does not dominate, and no longer than the regime you want to react to; Chainlink's realised-volatility feeds publish 24-hour, 7-day and 30-day windows sampled every 10 minutes, and the demo uses 60 to 300 seconds only because its marks arrive every second. `stressHorizonSeconds`: the time it takes to get out, which for a frozen vault is five `unwind()` blocks plus however long nobody calls them; 60 seconds to a day. `stressSigmasX10`: 20 to 40, two to four standard deviations, with 30 as the default; exchange portfolio-margin systems also stress against fixed scenario moves, but the exact ranges they use have not been verified here and are not quoted. Volatility-targeted position sizing is known to cut the left tail of returns (Man Group, "The Impact of Volatility Targeting"), which is the effect the clause borrows.
 
@@ -375,7 +375,7 @@ From demo to real use (2026-10-05). Today the live demo signs for its visitors w
 16. A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's index price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
 17. Mainnet with real USDC, only after item 12's external audit.
 
-The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (proposed 2026-10-05, not implemented).
+The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is planned).
 
 ## Stack
 

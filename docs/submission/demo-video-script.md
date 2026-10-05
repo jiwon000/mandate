@@ -25,15 +25,15 @@
 | 1:12 | "Send over-limit order". 피드의 REVERTED 줄과 에러 이름을 가리킨다. | An order past the leverage limit is refused before it reaches the venue. The feed shows the contract's own error. | 레버리지 한도를 넘는 주문은 거래소에 닿기 전에 거절된다. 피드에 컨트랙트가 낸 에러가 그대로 나온다. |
 | 1:26 | "−2% shock". 몇 초 뒤 상태가 OVER LIMIT으로 바뀌는 것을 보여 준다. | The market drops two percent. This vault runs at about two times leverage, so it is now about four percent under its high-water mark, past its three percent limit. | 시장이 2% 빠진다. 이 볼트는 약 2배 레버리지라 고점 대비 약 4% 아래, 3% 한도를 넘었다. |
 | 1:42 | "poke()" 버튼. 상태가 FROZEN으로 바뀌고 피드에 bounty 줄이 뜬다. 이어서 "Send order inside mandate"를 눌러 AgentNotActive 거절을 보여 준다. | Anyone can prove that. I call poke: the guard re-marks the vault, freezes the agent and pays the caller a small bounty. The agent's next order is refused. | 누구나 이걸 증명할 수 있다. poke를 부르면 가드가 다시 평가하고 에이전트를 동결하고 호출자에게 소액 보상을 준다. 에이전트의 다음 주문은 거절된다. |
-| 2:00 | "unwind()"을 두 번 누른다(한 블록에 한 번만 가능). 피드의 "unwind step 1/5", "2/5". Allocate 화면으로 가서 "Withdraw all shares". | A frozen position is closed in public steps, one fifth per call. The allocator can withdraw the whole time. | 동결된 포지션은 한 번에 5분의 1씩 공개적으로 정리된다. 투자자는 그동안 계속 인출할 수 있다. |
-| 2:18 | (로컬 빌드로 전환) Live Risk 화면, Tight Mandate 선택 상태. 먼저 "Ethereum · 12s blocks"를 누른다. 화면의 mark age가 4초를 넘은 것을 확인하고 "Send order inside mandate"를 누른다. 피드에 REVERTED MarkTooOld. 스위치 아래 설명 문장을 보여 준다. 이어서 "Monad · 1s blocks"를 누르고 같은 버튼을 누른다. 주문이 통과한다. | One more thing, on the local build. Here this vault asks for a mark no older than four seconds. I slow the oracle to one mark every twelve seconds, the most a twelve-second chain allows. A few seconds after a mark, the order reverts with MarkTooOld. Back at one-second cadence, the same order passes. A mandate can only ask for a mark as fresh as the chain's block interval allows. That is why Mandate is built on Monad. | 로컬 빌드에서 하나 더. 여기서는 이 볼트가 4초 이내의 가격을 요구한다. 가격 갱신을 12초에 한 번으로 늦춘다. 12초 블록 체인이 낼 수 있는 최대 빈도다. 갱신 몇 초 뒤부터 주문은 MarkTooOld로 되돌려진다. 1초 주기로 돌아오면 같은 주문이 통과한다. 조건이 요구할 수 있는 가격의 신선도는 블록 간격이 허락하는 만큼이다. 그래서 Monad 위에 만든다. |
+| 2:00 | "unwind()"을 두 번 누른다(한 블록에 한 번만 가능). 피드의 "unwind step 1/5", "2/5". Allocate 화면으로 가서 "Withdraw all shares". | A frozen position is closed in public steps, one fifth per call. The allocator can withdraw at any point, at a fresh price. | 동결된 포지션은 한 번에 5분의 1씩 공개적으로 정리된다. 투자자는 그동안 언제든 새 가격 기준으로 인출할 수 있다. |
+| 2:18 | (로컬 빌드로 전환) Live Risk 화면, Tight Mandate 선택 상태. 먼저 "12s marks · 12s-block chain"을 누른다. 화면의 mark age가 4초를 넘은 것을 확인하고 "Send order inside mandate"를 누른다. 피드에 REVERTED MarkTooOld. 스위치 아래 설명 문장을 보여 준다. 이어서 "1s marks · Monad"를 누르고 같은 버튼을 누른다. 주문이 통과한다. | One more thing, on the local build. Here this vault asks for a mark no older than four seconds. I slow the oracle to one mark every twelve seconds, the most a twelve-second chain allows. A few seconds after a mark, the order reverts with MarkTooOld. Back at one-second cadence, the same order passes. A mandate can only ask for a mark as fresh as the chain's block interval allows. That is why Mandate is built on Monad. | 로컬 빌드에서 하나 더. 여기서는 이 볼트가 4초 이내의 가격을 요구한다. 가격 갱신을 12초에 한 번으로 늦춘다. 12초 블록 체인이 낼 수 있는 최대 빈도다. 갱신 몇 초 뒤부터 주문은 MarkTooOld로 되돌려진다. 1초 주기로 돌아오면 같은 주문이 통과한다. 조건이 요구할 수 있는 가격의 신선도는 블록 간격이 허락하는 만큼이다. 그래서 Monad 위에 만든다. |
 | 2:50 | Market 화면으로 돌아와 끝. | (없음) | |
 
 ## 선택 장면: Batch와 Privacy (10-05 추가)
 
 10-04에 Batch 화면과 Privacy 화면이 생겼다. 본편이 이미 2분 50초라 둘을 다 넣으면 3분을 넘는다. 넣으려면 장면 4의 monadscan 확인과 장면 8의 두 번째 unwind를 줄여 20초쯤 확보한다. 넣을지는 팀이 정한다.
 
-공개 주소에는 이 두 화면이 아직 없다. 테스트넷 배포 기록에 BatchAllocator와 MandateRegistry가 들어가고 Render가 새 커밋을 배포한 뒤에 나타난다. 그 전에는 로컬 빌드에서 찍는다.
+공개 주소에 두 화면이 올라와 있다(10-05 제출 현황판 기준). 녹화는 공개 주소에서 한다.
 
 | 길이 | 화면에서 하는 일 | 내레이션 (영어) | 뜻 |
 | --- | --- | --- | --- |

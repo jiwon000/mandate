@@ -743,8 +743,8 @@ function renderRisk() {
   $("#blocktimeNote").textContent = state.live
     ? liveNote()
     : state.blockTimeSeconds === 1
-      ? "Block cadence 1s. Every mandate on this page can be re-marked inside its own mark-age limit."
-      : `Block cadence 12s: the oracle cannot re-stamp a mark more often than a block arrives. ${
+      ? "Mark cadence 1s. Every mandate on this page can be re-marked inside its own mark-age limit."
+      : `Oracle held to one mark per 12s, as a 12-second chain would force (the local chain keeps mining). ${
           unenforceable.length
             ? `${unenforceable.map((v) => v.name).join(", ")} asks for a mark no older than ${unenforceable[0].limits.maxMarkAgeSeconds}s, so poke() and execute() now spend most of their time reverting with MarkTooOld.`
             : "Mandates with short mark-age limits become unenforceable."

@@ -14,7 +14,7 @@ WHAT MANDATE DOES
 
 A mandate is a set of eleven risk terms written into a contract and locked before the first deposit.
 
-- Custody separation. MandateVault holds the USDC and issues shares at marked NAV. The agent can call execute() and nothing else. It has no withdrawal function. A freeze stops the agent and leaves withdrawals open.
+- Custody separation. MandateVault holds the USDC and issues shares at marked NAV. The agent can call execute() and nothing else. It has no withdrawal function. A freeze stops the agent and leaves withdrawals open, priced at a fresh mark and paid from the vault's cash.
 - Pre-trade limits. The venue adapter previews the exposure an order would leave. MandateRiskGuard checks order size, position size, total exposure, leverage, per-block notional and trade spacing before any external call. An over-limit order reverts and no venue state changes.
 - Mark-to-market drawdown. After every trade the guard re-marks the vault against its high-water mark. Anyone can call poke() between trades. If drawdown is past the mandate, the vault freezes and the caller is paid a 0.05% bounty out of the vault, so enforcement does not depend on a trusted keeper.
 - Unwind after a freeze. Anyone can call unwind() to close a frozen position in five reduce-only steps of 20%, each inside a 1% slippage bound, for a 0.01% bounty. The vault ends Closed.
@@ -28,7 +28,7 @@ WHY THIS NEEDS MONAD
 
 The mark-age term has a floor, and the floor is the block interval. A mark is refreshed by a transaction, so when the next block's transactions read it, it is already one block interval old. A mandate that says "do not trust a price older than 4 seconds" can only be kept where blocks arrive inside 4 seconds. On 12-second blocks the mark has expired before the next block exists: a trade, deposit or withdrawal goes through only if it lands in the same block as an oracle update and behind it, and reverts with MarkTooOld in every later block.
 
-The local build shows this with a block-cadence switch. At 1-second cadence, orders on the Tight Mandate vault pass its 4-second term. At 12-second cadence the same order reverts with MarkTooOld for most of each interval. The guard measures age from the venue's own price timestamp, so short blocks cannot make a stale feed look fresh.
+The local build simulates this with a switch that holds the oracle to one mark per 12 seconds, the most a 12-second chain can deliver, while the local chain keeps mining. At 1-second cadence, orders on the Tight Mandate vault pass its 4-second term. At 12-second cadence the same order reverts with MarkTooOld for most of each interval; on a real 12-second chain it would pass only in the oracle's own block. The guard measures age from the venue's own price timestamp, so short blocks cannot make a stale feed look fresh.
 
 On Monad testnet our demo oracle is a paid transaction every 5 seconds, so the tightest live mandate asks for a 10-second mark. Eight consecutive poke() calls on that vault, 4.5 seconds apart, all passed the term.
 
@@ -36,7 +36,7 @@ The live demo was also built around how Monad testnet behaves. Gas is billed on 
 
 WHAT IS LIVE TODAY
 
-- Contracts on Monad testnet (chain 10143): MandateRiskGuard, four MandateVaults with different mandates, the venue adapter, a mock venue and a mock USDC. Addresses and a recorded run with transaction links are in the README. BatchAllocator and MandateRegistry are implemented, tested and running in the local build. The hosted server's own redeploys already put them on testnet, and the hosted link shows the Batch and Privacy screens once its current build is deployed.
+- Contracts on Monad testnet (chain 10143): MandateRiskGuard, four MandateVaults with different mandates, the venue adapter, a mock venue and a mock USDC. Addresses and a recorded run with transaction links are in the README. BatchAllocator and MandateRegistry are deployed in the same book, and the hosted link shows the Batch and Privacy screens.
 - A six-screen web app: Market, Agent, Allocate, Batch, Privacy, Live Risk. Every number is a contract read and every button is a real transaction. A visitor needs no wallet and no faucet: the server signs with testnet-only demo keys behind a per-role allowlist, a gas cap and rate limits.
 - A recorded pass on testnet: a deposit, an order inside the mandate, an over-limit order refused with OrderNotionalExceeded, a 10% price shock, poke() freezing three of the four vaults, the frozen agent refused with AgentNotActive, and the first unwind() step.
 - 61 contract tests, 46 server tests and Foundry invariant and reentrancy suites, run in CI. An internal security review (static analysis plus a second pass) found and fixed one real bug in registry registration.

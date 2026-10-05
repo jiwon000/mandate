@@ -298,7 +298,7 @@ The demo in `web/` has six screens: Market, Agent, Allocate, Batch, Privacy and 
 5. Send an over-limit order and see the guard's own custom error decoded from the revert data, before any venue state changes.
 6. Push a price shock, then call `poke()` from an account that is neither allocator nor agent: the vault past its drawdown limit freezes and the caller is paid the bounty.
 7. Select Range Carry after the same 2% shock. Its drawdown is about 3% against a 12% mandate, so nothing freezes, but the stressed-drawdown tile jumps: realised volatility is now roughly 200 bps over 120 seconds, three of those is a 6% move, and the vault would sit about 15% under water if the agent added exposure at 2.1x. The same "inside mandate" order that passed in step 4 now reverts with `StressBreach(196, 588, 1480)` before any venue state changes; the reduce-only order still passes. Leave the tape alone for about 70 seconds and the estimate decays under the limit, and the order passes again.
-8. Switch the node to 12-second blocks: the mandate that asks for a 4-second mark can no longer be enforced and starts reverting with `MarkTooOld`.
+8. Hold the oracle to one mark per 12 seconds, as a 12-second chain would force (the local node keeps mining): the mandate that asks for a 4-second mark can no longer be enforced and spends most of each interval reverting with `MarkTooOld`.
 9. Withdraw from the frozen vault at marked NAV while its position is still open.
 
 10. On Batch, deposit to escrow, sign an `AllocationIntent` for the current epoch (off-chain, free), and once the epoch ends, settle it (the demo server plays the batcher role `deploy.mjs` gives the deployer key on Monad) and claim the resulting shares with the reconstructed Merkle proof.

@@ -10,7 +10,7 @@ A five-minute pass:
 6. Press "poke()". The vault freezes and the caller is paid the bounty. Press "Send order inside mandate" again: the agent is refused with AgentNotActive.
 7. Press "unwind()" up to five times, a few seconds apart. Each call closes a fifth of the position. After the fifth the vault is Closed.
 8. Back on Allocate, press "Withdraw all shares". Withdrawals stay open through the freeze, paid from the vault's cash at a fresh mark.
-9. Optional: select Range Carry after the shock and press "Send order inside mandate". Its drawdown is inside the mandate, but the volatility clause refuses new exposure with StressBreach until the market has been quiet for about a minute. "Send reduce-only order" still passes.
+9. Optional: press "+3%", then within a few seconds select Range Carry on Market and press "Send order inside mandate" on Live Risk. Its drawdown is inside the mandate, but the volatility clause refuses new exposure with StressBreach until the market has been quiet for about a minute. "Send reduce-only order" still passes.
 
 Two more screens, Batch and Privacy, are in the menu; they run against BatchAllocator and MandateRegistry in the same book.
 

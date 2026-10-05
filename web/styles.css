@@ -56,3 +56,59 @@ body.live .blocktime-toggle{display:none}
 body.live:not(.admin) #redeployButton{display:none}
 body.live .live-only{display:inline}
 .feed-item time a{color:inherit;text-decoration:underline dotted}
+
+/* wallet menu */
+.header-actions{position:relative}
+.wallet-menu{display:none;position:absolute;right:0;top:calc(100% + 10px);width:320px;max-width:calc(100vw - 32px);z-index:40;background:var(--panel,#0d1422);border:1px solid var(--line);border-radius:12px;padding:10px;box-shadow:0 18px 50px rgba(0,0,0,.45);flex-direction:column;gap:8px}
+.wallet-menu.open{display:flex}
+.wallet-option{display:flex;flex-direction:column;gap:4px;text-align:left;background:#101827;border:1px solid var(--line);border-radius:9px;padding:12px;color:var(--text);cursor:pointer;font:inherit}
+.wallet-option:hover,.wallet-option:focus-visible{border-color:var(--blue);outline:none}
+.wallet-option[hidden]{display:none}
+.wallet-option small{color:var(--muted);font-size:12px;line-height:1.4}
+.wallet-faucet{width:100%}
+.wallet-note{margin:0;color:var(--muted);font-size:11px;line-height:1.4;padding:0 2px}
+.agent-glyph.launched{background:#1d1a2e;color:var(--orange);border-color:#4a3c66}
+
+/* term sheet */
+.term-panel{margin-top:24px}
+.term-panel .panel-title{gap:16px}
+.term-panel .panel-title h3{font-size:18px;text-wrap:balance}
+.verified.alarm{color:var(--red);border-color:rgba(255,89,100,.5)}
+.term-sheet{margin-top:20px;overflow-x:auto}
+.term-head,.term-row{display:grid;grid-template-columns:minmax(120px,.9fr) minmax(170px,1.3fr) minmax(110px,.9fr) minmax(220px,1.6fr) minmax(150px,auto);gap:14px;align-items:center;min-width:820px}
+.term-head{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:0 0 10px;border-bottom:1px solid var(--line)}
+.term-group{font-size:12px;color:var(--cyan);padding:16px 0 6px;min-width:820px}
+.term-row{padding:11px 0;border-bottom:1px solid rgba(37,50,74,.55);font-size:13px}
+.term-name{font-weight:700}
+.term-locked,.term-now{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.term-now{color:var(--muted)}
+.term-now.breached{color:var(--red);font-weight:700}
+.term-breach{color:var(--muted);font-size:12px;line-height:1.45}
+.term-breach code{font-family:var(--mono);color:var(--text);font-size:11px}
+.term-action{text-align:right}
+.button-small{padding:7px 10px;font-size:12px;border-radius:8px;white-space:nowrap}
+#termSheetNote{text-align:left;margin-top:14px;font-size:11px}
+
+/* launch */
+.launch-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;align-items:start}
+.launch-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+.launch-group{margin:0;display:flex;flex-direction:column;gap:14px;min-width:0}
+.launch-wide{grid-column:1/-1}
+.launch-group legend{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);padding:0;float:left;width:100%;margin-bottom:4px}
+.preset-row,.check-row{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:#111a2b;color:var(--muted);border:1px solid var(--line);border-radius:7px;padding:8px 13px;cursor:pointer;font:inherit;font-size:13px}
+.chip.active{color:var(--text);border-color:var(--blue)}
+.lf{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.lf>span{font-weight:700}
+.lf small{color:var(--muted);font-size:11px;line-height:1.4}
+.lf input,.lf select{background:#0b111d;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px 12px;font:13px var(--mono);width:100%}
+.lf input:focus,.lf select:focus{outline:none;border-color:var(--blue)}
+.check{display:flex;align-items:center;gap:7px;background:#111a2b;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font:12px var(--mono);cursor:pointer}
+.launch-summary{position:sticky;top:90px;display:flex;flex-direction:column;gap:12px}
+.launch-summary .eyebrow{margin:0}
+.terms-preview{font:11px var(--mono);word-break:break-all;color:var(--text);background:#0b111d;border:1px solid var(--line);border-radius:8px;padding:10px}
+.launch-summary .fineprint{text-align:left}
+.launch-errors{margin:0;padding-left:18px;color:#ffadb2;font-size:12px;line-height:1.5}
+.launch-errors:empty{display:none}
+@media (max-width:900px){.launch-layout{grid-template-columns:1fr}.launch-summary{position:static}}
+@media (max-width:600px){.launch-fields{grid-template-columns:1fr}.wallet-menu{right:-8px}}

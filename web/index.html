@@ -23,11 +23,19 @@
         <button data-route="allocate">Allocate</button>
         <button data-route="batch">Batch</button>
         <button data-route="privacy">Privacy</button>
+        <button data-route="launch" hidden>Launch</button>
         <button data-route="risk">Live Risk</button>
       </nav>
       <div class="header-actions">
         <span class="network"><i></i> <span id="chainLabel">connecting…</span></span>
-        <button id="walletButton" class="button button-secondary">Connect allocator</button>
+        <button id="walletButton" class="button button-secondary" aria-haspopup="true" aria-controls="walletMenu">Connect</button>
+        <div id="walletMenu" class="wallet-menu" role="menu">
+          <button id="walletInjected" class="wallet-option" role="menuitem"><b>Browser wallet</b><small>Sign with your own key. Launching a mandate, and acting as its agent, needs this on a live chain.</small></button>
+          <p id="walletNoInjected" class="wallet-note" hidden>No browser wallet found in this browser.</p>
+          <button id="walletDemo" class="wallet-option" role="menuitem"><b>Demo allocator</b><small>A funded test account the server signs for. Nothing to install.</small></button>
+          <button id="walletFaucet" class="button button-secondary wallet-faucet">Get test mUSDC</button>
+          <p class="wallet-note">mUSDC is a mock token on a test chain. It has no value.</p>
+        </div>
       </div>
     </header>
 
@@ -85,9 +93,77 @@
             <div id="agentLimits"></div>
             <div class="hash"><span>VAULT</span><code id="agentAddress">0x…</code></div>
             <div class="hash"><span>AGENT KEY</span><code id="agentKey">0x…</code></div>
-            <div class="hash"><span>TERMS</span><code id="agentTerms" title="keccak256 of the locked RiskLimits">0x…</code></div>
+            <div class="hash"><span>TERMS</span><code id="agentTerms" title="keccak256 of the locked terms">0x…</code></div>
           </article>
         </div>
+        <article class="panel term-panel">
+          <div class="panel-title"><div><p class="eyebrow">TERM SHEET</p><h3>What the contract enforces, and what happens when it is crossed</h3></div><span class="verified" id="termSheetBadge">LOCKED ONCHAIN</span></div>
+          <div class="term-sheet" id="termSheet" role="table" aria-label="Locked mandate terms"></div>
+          <p class="fineprint" id="termSheetNote"></p>
+        </article>
+      </section>
+
+      <section class="view" data-view="launch">
+        <div class="narrow-head"><p class="eyebrow">OPEN REGISTRATION</p><h1>Launch a mandate</h1><p>One transaction deploys a vault from the reviewed code, sets these terms on the shared risk guard, locks them and lists the vault. No approval from anyone. The guard and the factory refuse terms outside their ranges.</p></div>
+        <form class="launch-layout" id="launchForm" novalidate>
+          <div class="launch-fields">
+            <fieldset class="panel launch-group launch-wide">
+              <legend>Start from</legend>
+              <div class="preset-row">
+                <button type="button" class="chip" data-preset="careful">Careful</button>
+                <button type="button" class="chip active" data-preset="balanced">Balanced</button>
+                <button type="button" class="chip" data-preset="aggressive">Aggressive</button>
+              </div>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>Who trades it</legend>
+              <label class="lf"><span>Agent key</span><input id="lfAgent" name="agent" spellcheck="false" autocomplete="off" placeholder="0x…" /><small id="lfAgentHint">The only address that can send orders. It can never withdraw.</small></label>
+              <label class="lf"><span>Model or strategy description</span><input id="lfModel" name="model" maxlength="200" placeholder="e.g. trend-follow v3, 4h bars" /><small>Only its keccak256 goes onchain, as the registry's model hash.</small></label>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>What it may trade</legend>
+              <div class="lf"><span>Markets</span><div class="check-row" id="lfMarkets"></div></div>
+              <label class="lf"><span>Direction</span><select id="lfDirection"><option value="0">Long or short</option><option value="1">Long only</option><option value="2">Short only</option></select></label>
+              <label class="lf"><span>Limit price band, bps</span><input id="lfDeviation" type="number" min="0" max="10000" step="1" /><small>An order's limit price may sit this far from the mark. 0 turns it off.</small></label>
+              <label class="lf"><span>Orders that add risk, per day</span><input id="lfTrades" type="number" min="0" max="65535" step="1" /><small>0 turns it off.</small></label>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>How big</legend>
+              <label class="lf"><span>Max leverage, x</span><input id="lfLeverage" type="number" min="0.01" max="20" step="0.01" /></label>
+              <label class="lf"><span>Per order, USD</span><input id="lfOrder" type="number" min="1" step="1" /></label>
+              <label class="lf"><span>Per block, USD</span><input id="lfBlock" type="number" min="1" step="1" /></label>
+              <label class="lf"><span>Per market, USD</span><input id="lfPosition" type="number" min="1" step="1" /></label>
+              <label class="lf"><span>All markets, USD</span><input id="lfTotal" type="number" min="1" step="1" /></label>
+              <label class="lf"><span>Cooldown, blocks</span><input id="lfCooldown" type="number" min="0" max="100000" step="1" /></label>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>How much it may lose</legend>
+              <label class="lf"><span>Max drawdown, %</span><input id="lfDrawdown" type="number" min="0.01" max="50" step="0.01" /><small>From the high-water NAV. Crossing it lets anyone freeze the vault.</small></label>
+              <label class="lf"><span>Max daily loss, %</span><input id="lfDailyLoss" type="number" min="0" max="50" step="0.01" /><small>From the day's opening NAV. 0 turns it off.</small></label>
+              <label class="lf"><span>Max holding time, hours</span><input id="lfHolding" type="number" min="0" step="0.25" /><small>Longest a position may stay open without going flat. 0 turns it off.</small></label>
+              <label class="lf"><span>Max mark age, seconds</span><input id="lfMarkAge" type="number" min="1" max="60" step="1" /><small>Older marks stop orders; three times this lets anyone freeze the vault.</small></label>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>Stress test</legend>
+              <label class="lf"><span>Volatility window, seconds</span><input id="lfVolWindow" type="number" min="0" step="1" /><small>0 turns the stress test off. It needs a single market.</small></label>
+              <label class="lf"><span>Stress horizon, seconds</span><input id="lfHorizon" type="number" min="0" step="1" /></label>
+              <label class="lf"><span>Stress size, sigmas</span><input id="lfSigmas" type="number" min="0" max="6553" step="0.1" /></label>
+            </fieldset>
+            <fieldset class="panel launch-group">
+              <legend>Fees to the agent</legend>
+              <label class="lf"><span>Performance fee, %</span><input id="lfPerf" type="number" min="0" max="30" step="0.1" /><small>Of gains above the fee high-water mark. At most 30%.</small></label>
+              <label class="lf"><span>Management fee, % a year</span><input id="lfMgmt" type="number" min="0" max="5" step="0.1" /><small>On marked equity. At most 5%. Both are paid in new vault shares.</small></label>
+            </fieldset>
+          </div>
+          <aside class="panel launch-summary">
+            <p class="eyebrow">TERMS HASH</p>
+            <code class="terms-preview" id="lfHash">—</code>
+            <p class="fineprint">keccak256 of the encoded limits, trade terms and fees. Allocators compare it with the vault's locked hash.</p>
+            <ul class="launch-errors" id="lfErrors" aria-live="polite"></ul>
+            <button type="submit" id="launchButton" class="button button-primary button-large">Launch mandate</button>
+            <p class="fineprint" id="lfSigner">—</p>
+          </aside>
+        </form>
       </section>
 
       <section class="view" data-view="allocate">

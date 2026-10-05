@@ -212,3 +212,32 @@ test("a close reports its price PnL at Perpl's mark in Executed", async (t) => {
     .find((parsed) => parsed?.name === "Executed");
   assert.equal(executed.args.realizedPnl, e18("1.8"));
 });
+
+test("the factory refuses a Perpl adapter that settles in another token", async (t) => {
+  const chain = await hre.network.create();
+  t.after(() => chain.close());
+  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
+  provider.pollingInterval = 10;
+  const owner = await provider.getSigner(0);
+  const deploy = async (source, name, args = []) => {
+    const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
+    const c = await new ContractFactory(abi, bytecode, owner).deploy(...args);
+    await c.waitForDeployment();
+    return c;
+  };
+  const usdc = await deploy("mocks/MockUSDC", "MockUSDC");
+  const other = await deploy("mocks/MockUSDC", "MockUSDC");
+  const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
+  const registry = await deploy("MandateRegistry", "MandateRegistry");
+  const factory = await deploy("MandateFactory", "MandateFactory", [usdc.target, guard.target, registry.target]);
+  const exchange = await deploy("mocks/MockPerplExchange", "MockPerplExchange", [other.target]);
+  const wrong = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, other.target, 500, [BTC]]);
+  const right = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, [BTC]]);
+  await assert.rejects(factory.listAdapter(wrong.target, true),
+    (error) => String(error?.message).includes(factory.interface.getError("AdapterAssetMismatch").selector) ||
+      error?.revert?.name === "AdapterAssetMismatch");
+  await (await factory.listAdapter(right.target, true)).wait();
+  assert.equal(await factory.adapterListed(right.target), true);
+  // Delisting never needs the check.
+  await (await factory.listAdapter(wrong.target, false)).wait();
+});

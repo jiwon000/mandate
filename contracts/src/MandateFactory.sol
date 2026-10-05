@@ -22,6 +22,7 @@ contract MandateFactory is Ownable {
     error AdapterNotListed(address adapter);
     error InvalidLimits();
     error ZeroAgent();
+    error AdapterAssetMismatch(address adapter);
 
     /// @notice Leverage ceiling for a factory-made mandate, x100 (20x).
     uint16 public constant MAX_LEVERAGE_X100 = 2_000;
@@ -61,7 +62,17 @@ contract MandateFactory is Ownable {
         registry = registry_;
     }
 
+    /// @dev An adapter that settles in a token says which through `collateral()`
+    ///      (PerplAdapter does); one that settles in anything but this factory's asset
+    ///      would price vaults in one token and move another, so it is refused. An
+    ///      adapter that moves no money (MockVenueAdapter) has no such getter.
     function listAdapter(address adapter, bool listed) external onlyOwner {
+        if (listed) {
+            (bool ok, bytes memory data) = adapter.staticcall(abi.encodeWithSignature("collateral()"));
+            if (ok && data.length == 32 && abi.decode(data, (address)) != address(asset)) {
+                revert AdapterAssetMismatch(adapter);
+            }
+        }
         if (listed && !adapterListed[adapter]) adapters.push(adapter);
         adapterListed[adapter] = listed;
         emit AdapterListed(adapter, listed);

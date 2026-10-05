@@ -113,7 +113,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 1. 테스트넷 재배포를 누가 언제 할지 (남은 일 3번).
 2. Render가 push마다 자동 배포하는지, 요금제가 무접속 시 서버를 재우는지. 체인 기록으로는 재우는 것으로 보이고, 깨어날 때마다 재배포 비용 약 2.5 MON이 나갑니다 ("공개 데모 운영 메모" 참고). 선택지는 셋입니다. 서버를 재우지 않는 요금제로 바꾸고 `ORACLE_IDLE_SECONDS`를 크게 올려 대기 비용을 줄이기, 재배포 뒤 새 `10143.json`을 커밋해 부팅 기록을 최신으로 유지하기 (방문자가 볼트를 얼리면 다시 낡습니다), 테스트넷 MON을 더 받아 두기. (@jiwon000 확인)
 3. 외부 감사 문구 (2026-10-05 정리). README 세 군데(한국어 "다음 작업", 영문 구현 현황 문단, 영문 Roadmap 12번)를 "외부 감사는 아직 받지 않았습니다"로 맞췄습니다. 제출 Description의 "No external audit has been completed."와 같은 뜻입니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰입니다. 진행 중인 외부 감사가 있다면 맡은 곳과 범위를 README에 적습니다. (@jiwon000 확인)
-4. Batch 화면의 문구 "Anyone can settle, once an epoch ends" (`web/index.html`). 컨트랙트에서는 batcher만 `settleEpoch()`를 부를 수 있고, 데모에서는 누가 버튼을 눌러도 서버가 batcher로서 대신 보냅니다. 문구를 이 동작에 맞출지 정합니다.
+4. Batch 화면 제목 (2026-10-05 정리). "Anyone can settle, once an epoch ends"는 컨트랙트와 달랐습니다. `settleEpoch()`는 batcher 주소만 부를 수 있습니다. 제목을 "Anyone can ask for settlement; only the batcher sends it"로 바꿨습니다. 누구나 버튼을 누를 수 있고 서버가 batcher로서 보낸다는 실제 동작과 같습니다.
 5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 트레일러 없이 AI 도구를 쓴 커밋이 있으면 그 절에 한 줄을 더합니다. (@jiwon000 확인)
 6. 한 줄 설명의 뒷부분 "market signals published with scoped differential privacy"를 그대로 둘지. 지금 게시하는 것은 공개된 볼트 통계라서 "market signals"가 더 넓게 읽힐 수 있습니다. 대안: "Back autonomous trading agents without custody: the agent can only execute, and every order must pass on-chain risk terms locked before the first deposit."
 7. DP 리포터는 Laplace 스케일 하나를 평균, Sharpe, 최대 낙폭에 같이 씁니다. 그래서 화면의 ε는 평균에 대해서만 정확합니다. 제출 글에는 그렇게 적었습니다. 코드를 고칠지 지금 문구로 둘지 정합니다.

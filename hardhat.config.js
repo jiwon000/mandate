@@ -9,6 +9,11 @@ export default {
       evmVersion: "prague"
     }
   },
+  // Lets a test fork Monad testnet (Perpl's exchange lives there). EDR needs a
+  // hardfork for every block it replays; Monad runs Prague rules throughout.
+  chainDescriptors: {
+    10143: { name: "Monad testnet", hardforkHistory: { prague: { blockNumber: 0 } } }
+  },
   paths: {
     sources: "./contracts/src",
     tests: "./contracts/test-js",

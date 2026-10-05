@@ -203,7 +203,12 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         _accrueFees();
         TradePreview memory expected = IVenueAdapter(adapter).preview(address(this), order);
         riskGuard.checkAndConsumeBefore(address(this), adapter, expected);
+        // A venue that holds margin (PerplAdapter) pulls what the order needs from the
+        // vault's cash during the call. The allowance exists only inside this frame,
+        // and only for the one adapter the vault was built with.
+        asset.forceApprove(adapter, totalAssets());
         (int256 realizedPnl,) = IVenueAdapter(adapter).execute(address(this), order);
+        asset.forceApprove(adapter, 0);
         (uint256 positionNotional, uint256 totalNotional) =
             IVenueAdapter(adapter).positionState(address(this));
 

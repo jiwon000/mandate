@@ -150,5 +150,6 @@ test("a frozen vault with nothing on the book closes on the first call", async (
   assert.equal(await f.vault.unwindStepsDone(), 0n, "no reduce step was spent");
   const [unwound] = eventsNamed(receipt, f.vault, "Unwound");
   assert.equal(unwound.args.closedNotional, 0n);
+  assert.equal(unwound.args.bounty, 0n, "nothing closed, nothing paid");
   assert.equal(eventsNamed(receipt, f.vault, "Closed").length, 1);
 });

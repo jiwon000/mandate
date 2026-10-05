@@ -137,6 +137,9 @@ test("the agent cannot trade on a venue the vault is not priced against", async 
     /AdapterMismatch|revert/,
     "one vault, one venue"
   );
+  await assert.rejects(f.guard.poke(f.vaultAddress, otherAddress), /AdapterMismatch|revert/, "nor mark it off another venue");
+  await assert.rejects(f.guard.observe(f.vaultAddress, otherAddress), /AdapterMismatch|revert/, "nor sample its price there");
   await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
+  await (await f.guard.poke(f.vaultAddress, f.adapterAddress)).wait();
   assert.equal(await f.venue.positionSizeE18(f.vaultAddress), parseUnits("0.5", 18));
 });

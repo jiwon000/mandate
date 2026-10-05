@@ -65,6 +65,9 @@ interface IMandateVaultView {
     /// @notice The one account allowed to trade the vault, fixed at construction.
     function agent() external view returns (address);
 
+    /// @notice The one venue adapter the vault trades and is priced through, fixed at construction.
+    function venueAdapter() external view returns (address);
+
     /// @notice 0 Active, 1 Frozen, 2 Closed (MandateVault.AgentState).
     function state() external view returns (uint8);
 }

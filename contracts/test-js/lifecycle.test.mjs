@@ -70,7 +70,7 @@ test("a vault whose mark stops updating can be frozen by anyone, only after thre
 
   // The agent is stopped; a second freeze is refused by the vault.
   await assert.rejects(f.vault.connect(f.agent).execute(f.adapterAddress, f.order));
-  await assert.rejects(f.guard.connect(f.outsider).freezeUnobservable(f.vaultAddress));
+  await assert.rejects(f.guard.connect(f.outsider).freezeUnobservable(f.vaultAddress), revertsWith(f.vault, "AgentNotActive"));
 });
 
 test("the unobservable freeze needs configured terms and a funded vault", async (t) => {

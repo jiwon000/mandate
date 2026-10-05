@@ -35,6 +35,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice The vault's mark is not yet old enough to call it unobservable.
     error StillObservable(uint256 markedAt, uint256 unobservableAfter);
     error NothingToProtect();
+    /// @notice poke() and observe() only read a vault through the adapter it trades on.
+    error AdapterMismatch();
     /// @notice A k-sigma move over the stress horizon, applied to the exposure the order
     ///         would leave, would take the vault past `maxDrawdownBps`.
     error StressBreach(uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps);
@@ -209,9 +211,12 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     ///      and then goes quiet is never checked by checkAndConsumeBefore alone.
     ///      Enforcement precision is bounded by how often this can run, which is bounded
     ///      by the block time.
+    ///      `adapter` must be the vault's own: a second allowlisted adapter would mark
+    ///      the vault off a book that is not the one its shares are priced on.
     function poke(address vault, address adapter) external returns (bool frozen) {
         if (!configured[vault]) revert LimitsNotConfigured();
         if (!adapterAllowed[vault][adapter]) revert AdapterNotAllowed();
+        if (adapter != IMandateVaultView(vault).venueAdapter()) revert AdapterMismatch();
         return _markAndCheck(vault, adapter, msg.sender);
     }
 
@@ -251,6 +256,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     function observe(address vault, address adapter) external {
         if (!configured[vault]) revert LimitsNotConfigured();
         if (!adapterAllowed[vault][adapter]) revert AdapterNotAllowed();
+        if (adapter != IMandateVaultView(vault).venueAdapter()) revert AdapterMismatch();
         _observePrice(vault, adapter, limitsOf[vault]);
     }
 
@@ -309,7 +315,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         RiskLimits memory limits = limitsOf[vault];
         (uint256 equity, uint256 markedAt) = IVenueAdapter(adapter).markEquity(vault);
 
-        if (limits.maxMarkAgeSeconds != 0 && block.timestamp > markedAt + limits.maxMarkAgeSeconds) {
+        if (block.timestamp > markedAt + limits.maxMarkAgeSeconds) {
             revert MarkTooOld(markedAt, limits.maxMarkAgeSeconds);
         }
 
@@ -326,7 +332,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         uint256 drawdownBps = _drawdownBps(navPerShare, mark.highWaterNavPerShare);
         emit Marked(vault, navPerShare, mark.highWaterNavPerShare, drawdownBps);
 
-        if (limits.maxDrawdownBps == 0 || drawdownBps <= limits.maxDrawdownBps) {
+        if (drawdownBps <= limits.maxDrawdownBps) {
             return false;
         }
 

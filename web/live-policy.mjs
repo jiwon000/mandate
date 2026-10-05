@@ -20,12 +20,16 @@ export const ROLE_RULES = {
     ["vault", "withdraw"],
     ["vault", "unwind"],
     ["guard", "poke"],
-    ["guard", "observe"]
+    ["guard", "observe"],
+    ["guard", "freezeUnobservable"],
+    ["vault", "accrueFees"]
   ],
   keeper: [
     ["guard", "poke"],
     ["guard", "observe"],
-    ["vault", "unwind"]
+    ["guard", "freezeUnobservable"],
+    ["vault", "unwind"],
+    ["vault", "accrueFees"]
   ],
   // An agent signs execute() on its own vault and nothing else.
   agent: [["ownVault", "execute"]]
@@ -45,7 +49,9 @@ export function buildPolicy(deployment) {
   };
   const batchAddress = deployment.batch?.address && deployment.abis.batch ? deployment.batch.address : null;
   if (batchAddress) ifaces.batch = new Interface(deployment.abis.batch);
-  const selectorOf = (kind, fn) => ifaces[kind === "ownVault" ? "vault" : kind].getFunction(fn).selector.toLowerCase();
+  // null when the deployment's contracts predate the function (a book from
+  // before open registration has no freezeUnobservable or accrueFees).
+  const selectorOf = (kind, fn) => ifaces[kind === "ownVault" ? "vault" : kind].getFunction(fn)?.selector.toLowerCase() ?? null;
 
   const allow = new Map(); // from -> Map(to -> Map(selector -> name))
   const roles = new Map(); // from -> role
@@ -53,9 +59,11 @@ export function buildPolicy(deployment) {
     const f = from.toLowerCase();
     const t = to.toLowerCase();
     roles.set(f, role);
+    const selector = selectorOf(kind, fn);
+    if (!selector) return;
     if (!allow.has(f)) allow.set(f, new Map());
     if (!allow.get(f).has(t)) allow.get(f).set(t, new Map());
-    allow.get(f).get(t).set(selectorOf(kind, fn), fn);
+    allow.get(f).get(t).set(selector, fn);
   };
 
   const vaultAddresses = deployment.vaults.map((v) => v.address);

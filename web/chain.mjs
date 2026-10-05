@@ -14,9 +14,12 @@ import {
   REPORT_CLIP_BOUND,
   REPORT_EPSILON,
   REPORT_EPSILON_CAP,
+  START_BTC_PRICE,
   START_PRICE,
   deployDemoSystem
 } from "./mandates.mjs";
+import { FAUCET_USDC, FaucetLimiter } from "./faucet.mjs";
+import { parseEther } from "ethers";
 import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 import { DPReporter } from "../reporter/reporter.mjs";
 
@@ -160,7 +163,11 @@ export async function startChain() {
       // large enough to trip a mandate on its own.
       const wobbleBps = Math.round(8 * Math.sin(ticks / 9));
       const priceE18 = (basePriceE18 * BigInt(10_000 + wobbleBps)) / 10_000n;
-      await (await venue.setPrice(priceE18)).wait();
+      // Every market is re-marked in the same transaction, so a BTC mark is as
+      // fresh as the ETH one. Shocks move ETH only.
+      const btcWobbleBps = Math.round(6 * Math.sin(ticks / 7 + 1));
+      const btcE18 = (START_BTC_PRICE * BigInt(10_000 + btcWobbleBps)) / 10_000n;
+      await (await venue.setPrices([priceE18, btcE18])).wait();
       lastPushTs = await chainNow();
       // Feed the mark to every vault with a volatility clause. observe() only
       // updates the estimate - it never freezes, never pays a bounty - so it can
@@ -452,6 +459,27 @@ export async function startChain() {
     }
   };
 
+  // --- faucet ---------------------------------------------------------------
+  //
+  // A visitor's own wallet starts with nothing on this chain. The owner mints it
+  // mock USDC and, because the local chain's gas is free to make, a little ETH.
+  const faucetLimiter = new FaucetLimiter();
+  const faucet = {
+    async drip({ address, ip }) {
+      faucetLimiter.take(address, ip);
+      const to = getAddress(String(address));
+      try {
+        const usdc = new Contract(deployment.addresses.usdc, deployment.abis.usdc, owner);
+        const receipt = await (await usdc.mint(to, FAUCET_USDC)).wait();
+        await (await owner.sendTransaction({ to, value: parseEther("1") })).wait();
+        return { address: to, usdc: FAUCET_USDC.toString(), native: parseEther("1").toString(), txHash: receipt.hash };
+      } catch (error) {
+        faucetLimiter.release(address, ip);
+        throw error;
+      }
+    }
+  };
+
   await setup();
 
   return {
@@ -460,6 +488,7 @@ export async function startChain() {
     control,
     batch,
     reporter: reporterApi,
+    faucet,
     touch() {},
     async close() {
       clearInterval(timer);

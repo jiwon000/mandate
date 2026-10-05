@@ -12,13 +12,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Interface, getAddress, getCreateAddress } from "ethers";
-import { NOTIONAL_LIMITS, REPORT_CLIP_BOUND, REPORT_EPSILON, mandatesFor, serialiseLimits } from "./mandates.mjs";
+import { MARKETS, NOTIONAL_LIMITS, REPORT_CLIP_BOUND, REPORT_EPSILON, mandatesFor, serialiseLimits } from "./mandates.mjs";
 
 // The owner's nonces in one undisturbed deployDemoSystem() run, relative to the
 // first contract it creates: USDC, guard, venue and adapter, then
 // venue.setAdapter and the USDC mint; per vault the vault itself,
-// guard.setAdapter, configure, lockTerms and a venue.setPrice; the batch
-// allocator, one setVaultAllowed per vault; the registry last. Another owner
+// guard.setAdapter, configure (configureTerms since open registration),
+// lockTerms and a venue.setPrice; the batch allocator, one setVaultAllowed per
+// vault; then the registry. The factory and its wiring come after the
+// registry, so a newer book keeps this layout up to it. Another owner
 // transaction landing in between (an oracle mark) shifts the rest, so
 // latestBook() only uses this for how far below the registry to look.
 export function bookLayout(base, vaultCount) {
@@ -39,7 +41,8 @@ const iface = new Interface([
   "function genesis() view returns (uint256)",
   "function epochDuration() view returns (uint256)",
   "function settlementWindow() view returns (uint256)",
-  "function termsHash(address) view returns (bytes32)"
+  "function termsHash(address) view returns (bytes32)",
+  "function factory() view returns (address)"
 ]);
 const same = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
 
@@ -183,10 +186,16 @@ export async function latestBook({ request: raw, record, maxScan = 3000, chunk =
     const [genesis, epochDuration, settlementWindow] = await Promise.all(
       ["genesis", "epochDuration", "settlementWindow"].map((fn) => call(a.batch, fn))
     );
+    // A book from before open registration has no factory; the registry's
+    // getter reverts there and the record leaves it out, as it did then.
+    const factory = await call(a.registry, "factory");
+    const hasFactory = factory && !same(factory, "0x0000000000000000000000000000000000000000");
     const vaultRecords = [];
-    for (const [i, mandate] of mandates.entries()) {
+    for (const [i, { trade, fees, ...mandate }] of mandates.entries()) {
       vaultRecords.push({
         ...mandate,
+        // Older guards enforce no trade terms or fees; only claim what binds.
+        ...(hasFactory ? { trade, fees } : {}),
         address: vaults[i],
         agent: getAddress(agents[i]),
         termsHash: await call(a.guard, "termsHash", [vaults[i]]),
@@ -199,7 +208,8 @@ export async function latestBook({ request: raw, record, maxScan = 3000, chunk =
     return {
       chainId: record.chainId,
       profile: record.profile,
-      addresses: { usdc: a.usdc, guard: a.guard, venue: a.venue, adapter: a.adapter },
+      addresses: { usdc: a.usdc, guard: a.guard, venue: a.venue, adapter: a.adapter, ...(hasFactory ? { factory: getAddress(factory) } : {}) },
+      ...(hasFactory ? { markets: MARKETS } : {}),
       accounts: record.accounts,
       batch: { address: a.batch, genesis: Number(genesis), epochDuration: Number(epochDuration), settlementWindow: Number(settlementWindow) },
       registry: { address: a.registry, clipBound: REPORT_CLIP_BOUND, epsilon: REPORT_EPSILON },

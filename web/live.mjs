@@ -9,9 +9,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { Contract, ContractFactory, JsonRpcProvider, NonceManager, formatEther, formatUnits, parseEther } from "ethers";
+import { Contract, ContractFactory, JsonRpcProvider, NonceManager, formatEther, formatUnits, getAddress, parseEther } from "ethers";
 import { loadArtifact } from "../contracts/script/artifacts.mjs";
-import { CONTRACT_SOURCES, START_PRICE, deployDemoSystem } from "./mandates.mjs";
+import { CONTRACT_SOURCES, START_BTC_PRICE, START_PRICE, deployDemoSystem } from "./mandates.mjs";
+import { FAUCET_USDC, FaucetError, FaucetLimiter } from "./faucet.mjs";
 import { demoWallets } from "./accounts.mjs";
 import { authorise, authoriseTypedData, buildPolicy } from "./live-policy.mjs";
 import { RollingBudget, gasLimitFor, perKeyQueue, planTopUps } from "./live-gas.mjs";
@@ -383,7 +384,16 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     ticks += 1;
     const wobbleBps = Math.round(8 * Math.sin(ticks / 9));
     const priceE18 = (basePriceE18 * BigInt(10_000 + wobbleBps)) / 10_000n;
-    await send(signers.owner, () => padded(venue.setPrice, priceE18));
+    if (deployment.addresses.factory) {
+      // A book with the factory has a two-market venue: both marks go in one
+      // transaction, so a BTC mark is as fresh as the ETH one for the same gas
+      // overhead. Shocks move ETH only.
+      const btcWobbleBps = Math.round(6 * Math.sin(ticks / 7 + 1));
+      const btcE18 = (START_BTC_PRICE * BigInt(10_000 + btcWobbleBps)) / 10_000n;
+      await send(signers.owner, () => padded(venue.setPrices, [priceE18, btcE18]));
+    } else {
+      await send(signers.owner, () => padded(venue.setPrice, priceE18));
+    }
     reads.clear();
     reading = { at: 0, value: reading.value, pending: null };
     pushes += 1;
@@ -803,6 +813,37 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     }
   };
 
+  // --- faucet ---------------------------------------------------------
+  //
+  // A visitor's own wallet holds no mock USDC. The owner mints some, inside the
+  // limiter's per-address and per-IP windows, and sends native gas only when
+  // the operator sets FAUCET_NATIVE_WEI (0 by default: the deployer's MON is
+  // the demo's whole budget, so giving it away is the team's call).
+  const faucetLimiter = new FaucetLimiter({ perIp: number("FAUCET_PER_IP", 3) });
+  const faucetNativeWei = BigInt(process.env.FAUCET_NATIVE_WEI ?? "0");
+  const faucet = {
+    async drip({ address, ip }) {
+      if (!deployment.addresses.factory) {
+        throw new FaucetError("this book predates open registration; the faucet opens on the next deployment", 404);
+      }
+      faucetLimiter.take(address, ip);
+      const to = getAddress(String(address));
+      try {
+        const abi = deployment.abis ?? loadAbis();
+        const usdc = new Contract(deployment.addresses.usdc, abi.usdc, signers.owner);
+        const receipt = await ownerSends("faucet")(() => padded(usdc.mint, to, FAUCET_USDC));
+        if (faucetNativeWei > 0n) {
+          await ownerSends("faucet")(() => signers.owner.sendTransaction({ to, value: faucetNativeWei }));
+        }
+        log(`[faucet] ${to} received test USDC`);
+        return { address: to, usdc: FAUCET_USDC.toString(), native: faucetNativeWei.toString(), txHash: receipt?.hash ?? null };
+      } catch (error) {
+        faucetLimiter.release(address, ip);
+        throw error;
+      }
+    }
+  };
+
   log(`live mode on ${deployment.network.label} (chain ${chainId}); oracle ${config.activeSeconds}s while watched, ${config.idleSeconds}s idle`);
 
   return {
@@ -826,6 +867,7 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     get reporter() {
       return desk("reporter");
     },
+    faucet,
     touch,
     async close() {
       clearInterval(timer);

@@ -13,6 +13,7 @@ import { JsonRpcProvider } from "ethers";
 import { deploymentFileFor, startLive } from "./live.mjs";
 import { adoptLatestBook } from "./live-recover.mjs";
 import { toRpcError } from "./rpc.mjs";
+import { clientIp } from "./faucet.mjs";
 
 const port = Number(process.env.PORT || 3000);
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -155,6 +156,14 @@ const server = createServer(async (req, res) => {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
       chain.touch();
       return sendJson(res, 200, await feature("reporter", "registry").publish());
+    }
+
+    // Test USDC for a visitor's own wallet, rate limited per address and per IP.
+    if (pathname === "/api/faucet") {
+      if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      chain.touch();
+      const { address } = JSON.parse(await readBody(req));
+      return sendJson(res, 200, await feature("faucet", "faucet").drip({ address, ip: clientIp(req) }));
     }
 
     if (pathname === "/api/control") {

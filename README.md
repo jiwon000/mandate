@@ -87,14 +87,14 @@ npm run deploy:demo         # 한 번: 배포·시드 후 web/deployments/10143.
 npm run web:live            # 페이지 서빙 + 오라클 + 대리 서명
 ```
 
-니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 실측 약 1.25 MON, 데모 계정 6개에 각 0.4 MON 송금. 스크립트는 시작 전에 4 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Batch와 Privacy 화면도 라이브에서 동작합니다(배치 정산 컨트랙트와 레지스트리가 포함된 배포 기록일 때). 서버가 배처와 리포터 역할을 맡아 배분자의 `AllocationIntent`만 EIP-712로 서명하고, epoch이 끝나면 `settleEpoch()`를, 표본이 모이면 `postLeaderboard()`를 배포 계정 비용으로 보냅니다. 두 트랜잭션은 시간당 가스 한도와 횟수 제한 안에서만 나갑니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
+니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 약 1.8 MON으로 추정합니다. 배치 정산 컨트랙트와 레지스트리를 포함해 약 1,800만 gas이고, 두 컨트랙트가 없던 2026-10-04 배포의 실측은 약 1.25 MON이었습니다. 여기에 데모 계정 6개에 각 0.4 MON을 송금합니다. 스크립트는 시작 전에 4.5 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Batch와 Privacy 화면도 라이브에서 동작합니다(배치 정산 컨트랙트와 레지스트리가 포함된 배포 기록일 때). 서버가 배처와 리포터 역할을 맡아 배분자의 `AllocationIntent`만 EIP-712로 서명하고, epoch이 끝나면 `settleEpoch()`를, 표본이 모이면 `postLeaderboard()`를 배포 계정 비용으로 보냅니다. 두 트랜잭션은 시간당 가스 한도와 횟수 제한 안에서만 나갑니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
 
 2026-10-04에 Monad 테스트넷(chain 10143)에 배포했습니다. 컨트랙트 주소 8개와, 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다. AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
 
 ## 저장소 구조
 
 ```text
-contracts/src/          Vault, RiskGuard, Adapter, BatchAllocator, interface, mock
+contracts/src/          Vault, RiskGuard, Adapter, BatchAllocator, MandateRegistry, interface, mock
 contracts/test-js/      in-process Hardhat EVM 계약 테스트
 contracts/test/         Foundry invariant/fuzz 테스트와 reentrancy 테스트
 contracts/script/       deploy-demo.mjs(네 개 Vault), deploy.mjs(단일 Vault), keeper.mjs, artifacts.mjs
@@ -103,11 +103,13 @@ reporter/               DP release 계산: clipping, Laplace noise, epsilon ledg
 web/                    Market, Agent, Allocate, Batch, Privacy, Live Risk 화면, 데모 서버, in-process chain(chain.mjs)과 라이브 RPC 프록시(live.mjs)
 web/deployments/        deploy-demo.mjs가 쓰는 <chainId>.json. 라이브 서버가 여기서 시작
 deploy/systemd/         Linux 호스트용 라이브 데모 유닛 파일
-docs/                   마일스톤 설계 문서
+docs/                   마일스톤 설계 문서, 보안 리뷰, 제출 준비 현황과 제출 글(docs/submission/)
 mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ```
 
 ## 다음 작업
+
+해커톤 제출까지 남은 일과 담당, 제출 폼에 넣은 글, 영상 대본 초안은 [`docs/submission/`](docs/submission/README.md)에 있습니다.
 
 외부 감사(제3자 진행 중)가 남아 있습니다. 라이브 데모는 공개 호스팅했습니다([라이브 테스트넷 데모](#라이브-테스트넷-데모)). baseline 에이전트 구현은 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
 
@@ -334,7 +336,7 @@ reporter/               DP release computation: clipping, Laplace noise, epsilon
 web/                    Market, Agent, Allocate, Batch, Privacy and Live Risk screens, demo server, in-process chain (chain.mjs) and live-RPC proxy (live.mjs)
 web/deployments/        <chainId>.json written by deploy-demo.mjs; the live server boots from it
 deploy/systemd/         unit file for running the live demo on a Linux host
-docs/                   Milestone design notes
+docs/                   Milestone design notes, the 2026-10-04 security review, submission status and form texts (docs/submission/, status notes in Korean)
 mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
 
@@ -399,7 +401,7 @@ npm run deploy:demo         # once: deploys and seeds, writes web/deployments/10
 npm run web:live            # serves the page, runs the oracle, signs on visitors' behalf
 ```
 
-Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays (a measured 1.25 MON or so for the deploy and seeding at the testnet's gas price of about 100 gwei, plus 0.4 MON sent to each of the six demo accounts); `deploy:demo` refuses to start with less than 4 MON. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
+Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays: an estimated 1.8 MON for the deploy and seeding at the testnet's gas price of about 100 gwei (about 18M gas now that the book includes the batch allocator and the registry; the 2026-10-04 run, before those two contracts were part of it, measured 1.25 MON), plus 0.4 MON sent to each of the six demo accounts. `deploy:demo` refuses to start with less than 4.5 MON. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
 
 What the visitor gets:
 

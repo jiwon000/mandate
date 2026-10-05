@@ -28,7 +28,7 @@
       </nav>
       <div class="header-actions">
         <span class="network"><i></i> <span id="chainLabel">connecting…</span></span>
-        <button id="walletButton" class="button button-secondary" aria-haspopup="true" aria-controls="walletMenu">Connect</button>
+        <button id="walletButton" class="button button-secondary" aria-haspopup="menu" aria-expanded="false" aria-controls="walletMenu">Connect</button>
         <div id="walletMenu" class="wallet-menu" role="menu">
           <button id="walletInjected" class="wallet-option" role="menuitem"><b>Browser wallet</b><small>Sign with your own key. Launching a mandate, and acting as its agent, needs this on a live chain.</small></button>
           <p id="walletNoInjected" class="wallet-note" hidden>No browser wallet found in this browser.</p>
@@ -330,11 +330,11 @@
       </section>
     </main>
 
-    <div id="modal" class="modal" aria-hidden="true">
+    <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal></div>
-      <div class="modal-card"><button class="modal-close" data-close-modal>×</button><p class="eyebrow">ALLOCATION</p><h2>Review allocation</h2><div class="modal-agent"><div class="agent-glyph fly" id="modalGlyph">—</div><div><b id="modalAgent">—</b><span id="modalVault">MandateVault</span></div></div><div class="modal-row"><span>You allocate</span><b id="modalAmount">—</b></div><div class="modal-row"><span>Estimated shares</span><b id="modalShares">—</b></div><div class="modal-row"><span>Agent permissions</span><b class="positive">Execute only</b></div><button id="signIntent" class="button button-primary button-large">approve() + allocate()</button></div>
+      <div class="modal-card"><button class="modal-close" data-close-modal aria-label="Close dialog">×</button><p class="eyebrow">ALLOCATION</p><h2 id="modalTitle">Review allocation</h2><div class="modal-agent"><div class="agent-glyph fly" id="modalGlyph">—</div><div><b id="modalAgent">—</b><span id="modalVault">MandateVault</span></div></div><div class="modal-row"><span>You allocate</span><b id="modalAmount">—</b></div><div class="modal-row"><span>Estimated shares</span><b id="modalShares">—</b></div><div class="modal-row"><span>Agent permissions</span><b class="positive">Execute only</b></div><button id="signIntent" class="button button-primary button-large">approve() + allocate()</button></div>
     </div>
-    <div id="toast" class="toast"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="/vendor/ethers.js"></script>
     <script type="module" src="/app.js"></script>
   </body>

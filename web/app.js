@@ -116,6 +116,9 @@ function riskSign(vault, marketId) {
 const toast = $("#toast");
 let toastTimer = null;
 function showToast(message) {
+  const isError = /^(failed|reverted|could not|error)|\b(failed|error)\b/i.test(String(message));
+  toast.setAttribute("role", isError ? "alert" : "status");
+  toast.setAttribute("aria-live", isError ? "assertive" : "polite");
   toast.textContent = message;
   toast.classList.add("show");
   clearTimeout(toastTimer);
@@ -636,7 +639,7 @@ function buildLeaderboardSkeleton() {
   $("#leaderboard").innerHTML = ordered
     .map((vault, position) => {
       const index = state.deployment.vaults.indexOf(vault);
-      return `<div class="agent-row" data-index="${index}">
+      return `<div class="agent-row" data-index="${index}" role="button" tabindex="0" aria-label="Open ${vault.name}">
         <span class="rank">${String(position + 1).padStart(2, "0")}</span>
         <div class="agent-name">
           <div class="agent-glyph${vault.key === "tight" ? " fly" : ""}${vault.launched ? " launched" : ""}">${vault.initials}</div>
@@ -655,12 +658,19 @@ function buildLeaderboardSkeleton() {
 }
 
 // One listener for the table, however many times its rows are rebuilt.
-$("#leaderboard").addEventListener("click", (event) => {
+function openAgentRow(event) {
   const row = event.target.closest(".agent-row");
   if (!row) return;
   state.selected = Number(row.dataset.index);
   render();
   route("agent");
+}
+$("#leaderboard").addEventListener("click", openAgentRow);
+$("#leaderboard").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  if (!event.target.classList.contains("agent-row")) return;
+  event.preventDefault();
+  openAgentRow(event);
 });
 
 function render() {
@@ -1723,6 +1733,35 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest("#walletMenu, #walletButton")) $("#walletMenu").classList.remove("open");
 });
 
+// Wallet menu a11y: aria-expanded mirrors the open class, Escape closes and
+// returns focus, arrows move between visible menu items.
+{
+  const walletMenu = $("#walletMenu");
+  const walletButton = $("#walletButton");
+  const items = () => $$("#walletMenu [role=menuitem]").filter((el) => !el.hidden && !el.disabled);
+  new MutationObserver(() => {
+    const open = walletMenu.classList.contains("open");
+    walletButton.setAttribute("aria-expanded", String(open));
+    if (open) items()[0]?.focus();
+  }).observe(walletMenu, { attributes: true, attributeFilter: ["class"] });
+  walletButton.setAttribute("aria-expanded", "false");
+  walletMenu.addEventListener("keydown", (event) => {
+    const list = items();
+    const at = list.indexOf(document.activeElement);
+    let next = null;
+    if (event.key === "ArrowDown") next = list[(at + 1) % list.length];
+    else if (event.key === "ArrowUp") next = list[(at - 1 + list.length) % list.length];
+    else if (event.key === "Home") next = list[0];
+    else if (event.key === "End") next = list[list.length - 1];
+    if (next) { event.preventDefault(); next.focus(); }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !walletMenu.classList.contains("open")) return;
+    walletMenu.classList.remove("open");
+    walletButton.focus();
+  });
+}
+
 $("#walletInjected").addEventListener("click", (event) =>
   withButton(event.currentTarget, "waiting for wallet…", async () => {
     const address = await connectInjected();
@@ -1802,6 +1841,33 @@ $$("[data-close-modal]").forEach((element) =>
     modal.setAttribute("aria-hidden", "true");
   })
 );
+
+// Modal a11y: focus moves in on open, returns on close; Escape closes; Tab stays inside.
+{
+  let opener = null;
+  new MutationObserver(() => {
+    if (modal.classList.contains("open")) {
+      opener = document.activeElement;
+      modal.querySelector(".modal-close")?.focus();
+    } else if (opener) {
+      opener.focus?.();
+      opener = null;
+    }
+  }).observe(modal, { attributes: true, attributeFilter: ["class"] });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    } else if (event.key === "Tab") {
+      const f = $$("#modal button, #modal input, #modal select, #modal textarea, #modal a[href]")
+        .filter((el) => !el.disabled && !el.hidden && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  });
+}
 
 $("#signIntent").addEventListener("click", (event) =>
   withButton(event.currentTarget, "approve()…", async (button) => {

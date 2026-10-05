@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IRiskGuard, IVenueAdapter, IMandateVaultFreeze, TradePreview} from "./interfaces/IMandate.sol";
+import {IRiskGuard, IVenueAdapter, IMandateVaultFreeze, TradePreview, FeeTerms} from "./interfaces/IMandate.sol";
 
 contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     using SafeERC20 for IERC20;
@@ -72,6 +72,12 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
 
+    /// @notice NAV per share above which the next performance fee is charged.
+    /// @dev Starts at par and only moves up, and only when a fee is taken against it.
+    uint256 public feeHighWaterNavPerShare = 1e18;
+    /// @notice When fees were last accrued; 0 before the first deposit.
+    uint256 public lastFeeAccrual;
+
     event Allocated(address indexed allocator, uint256 assets, uint256 shares);
     event Withdrawn(address indexed allocator, uint256 assets, uint256 shares);
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
@@ -79,6 +85,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     event Frozen(address indexed beneficiary, uint256 bounty);
     event Unwound(address indexed caller, uint8 step, uint256 closedNotional, int256 realizedPnl, uint256 bounty);
     event Closed();
+    event FeesAccrued(address indexed agent, uint256 managementAssets, uint256 performanceAssets, uint256 shares);
 
     constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_, IVenueAdapter adapter_) {
         // The other three constructor args are typed as contracts: calling a
@@ -113,6 +120,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (!riskGuard.termsLocked(address(this))) revert TermsNotLocked();
         if (assets == 0) revert ZeroAmount();
 
+        _accrueFees();
         uint256 supply = totalSupply;
         uint256 locked;
         if (supply == 0) {
@@ -133,6 +141,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (shares == 0) revert ZeroShares();
 
         asset.safeTransferFrom(msg.sender, address(this), assets);
+        if (supply == 0) lastFeeAccrual = block.timestamp;
         totalSupply = supply + shares + locked;
         balanceOf[receiver] += shares;
         emit Allocated(receiver, assets, shares);
@@ -150,6 +159,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (shares == 0) revert ZeroShares();
         if (balanceOf[msg.sender] < shares) revert InsufficientShares();
 
+        _accrueFees();
         (uint256 equity, uint256 markedAt) = markedAssets();
         // A Closed vault holds no position, so no price can change what a share is
         // worth and a stale mark has nothing left to misprice. Everywhere else the
@@ -190,6 +200,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (state != AgentState.Active) revert AgentNotActive();
         if (adapter != address(venueAdapter)) revert AdapterMismatch();
 
+        _accrueFees();
         TradePreview memory expected = IVenueAdapter(adapter).preview(address(this), order);
         riskGuard.checkAndConsumeBefore(address(this), adapter, expected);
         (int256 realizedPnl,) = IVenueAdapter(adapter).execute(address(this), order);
@@ -219,6 +230,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     function freeze(address beneficiary) external returns (uint256 bounty) {
         if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
         if (state != AgentState.Active) revert AgentNotActive();
+        // Charge what accrued up to the freeze, then never again: accrual only runs
+        // while Active.
+        _accrueFees();
         state = AgentState.Frozen;
 
         bounty = (totalAssets() * POKE_BOUNTY_BPS) / 10_000;
@@ -228,6 +242,62 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
             bounty = 0;
         }
         emit Frozen(beneficiary, bounty);
+    }
+
+    /// @notice Charge the fees accrued since the last accrual. Permissionless.
+    function accrueFees() external nonReentrant returns (uint256 shares) {
+        return _accrueFees();
+    }
+
+    /// @notice Fees that accrueFees() would charge now, in assets, and the shares it
+    ///         would mint for them.
+    function pendingFees()
+        public
+        view
+        returns (uint256 managementAssets, uint256 performanceAssets, uint256 shares, uint256 navAfter)
+    {
+        uint256 supply = totalSupply;
+        if (state != AgentState.Active || supply == 0 || lastFeeAccrual == 0) return (0, 0, 0, 0);
+        FeeTerms memory fee = riskGuard.feesOf(address(this));
+        if (fee.managementFeeBps == 0 && fee.performanceFeeBps == 0) return (0, 0, 0, 0);
+        (uint256 equity, uint256 markedAt) = markedAssets();
+        if (equity == 0) return (0, 0, 0, 0);
+        // Fees are charged on a mark the guard would trade against, never on a stale one.
+        try riskGuard.requireFreshMark(address(this), markedAt) {} catch {
+            return (0, 0, 0, 0);
+        }
+
+        uint256 elapsed = block.timestamp - lastFeeAccrual;
+        managementAssets = Math.mulDiv(equity, uint256(fee.managementFeeBps) * elapsed, 10_000 * 365 days);
+        uint256 nav = Math.mulDiv(equity, 1e18, supply);
+        if (nav > feeHighWaterNavPerShare && fee.performanceFeeBps != 0) {
+            uint256 gain = Math.mulDiv(nav - feeHighWaterNavPerShare, supply, 1e18);
+            performanceAssets = Math.mulDiv(gain, fee.performanceFeeBps, 10_000);
+        }
+        uint256 total = managementAssets + performanceAssets;
+        if (total == 0 || total >= equity) return (0, 0, 0, nav);
+        // Mint so the new shares are worth exactly the fee at today's NAV:
+        // shares / (supply + shares) = total / equity.
+        shares = Math.mulDiv(total, supply, equity - total);
+        navAfter = Math.mulDiv(equity, 1e18, supply + shares);
+    }
+
+    /// @dev Fees are paid in new shares to the agent, never in cash, so a fee never
+    ///      competes with an allocator's withdrawal for the vault's cash.
+    function _accrueFees() private returns (uint256 shares) {
+        if (state != AgentState.Active || lastFeeAccrual == 0) return 0;
+        (uint256 managementAssets, uint256 performanceAssets, uint256 minted, uint256 navAfter) = pendingFees();
+        if (navAfter == 0) return 0; // stale or unpriced mark: try again later, nothing lost
+        lastFeeAccrual = block.timestamp;
+        // A new high, net of this fee, is the bar for the next performance fee.
+        if (navAfter > feeHighWaterNavPerShare) feeHighWaterNavPerShare = navAfter;
+        if (minted == 0) return 0;
+        uint256 supply = totalSupply;
+        totalSupply = supply + minted;
+        balanceOf[agent] += minted;
+        riskGuard.onFeeMint(supply, supply + minted);
+        emit FeesAccrued(agent, managementAssets, performanceAssets, minted);
+        return minted;
     }
 
     /// @notice Close one fifth of a frozen vault's position and pay the caller.

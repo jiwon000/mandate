@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { keccak256, parseUnits } from "ethers";
-import { BASE_LIMITS, coder, fixture } from "./fixture.mjs";
+import { parseUnits } from "ethers";
+import { BASE_LIMITS, fixture, termsHashOf } from "./fixture.mjs";
 
-const LIMITS_TUPLE = "tuple(uint16,uint16,uint32,uint32,uint256,uint256,uint256,uint256,uint32,uint32,uint16)";
-const hashOf = (l) =>
-  keccak256(coder.encode([LIMITS_TUPLE], [[
-    l.maxLeverageX100, l.maxDrawdownBps, l.minBlocksBetweenTrades, l.maxMarkAgeSeconds,
-    l.maxOrderNotional, l.maxPositionNotional, l.maxTotalNotional, l.maxBlockNotional,
-    l.volWindowSeconds, l.stressHorizonSeconds, l.stressSigmasX10
-  ]]));
+const hashOf = (l) => termsHashOf(l);
 
 test("a vault takes no deposit until its terms are locked", async (t) => {
   const f = await fixture(t, {}, { lockTerms: false });

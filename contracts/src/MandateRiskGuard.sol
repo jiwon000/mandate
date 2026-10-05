@@ -9,6 +9,8 @@ import {
     IMandateVaultFreeze,
     IVenueAdapter,
     RiskLimits,
+    TradeTerms,
+    FeeTerms,
     TradePreview
 } from "./interfaces/IMandate.sol";
 
@@ -40,6 +42,17 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice A k-sigma move over the stress horizon, applied to the exposure the order
     ///         would leave, would take the vault past `maxDrawdownBps`.
     error StressBreach(uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps);
+    /// @notice Trade terms outside this version's range: no market allowed, an unknown
+    ///         direction mode, a bound past 100%, or a stress window on more than one market.
+    error InvalidTradeTerms();
+    /// @notice Fees above this version's caps.
+    error InvalidFeeTerms();
+    error OnlyOwnerOrFactory();
+    error FactoryAlreadySet();
+    error MarketNotAllowed(uint256 marketId);
+    error DirectionNotAllowed(int256 resultingSizeE18);
+    error PriceDeviationExceeded(uint256 deviationBps);
+    error DailyTradesExceeded();
 
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
@@ -53,8 +66,18 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     ///         anyone. One late update is noise; three in a row means no feed.
     uint256 public constant UNOBSERVABLE_MARK_AGES = 3;
 
+    /// @notice Yearly management fee cap, in bps.
+    uint16 public constant MAX_MANAGEMENT_FEE_BPS = 500;
+    /// @notice Performance fee cap, in bps of gain above the fee high-water mark.
+    uint16 public constant MAX_PERFORMANCE_FEE_BPS = 3_000;
+    /// @notice TradeTerms.direction values; 0 allows both.
+    uint8 public constant DIRECTION_LONG_ONLY = 1;
+    uint8 public constant DIRECTION_SHORT_ONLY = 2;
+
     uint8 private constant REASON_DRAWDOWN = 1;
     uint8 private constant REASON_UNOBSERVABLE = 2;
+    uint8 private constant REASON_DAILY_LOSS = 3;
+    uint8 private constant REASON_HOLDING_TIME = 4;
 
     struct BlockUsage {
         uint64 blockNumber;
@@ -67,6 +90,20 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     }
     struct MarkState {
         uint128 highWaterNavPerShare;
+    }
+
+    /// @dev Daily-loss bookkeeping. `openNav` is the NAV per share the current UTC day
+    ///      is measured from: the last NAV marked before the day began, so a loss that
+    ///      lands across midnight is not forgiven by the date change.
+    struct DayState {
+        uint64 day;
+        uint128 openNav;
+        uint128 lastNav;
+    }
+
+    struct TradeCount {
+        uint64 day;
+        uint32 count;
     }
 
     /// @dev Realised-volatility state. `varRatePerSecond` is the exponentially weighted
@@ -94,8 +131,22 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => MarkState) public markOf;
     mapping(address => VolState) public volOf;
     mapping(address => FreezeRecord) private freezeRecordOf;
+    mapping(address => TradeTerms) private tradeTerms;
+    mapping(address => FeeTerms) private fees;
+    mapping(address => DayState) public dayOf;
+    mapping(address => TradeCount) public tradesOf;
+    /// @notice When the vault last went from flat to holding a position; 0 while flat.
+    mapping(address => uint64) public positionOpenedAt;
+
+    /// @notice The one MandateFactory allowed to configure and lock vaults it deploys.
+    ///         Set once by the owner.
+    address public factory;
 
     event LimitsConfigured(address indexed vault);
+    event FactorySet(address indexed factory);
+    event DailyLossBreach(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 bounty);
+    event HoldingTimeBreach(address indexed vault, address indexed caller, uint256 openedAt, uint256 bounty);
+    event FeeRebased(address indexed vault, uint256 supplyBefore, uint256 supplyAfter);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
     event TermsLocked(address indexed vault, bytes32 termsHash);
     event RiskConsumed(address indexed vault, bytes32 indexed orderHash, uint256 notional);
@@ -111,7 +162,39 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     constructor() Ownable(msg.sender) {}
 
-    function configure(address vault, RiskLimits calldata limits) external onlyOwner {
+    modifier onlyOwnerOrFactory() {
+        if (msg.sender != owner() && (factory == address(0) || msg.sender != factory)) {
+            revert OnlyOwnerOrFactory();
+        }
+        _;
+    }
+
+    /// @notice Name the factory that may configure and lock the vaults it deploys. Once.
+    function setFactory(address factory_) external onlyOwner {
+        if (factory != address(0)) revert FactoryAlreadySet();
+        factory = factory_;
+        emit FactorySet(factory_);
+    }
+
+    /// @notice Size and loss limits only, with the default trade terms (market 0, both
+    ///         directions, nothing else) and no fees.
+    function configure(address vault, RiskLimits calldata limits) external onlyOwnerOrFactory {
+        _configure(vault, limits, TradeTerms(1, 0, 0, 0, 0, 0), FeeTerms(0, 0));
+    }
+
+    /// @notice Every term a mandate can carry.
+    function configureTerms(
+        address vault,
+        RiskLimits calldata limits,
+        TradeTerms calldata trade,
+        FeeTerms calldata fee
+    ) external onlyOwnerOrFactory {
+        _configure(vault, limits, trade, fee);
+    }
+
+    function _configure(address vault, RiskLimits memory limits, TradeTerms memory trade, FeeTerms memory fee)
+        private
+    {
         if (termsLocked[vault]) revert LimitsLocked();
         if (
             limits.volWindowSeconds != 0 &&
@@ -121,7 +204,21 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             limits.maxDrawdownBps == 0 || limits.maxDrawdownBps > MAX_DRAWDOWN_BPS_CAP ||
             limits.maxMarkAgeSeconds == 0 || limits.maxMarkAgeSeconds > MAX_MARK_AGE_CAP
         ) revert InvalidLossTerms();
+        if (
+            trade.allowedMarkets == 0 ||
+            trade.direction > DIRECTION_SHORT_ONLY ||
+            trade.maxPriceDeviationBps > 10_000 ||
+            trade.maxDailyLossBps > MAX_DRAWDOWN_BPS_CAP ||
+            // The volatility estimate is one price series, so a stress term needs a
+            // single market to read it from.
+            (limits.volWindowSeconds != 0 && (trade.allowedMarkets & (trade.allowedMarkets - 1)) != 0)
+        ) revert InvalidTradeTerms();
+        if (fee.managementFeeBps > MAX_MANAGEMENT_FEE_BPS || fee.performanceFeeBps > MAX_PERFORMANCE_FEE_BPS) {
+            revert InvalidFeeTerms();
+        }
         limitsOf[vault] = limits;
+        tradeTerms[vault] = trade;
+        fees[vault] = fee;
         configured[vault] = true;
         // Seed the high-water mark at par. Shares are minted 1:1 against the first
         // deposit, so NAV per share is 1e18 before any trade; without this seed the
@@ -129,10 +226,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (markOf[vault].highWaterNavPerShare == 0) {
             markOf[vault].highWaterNavPerShare = uint128(ONE);
         }
+        if (dayOf[vault].openNav == 0) {
+            dayOf[vault] = DayState(uint64(block.timestamp / 1 days), uint128(ONE), uint128(ONE));
+        }
         emit LimitsConfigured(vault);
     }
 
-    function setAdapter(address vault, address adapter, bool allowed) external onlyOwner {
+    function setAdapter(address vault, address adapter, bool allowed) external onlyOwnerOrFactory {
         if (termsLocked[vault]) revert LimitsLocked();
         adapterAllowed[vault][adapter] = allowed;
         emit AdapterAllowed(vault, adapter, allowed);
@@ -143,17 +243,42 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @dev The vault refuses deposits until this has happened, so an allocator never
     ///      funds terms the owner could still rewrite. `termsHash` is what a UI quotes
     ///      and what a registry release would anchor.
-    function lockTerms(address vault) external onlyOwner {
+    function lockTerms(address vault) external onlyOwnerOrFactory {
         if (!configured[vault]) revert LimitsNotConfigured();
         if (termsLocked[vault]) revert LimitsLocked();
         termsLocked[vault] = true;
         emit TermsLocked(vault, termsHash(vault));
     }
 
-    /// @notice keccak256 of the vault's configured limits, in RiskLimits field order.
+    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)): every term the vault runs under.
     function termsHash(address vault) public view returns (bytes32) {
-        RiskLimits memory limits = limitsOf[vault];
-        return keccak256(abi.encode(limits));
+        return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault]));
+    }
+
+    /// @inheritdoc IRiskGuard
+    function tradeTermsOf(address vault) external view returns (TradeTerms memory) {
+        return tradeTerms[vault];
+    }
+
+    /// @inheritdoc IRiskGuard
+    function feesOf(address vault) external view returns (FeeTerms memory) {
+        return fees[vault];
+    }
+
+    /// @inheritdoc IRiskGuard
+    /// @dev Fee shares lower NAV per share by exactly the fee. Restating the marks
+    ///      per share keeps that out of the drawdown and daily-loss measures: those
+    ///      bound what trading did to the vault, and the fee is a declared term.
+    function onFeeMint(uint256 supplyBefore, uint256 supplyAfter) external {
+        address vault = msg.sender;
+        if (!configured[vault]) revert OnlyVault();
+        if (supplyAfter <= supplyBefore || supplyBefore == 0) return;
+        MarkState storage mark = markOf[vault];
+        mark.highWaterNavPerShare = uint128(Math.mulDiv(mark.highWaterNavPerShare, supplyBefore, supplyAfter));
+        DayState storage d = dayOf[vault];
+        d.openNav = uint128(Math.mulDiv(d.openNav, supplyBefore, supplyAfter));
+        d.lastNav = uint128(Math.mulDiv(d.lastNav, supplyBefore, supplyAfter));
+        emit FeeRebased(vault, supplyBefore, supplyAfter);
     }
 
     function checkAndConsumeBefore(
@@ -175,17 +300,18 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
         if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
 
+        (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
+        bool addsRisk = trade.expectedTotalNotional > totalNotional;
+        _checkTradeTerms(vault, trade, addsRisk);
+
         // Pre-trade stress test, only for orders that add exposure. An order that takes
         // risk off is never refused here, whatever the market is doing: in a spike the
         // guard wants the agent to be able to get smaller, not to be stuck.
-        if (limits.volWindowSeconds != 0 && limits.maxDrawdownBps != 0) {
-            (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
-            if (trade.expectedTotalNotional > totalNotional) {
-                (uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps) =
-                    _stress(vault, adapter, limits, vol, trade.expectedLeverageX100);
-                if (stressedDrawdownBps > limits.maxDrawdownBps) {
-                    revert StressBreach(sigmaBps, moveBps, stressedDrawdownBps);
-                }
+        if (limits.volWindowSeconds != 0 && addsRisk) {
+            (uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps) =
+                _stress(vault, adapter, limits, vol, trade.expectedLeverageX100);
+            if (stressedDrawdownBps > limits.maxDrawdownBps) {
+                revert StressBreach(sigmaBps, moveBps, stressedDrawdownBps);
             }
         }
         if (
@@ -203,6 +329,34 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         blockUsageOf[vault] = BlockUsage(uint64(block.number), uint192(next));
         lastTradeBlock[vault] = block.number;
         emit RiskConsumed(vault, trade.orderHash, trade.orderNotional);
+    }
+
+    /// @dev Market allowlist, direction, limit-price distance from the mark, and the
+    ///      daily count of orders that add exposure. Orders that only take risk off are
+    ///      not counted, so hitting the count never traps the agent in a position.
+    function _checkTradeTerms(address vault, TradePreview calldata trade, bool addsRisk) private {
+        TradeTerms memory t = tradeTerms[vault];
+        if (trade.marketId >= 32 || (t.allowedMarkets >> trade.marketId) & 1 == 0) {
+            revert MarketNotAllowed(trade.marketId);
+        }
+        if (
+            (t.direction == DIRECTION_LONG_ONLY && trade.resultingSizeE18 < 0) ||
+            (t.direction == DIRECTION_SHORT_ONLY && trade.resultingSizeE18 > 0)
+        ) revert DirectionNotAllowed(trade.resultingSizeE18);
+        if (t.maxPriceDeviationBps != 0) {
+            uint256 mark = trade.markPriceE18;
+            uint256 limit = trade.limitPriceE18;
+            uint256 diff = limit > mark ? limit - mark : mark - limit;
+            uint256 deviationBps = mark == 0 ? type(uint256).max : Math.mulDiv(diff, 10_000, mark);
+            if (deviationBps > t.maxPriceDeviationBps) revert PriceDeviationExceeded(deviationBps);
+        }
+        if (t.maxTradesPerDay != 0 && addsRisk) {
+            uint64 today = uint64(block.timestamp / 1 days);
+            TradeCount memory c = tradesOf[vault];
+            uint32 count = c.day == today ? c.count : 0;
+            if (count >= t.maxTradesPerDay) revert DailyTradesExceeded();
+            tradesOf[vault] = TradeCount(today, count + 1);
+        }
     }
 
     /// @notice Re-mark a vault and freeze it if the drawdown limit is breached.
@@ -236,8 +390,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         (, uint256 markedAt) = IMandateVaultView(vault).markedAssets();
         uint256 after_ = markedAt + uint256(limitsOf[vault].maxMarkAgeSeconds) * UNOBSERVABLE_MARK_AGES;
         if (block.timestamp <= after_) revert StillObservable(markedAt, after_);
-        freezeRecordOf[vault] = FreezeRecord(REASON_UNOBSERVABLE, uint64(block.timestamp));
-        bounty = IMandateVaultFreeze(vault).freeze(msg.sender);
+        bounty = _freeze(vault, REASON_UNOBSERVABLE, msg.sender);
         emit Unobservable(vault, msg.sender, markedAt, bounty);
     }
 
@@ -264,6 +417,12 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     function checkAfter(address vault, address adapter) external {
         if (msg.sender != vault) revert OnlyVault();
         if (!configured[vault]) revert LimitsNotConfigured();
+        (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
+        if (totalNotional == 0) {
+            positionOpenedAt[vault] = 0;
+        } else if (positionOpenedAt[vault] == 0) {
+            positionOpenedAt[vault] = uint64(block.timestamp);
+        }
         _markAndCheck(vault, adapter, address(0));
     }
 
@@ -331,15 +490,54 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         }
         uint256 drawdownBps = _drawdownBps(navPerShare, mark.highWaterNavPerShare);
         emit Marked(vault, navPerShare, mark.highWaterNavPerShare, drawdownBps);
+        uint256 dailyLossBps = _markDay(vault, navPerShare);
 
-        if (drawdownBps <= limits.maxDrawdownBps) {
-            return false;
+        if (drawdownBps > limits.maxDrawdownBps) {
+            uint256 bounty = _freeze(vault, REASON_DRAWDOWN, beneficiary);
+            emit DrawdownBreach(vault, beneficiary, navPerShare, drawdownBps, bounty);
+            return true;
         }
+        TradeTerms memory t = tradeTerms[vault];
+        if (t.maxDailyLossBps != 0 && dailyLossBps > t.maxDailyLossBps) {
+            uint256 bounty = _freeze(vault, REASON_DAILY_LOSS, beneficiary);
+            emit DailyLossBreach(vault, beneficiary, navPerShare, dailyLossBps, bounty);
+            return true;
+        }
+        uint64 openedAt = positionOpenedAt[vault];
+        if (t.maxHoldingSeconds != 0 && openedAt != 0 && block.timestamp > uint256(openedAt) + t.maxHoldingSeconds) {
+            uint256 bounty = _freeze(vault, REASON_HOLDING_TIME, beneficiary);
+            emit HoldingTimeBreach(vault, beneficiary, openedAt, bounty);
+            return true;
+        }
+        return false;
+    }
 
-        freezeRecordOf[vault] = FreezeRecord(REASON_DRAWDOWN, uint64(block.timestamp));
-        uint256 bounty = IMandateVaultFreeze(vault).freeze(beneficiary);
-        emit DrawdownBreach(vault, beneficiary, navPerShare, drawdownBps, bounty);
-        return true;
+    function _freeze(address vault, uint8 reason, address beneficiary) private returns (uint256) {
+        freezeRecordOf[vault] = FreezeRecord(reason, uint64(block.timestamp));
+        return IMandateVaultFreeze(vault).freeze(beneficiary);
+    }
+
+    /// @dev Roll the day if it changed and return today's loss from its opening NAV.
+    function _markDay(address vault, uint256 navPerShare) private returns (uint256 lossBps) {
+        DayState memory d = dayOf[vault];
+        uint64 today = uint64(block.timestamp / 1 days);
+        if (d.day != today) {
+            d.openNav = d.lastNav == 0 ? uint128(navPerShare) : d.lastNav;
+            d.day = today;
+        }
+        d.lastNav = uint128(navPerShare);
+        dayOf[vault] = d;
+        return _drawdownBps(navPerShare, d.openNav);
+    }
+
+    /// @notice Today's loss from the day's opening NAV, in bps, at the current mark.
+    function dailyLossQuote(address vault, address adapter) external view returns (uint256 lossBps, uint256 openNav) {
+        (uint256 equity,) = IVenueAdapter(adapter).markEquity(vault);
+        uint256 supply = IMandateVaultView(vault).totalSupply();
+        DayState memory d = dayOf[vault];
+        openNav = d.day == uint64(block.timestamp / 1 days) || d.lastNav == 0 ? d.openNav : d.lastNav;
+        if (supply == 0 || openNav == 0) return (0, openNav);
+        lossBps = _drawdownBps(Math.mulDiv(equity, ONE, supply), openNav);
     }
 
     /// @dev Write the projected volatility state if the mark moved on. A vault without a
@@ -369,7 +567,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         returns (VolState memory vol, bool changed)
     {
         vol = volOf[vault];
-        (uint256 priceE18, uint256 markedAt) = IVenueAdapter(adapter).markPrice(vault);
+        (uint256 priceE18, uint256 markedAt) =
+            IVenueAdapter(adapter).marketPrice(_referenceMarket(tradeTerms[vault].allowedMarkets));
         if (priceE18 == 0 || markedAt <= vol.lastPriceAt) return (vol, false);
         if (priceE18 > type(uint128).max) priceE18 = type(uint128).max;
 
@@ -419,6 +618,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (navNow > highWater) highWater = navNow;
         uint256 stressedNav = lossBps >= 10_000 ? 0 : navNow - Math.mulDiv(navNow, lossBps, 10_000);
         stressedDrawdownBps = _drawdownBps(stressedNav, highWater);
+    }
+
+    /// @dev Lowest market id in the allowlist. With a stress term the allowlist has
+    ///      exactly one market, so this is the market whose volatility is measured.
+    function _referenceMarket(uint32 allowed) private pure returns (uint256 id) {
+        if (allowed == 0) return 0;
+        while ((allowed >> id) & 1 == 0) ++id;
     }
 
     function _drawdownBps(uint256 navPerShare, uint256 highWater) private pure returns (uint256) {

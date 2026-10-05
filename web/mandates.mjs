@@ -3,7 +3,7 @@
 // web/chain.mjs runs this against the in-process EDR node; contracts/script/
 // deploy-demo.mjs runs the same routine against a live RPC. One definition, so
 // the testnet book and the local book are the same book.
-import { AbiCoder, parseUnits } from "ethers";
+import { AbiCoder, ZeroHash, parseUnits } from "ethers";
 
 export const coder = AbiCoder.defaultAbiCoder();
 export const E18 = (n) => parseUnits(String(n), 18);
@@ -111,12 +111,32 @@ export const CONTRACT_SOURCES = {
   guard: ["MandateRiskGuard", "MandateRiskGuard"],
   venue: ["mocks/DeterministicMockVenue", "DeterministicMockVenue"],
   adapter: ["MockVenueAdapter", "MockVenueAdapter"],
-  vault: ["MandateVault", "MandateVault"]
+  vault: ["MandateVault", "MandateVault"],
+  batch: ["BatchAllocator", "BatchAllocator"],
+  registry: ["MandateRegistry", "MandateRegistry"]
 };
+
+// Short enough that a live demo sees an epoch end and settle inside one
+// session; the privileged settleEpoch() call still only nets signed intents,
+// it never picks who gets how many shares (BatchAllocator.sol _allocate()).
+export const BATCH_EPOCH_SECONDS = 20;
+export const BATCH_SETTLEMENT_WINDOW_SECONDS = 600;
+
+// DP release tuning for the demo. "epoch" here is just a strictly-increasing
+// release counter, not a wall-clock window like BatchAllocator's -- the spec
+// only requires epoch/pinnedBlock to advance, and giving the Reporter its own
+// clock (mandate-technical-spec-v0.2.md 4.3: cadence is server config) avoids
+// coupling two independent concepts to the same timer.
+export const REPORT_CLIP_BOUND = 0.1; // 10% per-step return
+export const REPORT_EPSILON = 0.5; // epsilon spent per release's performance stats
+export const REPORT_EPSILON_CAP = 50_000_000n; // 50.0 cumulative epsilon, generous for a demo session
 
 // Deploys USDC, guard, venue, adapter and the four vaults, locks each vault's
 // terms, seeds it from the allocator and lets its agent open the position its
-// mandate allows. Returns the deployment record the browser boots from.
+// mandate allows. Then deploys the BatchAllocator (every vault allowed) and the
+// MandateRegistry (every vault registered), so the local book and the testnet
+// book carry the same six screens. Returns the deployment record the browser
+// boots from.
 //
 // `deploy(source, name, args)` and `abiOf(source, name)` are supplied by the
 // caller because the in-process chain compiles in memory while the live script
@@ -133,6 +153,8 @@ export async function deployDemoSystem({
   basePriceE18 = START_PRICE,
   profile = "local",
   allocatorBuffer = USDC(20_000),
+  batchEpochSeconds = BATCH_EPOCH_SECONDS,
+  batchWindowSeconds = BATCH_SETTLEMENT_WINDOW_SECONDS,
   log = () => {}
 }) {
   const mandates = mandatesFor(profile);
@@ -189,12 +211,41 @@ export async function deployDemoSystem({
     });
   }
 
+  // The batcher is `owner`: settleEpoch() only nets already-verified signed
+  // intents, so there is nothing a batcher key can steal by also being the
+  // deployer.
+  const ownerAddress = await owner.getAddress();
+  const batch = await deploy(...CONTRACT_SOURCES.batch, [usdcAddress, ownerAddress, batchEpochSeconds, batchWindowSeconds]);
+  const batchAddress = await batch.getAddress();
+  for (const v of vaults) await (await batch.setVaultAllowed(v.address, true)).wait();
+  const batchGenesis = Number(await batch.genesis());
+  log(`batch allocator ${batchAddress} allows ${vaults.length} vaults`);
+
+  // MandateRegistry: `owner` is both the admin and the configured reporter,
+  // the same centralisation tradeoff as the batcher above. `owner` is also
+  // `guard`'s Ownable owner, which is who registerAgent() requires as the
+  // caller. registerAgent() reads the real guard off the vault and checks the
+  // claimed limits against its termsHash, so this can only publish the truth.
+  // v.limits is the exact merged-and-locked RiskLimits: keccak256(abi.encode())
+  // depends on the numeric value, not on whether a field is a bigint or the
+  // decimal string it was serialised to.
+  const registry = await deploy(...CONTRACT_SOURCES.registry);
+  const registryAddress = await registry.getAddress();
+  await (await registry.setReporter(ownerAddress)).wait();
+  await (await registry.setEpsilonCap(REPORT_EPSILON_CAP)).wait();
+  for (const v of vaults) {
+    await (
+      await registry.registerAgent(v.address, adapterAddress, v.limits, { performanceFeeBps: 0, managementFeeBps: 0 }, ZeroHash)
+    ).wait();
+  }
+  log(`registry ${registryAddress} lists ${vaults.length} agents`);
+
   return {
     chainId: Number((await provider.getNetwork()).chainId),
     profile,
     addresses: { usdc: usdcAddress, guard: guardAddress, venue: venueAddress, adapter: adapterAddress },
     accounts: {
-      owner: await owner.getAddress(),
+      owner: ownerAddress,
       allocator: allocatorAddress,
       keeper: await keeper.getAddress()
     },
@@ -203,8 +254,17 @@ export async function deployDemoSystem({
       guard: abiOf(...CONTRACT_SOURCES.guard),
       adapter: abiOf(...CONTRACT_SOURCES.adapter),
       venue: abiOf(...CONTRACT_SOURCES.venue),
-      usdc: abiOf(...CONTRACT_SOURCES.usdc)
+      usdc: abiOf(...CONTRACT_SOURCES.usdc),
+      batch: abiOf(...CONTRACT_SOURCES.batch),
+      registry: abiOf(...CONTRACT_SOURCES.registry)
     },
+    batch: {
+      address: batchAddress,
+      genesis: batchGenesis,
+      epochDuration: Number(batchEpochSeconds),
+      settlementWindow: Number(batchWindowSeconds)
+    },
+    registry: { address: registryAddress, clipBound: REPORT_CLIP_BOUND, epsilon: REPORT_EPSILON },
     vaults,
     startBlock,
     startedAt: Date.now()

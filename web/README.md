@@ -27,6 +27,9 @@ run `npm run deploy:demo` once, then `npm run web:live`. The server boots from
 `web/deployments/<chainId>.json`, runs the oracle itself and answers `/rpc` as a
 signing proxy: `eth_accounts` lists the six demo accounts, `eth_sendTransaction` is
 checked against a per-role allowlist and signed server-side, reads go upstream.
+`eth_signTypedData_v4` is answered for one thing only, the allocator's
+`AllocationIntent` on this deployment's batch allocator, and the server is the
+batcher and the reporter behind the Batch and Privacy screens (`web/live-desks.mjs`).
 The full description, the env table and the hosting unit are in the root README
 under "Live testnet demo".
 
@@ -46,7 +49,7 @@ single market move produces four different outcomes. On a live chain the oracle 
 paid transaction every 5 seconds, so the live profile widens Tight Mandate's mark age
 to 10 seconds; everything else is identical (`web/mandates.mjs` is the one definition).
 
-## The four screens
+## The six screens
 
 **Market** — the mandate book. Drawdown, leverage and mark age each shown against the
 limit the allocator accepted, not against each other. A vault past a limit reads
@@ -61,6 +64,28 @@ while a vault is frozen, because freezing closes the agent's door, not the
 allocator's. Both doors do close on a mark past its age limit: shares are priced
 off that mark in both directions, and neither screen will let you sign against a
 price the guard would reject.
+
+**Batch** — allocations netted per epoch. The allocator deposits escrow into
+`BatchAllocator`, signs an `AllocationIntent` (EIP-712, off-chain, free), and once the
+epoch has ended one `settleEpoch()` moves the net amount into each vault. Shares are
+then claimed with a Merkle proof. The batcher is the server: `web/chain.mjs` on the
+in-process chain, `web/live-desks.mjs` on a live one, where the queue is shared by
+every visitor. There an intent is checked against the chain when it arrives and again
+before settlement, and one the chain would still refuse is left out of the batch (the
+toast says which and why) instead of sinking the epoch.
+
+**Privacy** — a differentially private release. The reporter pools each vault's
+per-mark return, clips it, adds Laplace noise and posts the digest of the result to
+`MandateRegistry` with `postLeaderboard()`; the registry adds the release's ε to a
+running total and refuses a release past its cap. The inputs are public NAV marks, so
+this demonstrates the release and its on-chain budget, not secrecy of the data.
+
+On a live chain both are transactions the deployer pays for, so they are bounded:
+8 intents an epoch, 3 settlements a minute, one release every 2 minutes, and an
+hourly allowance of signed gas for the two together. Queued intents, claim proofs and
+the reporter's samples are held in memory; a restart or a reset drops them. Shares
+settled before a restart stay claimable on chain, but the proof has to be rebuilt from
+the `settleEpoch()` calldata, which the demo does not do.
 
 **Live Risk** — the control room:
 

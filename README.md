@@ -33,7 +33,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
 - `reporter/`: 공개 정산 금액과 거래 수익률(`[-c,c]` clip)의 mean/Sharpe/max drawdown을 순수 ε-DP(Laplace 메커니즘, scale = `2·clipBound/(N·ε)`)로 집계. 노이즈는 `HMAC_SHA256(reporterSecret, domainSeparator||epochId||pinnedBlock||statsVersion)` 시드로 결정론적으로 생성되고, `EpsilonLedger`가 `MandateRegistry`와 동일한 누적 ε 산식·상한을 먼저 체크해서 온체인에서 거부될 release는 애초에 서명하지 않음. Privacy Simulator(`reporter/simulator.mjs`)는 같은 scale 공식을 쓰되 ledger·secret에 전혀 접근하지 않는 별도 모듈 — 슬라이더가 실제 ε 예산을 쓸 수 없는 구조
 
-로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 58개(Hardhat/node:test, MandateRegistry 10개·DP Reporter 14개 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 61개(Hardhat/node:test, MandateRegistry 12개·DP Reporter 14개 포함)와 데모 서버 테스트 46개(`npm run test:web`, 서명 allowlist·gas 한도·batcher/reporter·부팅 시 최신 장부 복구 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
 
 ## 동작 흐름
 
@@ -78,6 +78,8 @@ npm run test:invariant
 
 같은 화면을 Monad 테스트넷 위에서 띄울 수 있습니다. 서버가 네 개 Vault를 한 번 배포한 뒤, 방문자의 클릭을 서버가 보관한 테스트넷 전용 데모 키로 서명하고 가스를 대신 냅니다. 방문자는 지갑 확장도 faucet도 필요 없고, 피드의 각 항목은 monadscan 트랜잭션으로 연결됩니다.
 
+공개 인스턴스: <https://mandate-e4kb.onrender.com> (Monad 테스트넷, chainId 10143)
+
 ```bash
 cp .env.example .env        # MONAD_RPC_URL, DEMO_MNEMONIC(테스트넷 전용), DEMO_ADMIN_TOKEN
 npm run compile
@@ -85,14 +87,14 @@ npm run deploy:demo         # 한 번: 배포·시드 후 web/deployments/10143.
 npm run web:live            # 페이지 서빙 + 오라클 + 대리 서명
 ```
 
-니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 실측 약 1.25 MON, 데모 계정 6개에 각 0.4 MON 송금. 스크립트는 시작 전에 4 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
+니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 약 1.8 MON으로 추정합니다. 배치 정산 컨트랙트와 레지스트리를 포함해 약 1,800만 gas이고, 두 컨트랙트가 없던 2026-10-04 배포의 실측은 약 1.25 MON이었습니다. 여기에 데모 계정 6개에 각 0.4 MON을 송금합니다. 스크립트는 시작 전에 4.5 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Batch와 Privacy 화면도 라이브에서 동작합니다(배치 정산 컨트랙트와 레지스트리가 포함된 배포 기록일 때). 서버가 배처와 리포터 역할을 맡아 배분자의 `AllocationIntent`만 EIP-712로 서명하고, epoch이 끝나면 `settleEpoch()`를, 표본이 모이면 `postLeaderboard()`를 배포 계정 비용으로 보냅니다. 두 트랜잭션은 시간당 가스 한도와 횟수 제한 안에서만 나갑니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
 
 2026-10-04에 Monad 테스트넷(chain 10143)에 배포했습니다. 컨트랙트 주소 8개와, 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다. AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
 
 ## 저장소 구조
 
 ```text
-contracts/src/          Vault, RiskGuard, Adapter, BatchAllocator, interface, mock
+contracts/src/          Vault, RiskGuard, Adapter, BatchAllocator, MandateRegistry, interface, mock
 contracts/test-js/      in-process Hardhat EVM 계약 테스트
 contracts/test/         Foundry invariant/fuzz 테스트와 reentrancy 테스트
 contracts/script/       deploy-demo.mjs(네 개 Vault), deploy.mjs(단일 Vault), keeper.mjs, artifacts.mjs
@@ -101,13 +103,15 @@ reporter/               DP release 계산: clipping, Laplace noise, epsilon ledg
 web/                    Market, Agent, Allocate, Batch, Privacy, Live Risk 화면, 데모 서버, in-process chain(chain.mjs)과 라이브 RPC 프록시(live.mjs)
 web/deployments/        deploy-demo.mjs가 쓰는 <chainId>.json. 라이브 서버가 여기서 시작
 deploy/systemd/         Linux 호스트용 라이브 데모 유닛 파일
-docs/                   마일스톤 설계 문서
+docs/                   마일스톤 설계 문서, 보안 리뷰, 제출 준비 현황과 제출 글(docs/submission/)
 mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ```
 
 ## 다음 작업
 
-외부 감사(제3자 진행 중)와 라이브 데모의 공개 호스팅이 남아 있습니다. baseline/FlyGraph 에이전트는 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
+해커톤 제출까지 남은 일과 담당, 제출 폼에 넣은 글, 영상 대본 초안은 [`docs/submission/`](docs/submission/README.md)에 있습니다.
+
+외부 감사가 남아 있습니다. 아직 받지 않았고, 실제 자금을 다루는 배포 전에 받아야 합니다(지금까지의 검토는 아래 "보안 리뷰"의 내부 리뷰입니다). 라이브 데모는 공개 호스팅했습니다([라이브 테스트넷 데모](#라이브-테스트넷-데모)). baseline 에이전트 구현은 2026-10-04부로 범위에서 제외했습니다 — 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로, 지금은 우선순위가 아닙니다. Monad 테스트넷에는 2026-10-04에 배포했고 주소와 실행 트랜잭션을 게시했습니다([Recorded run on Monad testnet](#recorded-run-on-monad-testnet)).
 
 Invariant·fuzz 테스트 [구현 기준 2026-10-04]: `contracts/test/`에 Foundry 기반 stateful invariant 테스트를 추가했습니다. Vault·RiskGuard·MockVenueAdapter를 대상으로 allocate/withdraw/transferShares/execute/poke/unwind/가격 충격/시간 경과를 임의 순서로 섞어 핵심 불변식 9개(custody, 상태 전이, share 회계, lockTerms, 변동성 조항)를 검증하고, 악의적 ERC20 asset으로 reentrancy 3개를 별도 검증합니다. 각 invariant는 가드를 일부러 제거해 실패하는 것을 확인한 뒤 복원하는 방식으로 교차검증했습니다.
 
@@ -139,7 +143,7 @@ The sections below describe the target v1 product. The current repository implem
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no private Intent API, and `reporter/` is scoped to public data only (2026-10-04): it DP-releases settlement amounts and trade returns, which are already on-chain, rather than the private watchlist/pre-settlement-intent signals the v0.2 spec sketches — those have no corresponding feature in this demo, so there is nothing yet to protect.
 
-Fee accounting is pending (`FeeTerms` exists only as declared metadata on `MandateRegistry`, with no deduction mechanism behind it). The demo book is deployed on Monad testnet; addresses and a recorded run are under [Recorded run on Monad testnet](#recorded-run-on-monad-testnet). The six-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)); an external audit is in progress with a third party.
+Fee accounting is pending (`FeeTerms` exists only as declared metadata on `MandateRegistry`, with no deduction mechanism behind it). The demo book is deployed on Monad testnet; addresses and a recorded run are under [Recorded run on Monad testnet](#recorded-run-on-monad-testnet). The six-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same four-mandate book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)); no external audit has been done yet.
 
 ## Build status
 
@@ -162,7 +166,7 @@ The first executable contract milestone is complete:
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (58 cases). `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (61 cases). `npm run test:web` covers the demo server (46 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 
@@ -332,7 +336,7 @@ reporter/               DP release computation: clipping, Laplace noise, epsilon
 web/                    Market, Agent, Allocate, Batch, Privacy and Live Risk screens, demo server, in-process chain (chain.mjs) and live-RPC proxy (live.mjs)
 web/deployments/        <chainId>.json written by deploy-demo.mjs; the live server boots from it
 deploy/systemd/         unit file for running the live demo on a Linux host
-docs/                   Milestone design notes
+docs/                   Milestone design notes, the 2026-10-04 security review, submission status and form texts (docs/submission/, status notes in Korean)
 mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
 
@@ -354,7 +358,7 @@ Done:
 
 Next:
 
-12. An external, independent security audit (in progress with a third party) and publicly hosting the live demo (the testnet deployment itself is already published under "Recorded run on Monad testnet"). A baseline agent and FlyGraph are explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
+12. An external, independent security audit. None has been done yet; the review in item 11 is internal, and an external audit is a prerequisite before any real-money deployment. The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
@@ -386,7 +390,9 @@ Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the 
 
 ## Live testnet demo
 
-The same four screens can run against Monad testnet, with no wallet extension and no faucet trip for the visitor. The server deploys the book once, then signs every click with demo keys it holds and pays the gas. Every number is still a contract read against the live chain, every button still a transaction with an explorer link in the feed.
+The same screens can run against Monad testnet, with no wallet extension and no faucet trip for the visitor. The server deploys the book once, then signs every click with demo keys it holds and pays the gas. Every number is still a contract read against the live chain, every button still a transaction with an explorer link in the feed.
+
+A public instance runs at <https://mandate-e4kb.onrender.com> (Monad testnet, chain 10143).
 
 ```bash
 cp .env.example .env        # MONAD_RPC_URL, DEMO_MNEMONIC (testnet-only), DEMO_ADMIN_TOKEN
@@ -395,7 +401,7 @@ npm run deploy:demo         # once: deploys and seeds, writes web/deployments/10
 npm run web:live            # serves the page, runs the oracle, signs on visitors' behalf
 ```
 
-Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays (a measured 1.25 MON or so for the deploy and seeding at the testnet's gas price of about 100 gwei, plus 0.4 MON sent to each of the six demo accounts); `deploy:demo` refuses to start with less than 4 MON. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
+Both scripts read `.env` through `node --env-file-if-exists`, so nothing has to be exported by hand. Account 0 of the mnemonic deploys and pays: an estimated 1.8 MON for the deploy and seeding at the testnet's gas price of about 100 gwei (about 18M gas now that the book includes the batch allocator and the registry; the 2026-10-04 run, before those two contracts were part of it, measured 1.25 MON), plus 0.4 MON sent to each of the six demo accounts. `deploy:demo` refuses to start with less than 4.5 MON. Accounts 1 to 5 and 9 are the allocator, the four agents and the keeper; the server signs with those six and never with account 0. The deployment file is meant to be committed for a real network (`web/deployments/31337.json`, a local rehearsal, is ignored).
 
 What the visitor gets:
 
@@ -403,21 +409,25 @@ What the visitor gets:
 - Allocate, order, poke and unwind buttons work as on the local chain; the server signs `approve`/`allocate`/`withdraw` as the allocator, `execute` as the selected vault's agent, and `poke`/`unwind` as whichever account the page has adopted (the allocator once "Connect allocator" is pressed, the keeper before that).
 - The block-cadence toggle is gone (the chain's cadence is its own) and `Reset demo` only appears when the page is opened with `?admin=<DEMO_ADMIN_TOKEN>`.
 - The note under the control room reports the oracle's current cadence, how many marks it has pushed and the gas spent so far.
+- Batch and Privacy run on a book deployed with the batch allocator and the registry, which every `deploy:demo` since 2026-10-04 produces; on an older record the two tabs are hidden. The server is the batcher and the reporter: it signs the allocator's `AllocationIntent` when the page asks for an EIP-712 signature, queues it, nets the epoch into one `settleEpoch()`, and posts a DP release with `postLeaderboard()`.
 
 How the server keeps itself safe on a public URL:
 
 - Allowlist per role. A request to sign is refused unless the `from` account is one of the six demo keys, the target is a contract from the deployment, the selector is in that role's list (the allocator may not `execute`, an agent may not `withdraw`), and no value is attached. Refusals come back as JSON-RPC errors the page prints.
 - Gas cap (`MAX_GAS_PER_TX`, 1.5M) after a server-side estimate, so a reverting call costs nothing and a runaway one is not signed. The signed limit is the estimate plus `GAS_HEADROOM_PERCENT` (50): an oracle mark that lands between the estimate and inclusion makes `poke()` and `execute()` write more than was estimated, and Monad bills the limit whether or not it is used, so a transaction signed at the bare estimate can run out of gas and still be paid for in full. Reverts surface with their custom-error data, so the page decodes `LeverageExceeded`, `StressBreach` and friends exactly as it does locally.
 - Rate limits: `SEND_TX_PER_MINUTE` (40) signed transactions and `CONTROL_PER_MINUTE` (12) shocks per minute across all visitors. Read methods are forwarded to the upstream RPC from a short allowlist; anything else (`evm_mine`, `eth_sign`, ...) is `-32601`. Every visitor's reads share the server's upstream quota, and that quota is small: the public testnet RPC answers 15 `eth_call` a second per IP (measured 2026-10-04) while one page refresh is 32 to 34 reads, and inside a batch it refuses the surplus entry by entry under HTTP 200, where a client's ordinary 429 retry never sees it. So the proxy folds a batch's plain reads into one Multicall3 `aggregate3` call (`PACK_READS`, used when the chain has Multicall3 at its canonical address), resends whatever was refused for rate after a short pause, and answers identical reads from a `READ_CACHE_MS` (2000) cache that the server clears whenever it signs, marks or sees a receipt go by. None of the contracts' views depend on `msg.sender`, so a bundled read returns what a direct one would.
+- Typed data. `eth_signTypedData_v4` is answered for one request only: an `AllocationIntent` from the allocator, in the EIP-712 domain of this deployment's batch allocator, for a vault of this book. Any other signer, domain, primary type or field list is refused, so the proxy cannot be made to sign a permit or an order for another contract.
+- Batcher and reporter (`web/live-desks.mjs`). `settleEpoch()` reverts as a whole when one intent is stale and the deployer pays for what reaches the chain, so an intent is checked when it arrives (signature, epoch still settleable, nonce neither used nor queued, vault `Active`, escrow covering everything queued) and again right before settlement. A batch that would still revert is taken apart with one `eth_call` per intent and settled without the intents that sink it. Nothing is sent that did not pass a gas estimate. One settlement is capped at `SETTLE_MAX_GAS` (2M), an epoch takes `BATCH_MAX_PER_EPOCH` (8) intents and the queue `BATCH_MAX_PENDING` (32), settlements are limited to `SETTLE_PER_MINUTE` (3) and releases to one every `REPORT_MIN_SECONDS` (120), and the two together draw on `DESK_GAS_PER_HOUR` (10M) of signed gas, about 1 MON at 100 gwei. A release's noise is seeded from `DEMO_REPORTER_SECRET`, or from a random value drawn at boot; it is never derived from a signing key. The queue, the claim proofs and the reporter's samples live in memory and are dropped by a restart or a reset.
 - Presence-aware oracle. A visitor makes the server mark every `ORACLE_ACTIVE_SECONDS` (5) and `observe()` every `ORACLE_OBSERVE_SECONDS` (60); `PRESENCE_SECONDS` (60) after the last request it drops to `ORACLE_IDLE_SECONDS` (300). A shock lands on the next beat, so the price moves within seconds either way.
 - Gas for the demo accounts. Each of the six starts with `DEMO_GAS_PER_ACCOUNT_MON` (0.4). When one drops under `DEMO_GAS_FLOOR_MON` (0.2) the deployer fills it back up, within `DEMO_TOPUP_PER_HOUR_MON` (6) an hour so a visitor hammering the buttons cannot drain it, and never below its own `OWNER_RESERVE_MON` (1) so the oracle keeps marking. `/api/control` reports what has been refilled and says so when an account is low and cannot be.
 - Reset policy. `Reset demo` needs the admin token and respects `RESET_COOLDOWN_SECONDS` (600). With `AUTO_RESET` on (default), the server also redeploys by itself when a visitor leaves and at least `AUTO_RESET_MIN_FROZEN` (2) vaults are no longer `Active`, provided the deployer still holds `RESET_MIN_BALANCE_MON` (3). Each redeploy is a fresh book at new addresses; the page follows automatically.
+- Boot on the newest book (`web/live-recover.mjs`). A redeploy's record is written to the server's disk, and a host that wipes it on restart brings the server back on the committed `web/deployments/<chainId>.json`, which can name an older, frozen book; the next visitor to leave would then trigger another redeploy. Before it starts, the live server walks the deployer's contract-creation addresses down from its current nonce, rebuilds the newest complete book from the links between its contracts (registry and batch allocator owned by the deployer, vaults run by the record's agents, each naming the same USDC, guard and adapter) and boots on that instead. It only reads, at most 12 requests a second because Monad's public endpoint caps `eth_call` at 15, so boot takes up to about a minute longer. `RECOVER_BOOK=0` turns it off.
 
 `deploy/systemd/mandate-web.service` runs it on a Linux host (`/opt/mandate`, a dedicated user, `.env` at mode 600); put a TLS reverse proxy in front of port 3000. The budget for ten days of judging traffic is on the order of 20-30 testnet MON. Rehearse the whole thing offline first with `npx hardhat node` and `MONAD_RPC_URL=http://127.0.0.1:8545`; the proxy, the oracle and the reset path behave the same, only the explorer links are missing.
 
 ### Recorded run on Monad testnet
 
-The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one. These addresses and transactions stay on chain either way.
+The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one; a restarted server finds that newer book on chain and stays on it. These addresses and transactions stay on chain either way.
 
 | Contract | Address |
 | --- | --- |

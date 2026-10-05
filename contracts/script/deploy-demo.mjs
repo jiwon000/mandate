@@ -3,9 +3,10 @@
 //   MONAD_RPC_URL=... DEMO_MNEMONIC="..." npm run deploy:demo
 //
 // Account 0 of the mnemonic pays for everything and must hold MON already (the
-// full deploy plus seeding is about 13.5M gas, 1.4 MON at Monad's 100 gwei
-// floor, plus the gas allowance sent to each demo account). The result lands in
-// web/deployments/<chainId>.json, which `npm run web:live` boots from.
+// full deploy plus seeding - four vaults, the batch allocator and the registry -
+// is about 18M gas, 1.8 MON at Monad's 100 gwei floor, plus the gas allowance
+// sent to each demo account). The result lands in web/deployments/<chainId>.json,
+// which `npm run web:live` boots from.
 import { JsonRpcProvider, NonceManager, formatEther, parseEther } from "ethers";
 import { demoWallets } from "../../web/accounts.mjs";
 import { GAS_PER_ACCOUNT_MON, deployLiveSystem, deploymentFileFor, networkInfo } from "../../web/live.mjs";
@@ -30,7 +31,7 @@ const signers = {
 };
 
 const balance = await provider.getBalance(wallets.owner.address);
-const needed = parseEther("1.6") + parseEther(DEMO_GAS_PER_ACCOUNT_MON) * 6n;
+const needed = parseEther("2.1") + parseEther(DEMO_GAS_PER_ACCOUNT_MON) * 6n;
 console.log(`Deploying from ${wallets.owner.address} to chain ${chainId} (${networkInfo(chainId).label}); balance ${formatEther(balance)} MON`);
 if (balance < needed) {
   throw new Error(`Owner holds ${formatEther(balance)} MON; about ${formatEther(needed)} is needed for the deploy and the demo accounts' gas`);
@@ -49,4 +50,6 @@ console.log(`\nDone. Owner balance now ${formatEther(await provider.getBalance(w
 console.log("| Contract | Address |");
 console.log("| --- | --- |");
 for (const [key, address] of Object.entries(stored.addresses)) console.log(`| ${key} | ${link(address)} |`);
+console.log(`| batch allocator | ${link(stored.batch.address)} |`);
+console.log(`| registry | ${link(stored.registry.address)} |`);
 for (const vault of stored.vaults) console.log(`| vault ${vault.name} | ${link(vault.address)} |`);

@@ -1,0 +1,49 @@
+WHERE WE ARE
+
+Mandate is a hackathon build on Monad testnet with a mock venue. It has no users, no partners and no capital in it, and nothing below is a claim of traction. This is the order in which we would take it to market, and why.
+
+WHO THE FIRST USERS ARE
+
+Mandate is a two-sided market with a third side that comes for free.
+
+1. Agent builders (supply). Individuals and small teams who run a trading agent on their own capital and want outside capital. Their problem is that they have no reputation, and reputation is what an allocator normally underwrites. Mandate gives them something else to offer: a tight, locked mandate. A builder who accepts 2x leverage and a 5% drawdown freeze can be funded by someone who has never heard of them. This side comes first, because a market with no vaults has nothing to allocate to.
+
+2. Allocators (demand). First, crypto-native stablecoin holders who already use on-chain vaults or copy-trading and know the trade-off: a custodial product where the operator can withdraw, or an open vault where trades are visible after the fact and the limits are the operator's discretion. Later, DAO treasuries and small funds, whose investment rules already exist on paper as leverage and drawdown limits and who need them enforced rather than promised. For both, the product is one comparison table: drawdown, leverage and mark age for every vault, each shown against the limit it is locked to.
+
+3. Keepers. poke() and unwind() are permissionless and pay a bounty out of the vault. Anyone who already runs liquidation bots can add Mandate vaults to their loop. We do not have to recruit or pay a keeper network. The bounty is the acquisition channel.
+
+HOW WE REACH THEM
+
+Step 1. One real venue on Monad. Everything in Mandate goes through a per-venue adapter that can preview an order and execute it atomically. The mock adapter in the repository is the template. The first go-to-market action is an adapter for one perpetuals venue that is live on Monad. We have not approached a venue yet. The reason to start there is that the adapter is also the distribution channel: a venue wants volume, an agent vault with enforced limits is volume it can point its users to, and its existing traders are our allocator side.
+
+Step 2. Seed supply ourselves. We ship the baseline agent bot from our roadmap and run the first vaults ourselves under tight mandates, so the market opens with something to compare. Then we open vault creation to builders where they already are: the Monad developer community, this hackathon's Onchain Finance and Trading cohort, and open-source trading-agent communities. The pitch to a builder is one line: bring your agent, pick your terms, lock them, take deposits.
+
+Step 3. Capped mainnet launch. A deposit cap per vault, a short allowlist of adapters, and an external audit before any cap is raised. The hosted testnet demo stays up as the front door. It needs no wallet, and a visitor can break a mandate and watch the vault freeze in about a minute, which explains the product better than a landing page.
+
+Step 4. Make terms a standard. termsHash gives every mandate one comparable fingerprint. MandateRegistry anchors it on chain, so a front end, an aggregator or another protocol can list Mandate vaults by their terms without trusting us. The reporter already publishes noised statistics over public vault marks and the registry keeps their privacy budget. Extending it to private data is planned, and it adds what an allocator needs to choose between vaults: performance as a confidence interval instead of a headline return.
+
+WHY SOMEONE SWITCHES
+
+- An allocator switches because the loss limit is set before the deposit and enforced by the contract, not described by the operator.
+- A builder switches because a locked mandate is cheaper to produce than a multi-year track record.
+- Neither side has to trust the team. No agent or operator can move vault funds, rewrite locked terms or hold a withdrawal. Only a stale price can pause a withdrawal, and only until it refreshes.
+
+BUSINESS MODEL
+
+Fee accounting is not built. The intended shape is that fee terms become part of the locked mandate, so an allocator reads the fee the same way they read the leverage limit. One candidate for protocol revenue is a share of the operator's performance fee. Nothing here is decided.
+
+WHAT WE WILL MEASURE
+
+- Number of vaults with locked terms
+- Capital allocated per vault
+- Share of vaults whose limits were hit and enforced
+- Time from a breach to the poke() that freezes it
+
+The last two show whether the product does what it says.
+
+RISKS WE SEE
+
+- Cold start on a two-sided market. We seed supply ourselves and lean on one venue's existing users for demand.
+- Dependence on real venue adapters. Each adapter is code that has to be audited. We start with one.
+- Smart-contract risk. No capital goes in above the caps before the audit.
+- The mandate bounds when liquidation starts, not where it ends. We say so in the product, because an allocator who discovers it later stops trusting every other number on the screen.

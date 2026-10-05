@@ -328,7 +328,7 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 ## 5. 데모 에이전트
 
-[2026-10-04: 범위 제외] baseline/FlyGraph 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다.
+[2026-10-04: 범위 제외] baseline 에이전트 구현은 범위에서 뺐다. 프로토콜의 보안 근거는 RiskGuard/Vault에 있지 에이전트 구현에 있지 않으므로 지금 우선순위가 아니다.
 
 데모의 에이전트는 스크립트된 주문 시퀀스다. 어떤 에이전트든 같은 Adapter와 RiskGuard를 거치며, 에이전트 정책 자체는 프로토콜의 보안 근거가 아니다. 학습 기반 정책은 이 스펙의 범위 밖이다.
 
@@ -387,7 +387,6 @@ Simulator에는 항상 `Synthetic preview — not the published leaderboard` 라
 
 - allocator 완전 익명성 또는 shielded transfer
 - 일반 외부 venue의 무제한 지원
-- 커넥톰 기반 에이전트의 생물학적 충실도 또는 우월성 주장
 - Reporter의 탈중앙화
 - 메인넷 및 실자금 운용
 - 시스템 전역 DP

@@ -142,7 +142,7 @@
             <div class="custody-lock">
               <span class="lock-icon">◇</span>
               <p class="eyebrow">BATCHER ROLE</p>
-              <h3>Anyone can settle, once an epoch ends</h3>
+              <h3>Anyone can ask for settlement; only the batcher sends it</h3>
               <p>The batcher only nets verified signed intents into one deposit per vault; it never chooses who gets how many shares — settleEpoch() recomputes the Merkle root from every signature itself. This demo's server plays the batcher, the same role deploy.mjs gives the deployer key on Monad.</p>
             </div>
             <button id="settleBatchButton" class="button button-secondary button-large">settleEpoch()</button>

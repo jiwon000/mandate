@@ -89,7 +89,7 @@ npm run web:live            # 페이지 서빙 + 오라클 + 대리 서명
 
 니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 약 1.8 MON으로 추정합니다. 배치 정산 컨트랙트와 레지스트리를 포함해 약 1,800만 gas이고, 두 컨트랙트가 없던 2026-10-04 배포의 실측은 약 1.25 MON이었습니다. 여기에 데모 계정 6개에 각 0.4 MON을 송금합니다. 스크립트는 시작 전에 4.5 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Batch와 Privacy 화면도 라이브에서 동작합니다(배치 정산 컨트랙트와 레지스트리가 포함된 배포 기록일 때). 서버가 배처와 리포터 역할을 맡아 배분자의 `AllocationIntent`만 EIP-712로 서명하고, epoch이 끝나면 `settleEpoch()`를, 표본이 모이면 `postLeaderboard()`를 배포 계정 비용으로 보냅니다. 두 트랜잭션은 시간당 가스 한도와 횟수 제한 안에서만 나갑니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
 
-2026-10-04에 Monad 테스트넷(chain 10143)에 배포했습니다. 컨트랙트 주소 8개와, 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다. AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
+Monad 테스트넷(chain 10143)에 배포했습니다. 호스팅된 데모는 재시작 때마다 낡은 장부를 신뢰해 불필요하게 재배포하던 문제를 고친 뒤 2026-10-05에 확정된 10개 주소 장부(핵심 컨트랙트 4개, Vault 4개, BatchAllocator, MandateRegistry) 위에서 현재 돌아가고 있습니다. 2026-10-04 최초 배포 때 기록한 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 그대로 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다(해당 주소는 이후 교체됨, 같은 컨트랙트 코드의 동작 증거로 남겨둠). AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
 
 ## 저장소 구조
 
@@ -124,6 +124,10 @@ MandateRegistry [구현 기준 2026-10-04]: §3.7 인터페이스를 구현했�
 DP Reporter [구현 기준 2026-10-04]: `reporter/` 모듈이 실제 통계를 계산·노이즈 처리해 서명합니다. 범위는 의도적으로 좁습니다 — 이미 공개된 정산 금액·거래 수익률만 Laplace 메커니즘(`scale = 2·clipBound/(N·ε)`)으로 DP 집계하고, 스펙의 "private watchlist"·"정산 전 intent" DP는 해당 기능 자체가 데모에 없어서 v1 범위 밖입니다. `EpsilonLedger`가 `MandateRegistry`와 완전히 동일한 장부 검증을 먼저 통과시키므로 빌드된 release는 온체인에서 거부될 수 없고, 통합 테스트로 실제 `postLeaderboard()`가 받아들이는 것까지 확인했습니다.
 
 Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개 vault를 모두 `MandateRegistry`에 등록하고, 매 가격 tick마다 vault별 NAV 수익률을 모읍니다. 웹의 Privacy 화면에서 `postLeaderboard()`를 클릭하면 서버가 release를 만들어 서명·게시하고, 페이지는 서버 응답을 그대로 믿지 않고 `registry.releaseOf()`를 직접 읽어 digest가 일치하는지 대조해서 "VERIFIED ONCHAIN"을 표시합니다. Privacy Simulator 슬라이더는 같은 scale 공식을 쓰되 체인 호출이나 ledger 접근이 전혀 없는 순수 클라이언트 계산입니다.
+
+실사용을 위해 남은 것 [2026-10-05 정리]: 지금 데모는 서버가 데모 계정 6개로 대신 서명하고, 자산은 mock USDC, 거래소는 mock venue이며, 에이전트는 배포 스크립트가 만든 4개뿐입니다. 남은 순서는 (1) 지갑 연결: 사용자가 자기 키로 서명하고 테스트용 mock USDC를 받아 예치·배분·인출, (2) 에이전트 온보딩: 외부 운영자가 볼트를 만들고 한도를 잠가 레지스트리에 등록하는 화면과 절차(운영자 승인 방식인지 무허가인지 결정 포함), (3) 실제 거래소 어댑터: mock venue 대신 Monad의 perp 거래소 Perpl 테스트넷에 주문하고 Perpl 인덱스 가격으로 평가, (4) 외부 감사 뒤 실제 USDC로 메인넷 배포입니다. 영문 Roadmap 14~17번이 같은 내용입니다.
+
+동결 조건과 동결 이후 처리 [2026-10-05 결정, 1단계 구현]: 무엇이 동결을 일으키는지, 동결 기준값을 누가 정하는지, 동결 뒤 정리·인출·기록·복귀를 어떻게 하는지, 조건 종류를 어떻게 늘리는지를 [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)에 정리했습니다. 구현된 것: `configure()`가 `maxDrawdownBps`를 0 초과 5000 이하, `maxMarkAgeSeconds`를 0 초과 60초 이하로 강제(동결 없는 볼트 금지), mark가 `maxMarkAgeSeconds`의 3배 넘게 갱신되지 않으면 누구나 동결하는 `freezeUnobservable()`, 동결·종료 결과를 체인에서 읽어 기록하는 `MandateRegistry.recordOutcome()`과 에이전트 본인이 연결하는 볼트 이력 `linkVault()`/`vaultsOf()`. 다음 배포부터 적용되며, 호스팅 데모는 재배포 전까지 기존 컨트랙트로 돕니다. 조건 카탈로그·팩토리·수수료 차감은 해커톤 이후입니다.
 
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
@@ -273,13 +277,13 @@ Custody and execution permissions are enforced on-chain. Market-value risk limit
 | `maxLeverageX100` | total exposure divided by marked equity (cash plus unrealised PnL), at order time only | order reverts |
 | `minBlocksBetweenTrades` | blocks that must pass between two trades | order reverts |
 | `maxBlockNotional` | notional traded inside one block | order reverts |
-| `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust (0 disables) | trade, allocation, withdrawal and `poke()` revert until the price is refreshed |
-| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
+| `maxMarkAgeSeconds` | age of the venue price the guard is allowed to trust; required, at most 60 seconds | trade, allocation, withdrawal and `poke()` revert until the price is refreshed; past three times this age anyone can freeze the vault with `freezeUnobservable()` |
+| `maxDrawdownBps` | NAV per share below its high-water mark, mark-to-market; required, at most 5000 (50%) | vault freezes: no more trades or deposits, withdrawals stay open; anyone can then `unwind()` the position in five steps and the vault ends `Closed` |
 | `volWindowSeconds` | memory of the realised-volatility estimate: how many seconds of marks one squared return is averaged over (0 disables the clause) | no violation of its own; sets how fast the estimate reacts and decays |
 | `stressHorizonSeconds` | the horizon the estimate is scaled to before the stress move is taken | no violation of its own |
 | `stressSigmasX10` | the move, in tenths of a standard deviation over the horizon, an exposure-adding order must survive without breaching `maxDrawdownBps` (30 = 3 sigma) | order reverts with `StressBreach`; reducing orders are exempt; nothing freezes |
 
-Ten of the eleven terms reject one order and stop (the three volatility fields are one check); only the drawdown term changes the vault's state, and only through a mark. The guard's inputs are the adapter's order preview, the venue mark (price and its timestamp), the vault's share supply and cash, and the variance the guard itself has accumulated from those marks. No external volatility oracle is involved.
+Nine of the eleven terms reject one order and stop (the three volatility fields are one check). Two change the vault's state: the drawdown term through a mark, and the mark-age term when no mark arrives for three times its length. `configure()` refuses a mandate that leaves either at zero or past its range, so every vault can freeze. The guard's inputs are the adapter's order preview, the venue mark (price and its timestamp), the vault's share supply and cash, and the variance the guard itself has accumulated from those marks. No external volatility oracle is involved.
 
 Suggested ranges for the volatility clause, with the reasoning. `volWindowSeconds`: at least a few dozen marks long, so one print does not dominate, and no longer than the regime you want to react to; Chainlink's realised-volatility feeds publish 24-hour, 7-day and 30-day windows sampled every 10 minutes, and the demo uses 60 to 300 seconds only because its marks arrive every second. `stressHorizonSeconds`: the time it takes to get out, which for a frozen vault is five `unwind()` blocks plus however long nobody calls them; 60 seconds to a day. `stressSigmasX10`: 20 to 40, two to four standard deviations, with 30 as the default; exchange portfolio-margin systems also stress against fixed scenario moves, but the exact ranges they use have not been verified here and are not quoted. Volatility-targeted position sizing is known to cut the left tail of returns (Man Group, "The Impact of Volatility Targeting"), which is the effect the clause borrows.
 
@@ -364,6 +368,15 @@ From the 2026-09-23 progress review (the reviewers asked what the terms and thei
 
 13. Term coverage. Per-adapter instrument, direction and concentration whitelist; a bound on how far the venue mark may deviate from a reference price. `FeeTerms` exists as of 2026-10-04 but only as declared metadata on `MandateRegistry` — `MandateVault` has no fee-deduction mechanism to enforce it against. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
 
+From demo to real use (2026-10-05). Today the live demo signs for its visitors with six demo keys, the asset is a mock USDC, the venue is the deterministic MockVenue and the four agents are the ones the deploy script creates. In order:
+
+14. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
+15. Agent onboarding. An outside operator deploys a vault, sets and locks its limits and registers it in `MandateRegistry` from a page instead of the deploy script. Whether onboarding needs the guard owner's approval (as `configure()`, `lockTerms()` and `registerAgent()` do today) or is permissionless with a guard per operator is the open design question.
+16. A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's index price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
+17. Mainnet with real USDC, only after item 12's external audit.
+
+The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is planned).
+
 ## Stack
 
 Solidity 0.8.37 (EVM `prague`) · Hardhat 3 (EDR) · Foundry (invariant/fuzz) · OpenZeppelin 5.4 · ethers 6 · Node 22+ · dependency-free HTML/JS frontend · Monad testnet.
@@ -427,20 +440,24 @@ How the server keeps itself safe on a public URL:
 
 ### Recorded run on Monad testnet
 
-The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one; a restarted server finds that newer book on chain and stays on it. These addresses and transactions stay on chain either way.
+The book below was deployed to Monad testnet (chain 10143) by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684` and is the one the hosted demo is currently running, confirmed live on 2026-10-05 after the boot-recovery fix (`web/live-recover.mjs`) landed. It supersedes an earlier book from 2026-10-04: that one does not appear anywhere in this table because several of the hosted demo's own restarts redeployed over it before the fix shipped, each time the old process came back up on a stale committed file, found its vaults frozen, and paid for a fresh book — the exact waste `live-recover.mjs` exists to stop. From here on a restart finds this book on chain by walking the owner's own transaction history, rather than trusting a committed file, so it should not need to move again.
 
 | Contract | Address |
 | --- | --- |
-| MockUSDC | [`0x276A14be2b5D62580A58c74A29D348CF509AA4f6`](https://testnet.monadscan.com/address/0x276A14be2b5D62580A58c74A29D348CF509AA4f6) |
-| MandateRiskGuard | [`0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5`](https://testnet.monadscan.com/address/0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5) |
-| DeterministicMockVenue | [`0xC23e3fE7F931207233a804765c024DEf9C1F7BA4`](https://testnet.monadscan.com/address/0xC23e3fE7F931207233a804765c024DEf9C1F7BA4) |
-| MockVenueAdapter | [`0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354`](https://testnet.monadscan.com/address/0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354) |
-| MandateVault · Steady Basis | [`0x0309A8c6C9D416251D2786042857DAba9AE64388`](https://testnet.monadscan.com/address/0x0309A8c6C9D416251D2786042857DAba9AE64388) |
-| MandateVault · Range Carry | [`0xEAF037275B74f0536c38387130Fe4b758e395341`](https://testnet.monadscan.com/address/0xEAF037275B74f0536c38387130Fe4b758e395341) |
-| MandateVault · Momentum Vector | [`0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318`](https://testnet.monadscan.com/address/0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318) |
-| MandateVault · Tight Mandate | [`0x3de51B731E5F145B44a0d5D5F684459ff120505c`](https://testnet.monadscan.com/address/0x3de51B731E5F145B44a0d5D5F684459ff120505c) |
+| MockUSDC | [`0xB2d24425cB5CE34C95De396976E63Cf08Fa3B28F`](https://testnet.monadscan.com/address/0xB2d24425cB5CE34C95De396976E63Cf08Fa3B28F) |
+| MandateRiskGuard | [`0x3D073Eee90845737836567796d6941F232018c89`](https://testnet.monadscan.com/address/0x3D073Eee90845737836567796d6941F232018c89) |
+| DeterministicMockVenue | [`0x2Ea1A5ed585667af49E0E297FB49Bd4Cb22fA171`](https://testnet.monadscan.com/address/0x2Ea1A5ed585667af49E0E297FB49Bd4Cb22fA171) |
+| MockVenueAdapter | [`0x42031CB72319C3a740949063235e3C21642bfe1b`](https://testnet.monadscan.com/address/0x42031CB72319C3a740949063235e3C21642bfe1b) |
+| MandateVault · Steady Basis | [`0x473828276f958ea075E7eC37D60847ab882e0a31`](https://testnet.monadscan.com/address/0x473828276f958ea075E7eC37D60847ab882e0a31) |
+| MandateVault · Range Carry | [`0xfe2D4aBA3B8fb31297aa183b62e76461B2556C55`](https://testnet.monadscan.com/address/0xfe2D4aBA3B8fb31297aa183b62e76461B2556C55) |
+| MandateVault · Momentum Vector | [`0xaF1a39ba150C837699d2c7348803fD215cC48a17`](https://testnet.monadscan.com/address/0xaF1a39ba150C837699d2c7348803fD215cC48a17) |
+| MandateVault · Tight Mandate | [`0xEd159620f3BaC63dDb21cbeeb9BD71b4d1dAE95F`](https://testnet.monadscan.com/address/0xEd159620f3BaC63dDb21cbeeb9BD71b4d1dAE95F) |
+| BatchAllocator | [`0xF5C0e1200844f624728412EE77d3bcc0F3C5f89C`](https://testnet.monadscan.com/address/0xF5C0e1200844f624728412EE77d3bcc0F3C5f89C) |
+| MandateRegistry | [`0x0873eCcf457195811a7DFD9E7380D5b65E78626f`](https://testnet.monadscan.com/address/0x0873eCcf457195811a7DFD9E7380D5b65E78626f) |
 
-One pass through the demo against that book, every step sent through the page's `/rpc` proxy and signed by the server's demo keys:
+The walkthrough below predates this table: it was recorded against the 2026-10-04 predecessor book, before that book was replaced by the restarts described above. The addresses it names are no longer live, but the mechanisms it exercised (order limits, price-shock freeze, frozen-vault rejection, `unwind()`) are the same contract code running in the book above, so the run is kept as evidence of behavior rather than of these specific addresses.
+
+One pass through the demo against that earlier book, every step sent through the page's `/rpc` proxy and signed by the server's demo keys:
 
 | Step | What the chain did | Transaction |
 | --- | --- | --- |

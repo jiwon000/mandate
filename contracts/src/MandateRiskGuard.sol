@@ -28,6 +28,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice A window without a horizon or a sigma multiple would be a stress term
     ///         that never bites; refused at configure() so nobody reads it as one.
     error InvalidStressTerms();
+    /// @notice Every mandate carries a loss cap and a mark age, each inside this
+    ///         version's range. A vault with no cap would never freeze, and a cap is
+    ///         only as tight as the age of the mark it is checked against.
+    error InvalidLossTerms();
+    /// @notice The vault's mark is not yet old enough to call it unobservable.
+    error StillObservable(uint256 markedAt, uint256 unobservableAfter);
+    error NothingToProtect();
     /// @notice A k-sigma move over the stress horizon, applied to the exposure the order
     ///         would leave, would take the vault past `maxDrawdownBps`.
     error StressBreach(uint256 sigmaBps, uint256 moveBps, uint256 stressedDrawdownBps);
@@ -35,11 +42,27 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
 
+    /// @notice Upper bound on `maxDrawdownBps` in this guard version. Past half the
+    ///         capital a cap no longer reads as a loss bound.
+    uint16 public constant MAX_DRAWDOWN_BPS_CAP = 5_000;
+    /// @notice Upper bound on `maxMarkAgeSeconds` in this guard version.
+    uint32 public constant MAX_MARK_AGE_CAP = 60;
+    /// @notice A vault whose mark is older than this many mark ages can be frozen by
+    ///         anyone. One late update is noise; three in a row means no feed.
+    uint256 public constant UNOBSERVABLE_MARK_AGES = 3;
+
+    uint8 private constant REASON_DRAWDOWN = 1;
+    uint8 private constant REASON_UNOBSERVABLE = 2;
+
     struct BlockUsage {
         uint64 blockNumber;
         uint192 notional;
     }
 
+    struct FreezeRecord {
+        uint8 reason;
+        uint64 frozenAt;
+    }
     struct MarkState {
         uint128 highWaterNavPerShare;
     }
@@ -68,12 +91,14 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => uint256) public lastTradeBlock;
     mapping(address => MarkState) public markOf;
     mapping(address => VolState) public volOf;
+    mapping(address => FreezeRecord) private freezeRecordOf;
 
     event LimitsConfigured(address indexed vault);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
     event TermsLocked(address indexed vault, bytes32 termsHash);
     event RiskConsumed(address indexed vault, bytes32 indexed orderHash, uint256 notional);
     event Marked(address indexed vault, uint256 navPerShare, uint256 highWaterNavPerShare, uint256 drawdownBps);
+    event Unobservable(address indexed vault, address indexed caller, uint256 markedAt, uint256 bounty);
     event DrawdownBreach(
         address indexed vault,
         address indexed caller,
@@ -90,6 +115,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             limits.volWindowSeconds != 0 &&
             (limits.stressHorizonSeconds == 0 || limits.stressSigmasX10 == 0)
         ) revert InvalidStressTerms();
+        if (
+            limits.maxDrawdownBps == 0 || limits.maxDrawdownBps > MAX_DRAWDOWN_BPS_CAP ||
+            limits.maxMarkAgeSeconds == 0 || limits.maxMarkAgeSeconds > MAX_MARK_AGE_CAP
+        ) revert InvalidLossTerms();
         limitsOf[vault] = limits;
         configured[vault] = true;
         // Seed the high-water mark at par. Shares are minted 1:1 against the first
@@ -186,6 +215,33 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         return _markAndCheck(vault, adapter, msg.sender);
     }
 
+    /// @notice Freeze a vault nobody can check any more: its mark is older than
+    ///         UNOBSERVABLE_MARK_AGES times its `maxMarkAgeSeconds`. Permissionless and
+    ///         bountied like poke().
+    /// @dev poke() reverts with MarkTooOld once the feed stops, so without this a
+    ///      vault whose venue goes quiet stays Active with an open position and no
+    ///      check on it. If the guarantee cannot be verified, new risk stops. The
+    ///      mark is the vault's own markedAssets(), the one its shares are priced
+    ///      off, so a caller cannot point this at a different adapter. An unfunded
+    ///      vault has nothing to protect and is left alone, so a vault cannot be
+    ///      bricked between deployment and its first deposit.
+    function freezeUnobservable(address vault) external returns (uint256 bounty) {
+        if (!configured[vault]) revert LimitsNotConfigured();
+        if (IMandateVaultView(vault).totalSupply() == 0) revert NothingToProtect();
+        (, uint256 markedAt) = IMandateVaultView(vault).markedAssets();
+        uint256 after_ = markedAt + uint256(limitsOf[vault].maxMarkAgeSeconds) * UNOBSERVABLE_MARK_AGES;
+        if (block.timestamp <= after_) revert StillObservable(markedAt, after_);
+        freezeRecordOf[vault] = FreezeRecord(REASON_UNOBSERVABLE, uint64(block.timestamp));
+        bounty = IMandateVaultFreeze(vault).freeze(msg.sender);
+        emit Unobservable(vault, msg.sender, markedAt, bounty);
+    }
+
+    /// @inheritdoc IRiskGuard
+    function freezeOf(address vault) external view returns (uint8 reason, uint64 frozenAt) {
+        FreezeRecord memory record = freezeRecordOf[vault];
+        return (record.reason, record.frozenAt);
+    }
+
     /// @notice Feed the current mark into the vault's volatility estimate. Permissionless
     ///         and free of side effects on the vault: no mark, no freeze, no bounty.
     /// @dev poke() and every trade observe as well; this is for a keeper that wants the
@@ -274,6 +330,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             return false;
         }
 
+        freezeRecordOf[vault] = FreezeRecord(REASON_DRAWDOWN, uint64(block.timestamp));
         uint256 bounty = IMandateVaultFreeze(vault).freeze(beneficiary);
         emit DrawdownBreach(vault, beneficiary, navPerShare, drawdownBps, bounty);
         return true;

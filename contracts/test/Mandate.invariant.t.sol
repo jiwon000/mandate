@@ -41,7 +41,7 @@ contract MandateInvariants is Test {
                 maxLeverageX100: 500,
                 maxDrawdownBps: 2_000,
                 minBlocksBetweenTrades: 0,
-                maxMarkAgeSeconds: 7 days,
+                maxMarkAgeSeconds: 60,
                 maxOrderNotional: 50_000e18,
                 maxPositionNotional: 50_000e18,
                 maxTotalNotional: 50_000e18,

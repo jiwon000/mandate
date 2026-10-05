@@ -9,7 +9,7 @@ export const coder = AbiCoder.defaultAbiCoder();
 export const BASE_LIMITS = {
   maxLeverageX100: 300,
   maxDrawdownBps: 200,
-  maxMarkAgeSeconds: 3_600,
+  maxMarkAgeSeconds: 60,
   minBlocksBetweenTrades: 0,
   maxOrderNotional: parseUnits("2000", 18),
   maxPositionNotional: parseUnits("2000", 18),

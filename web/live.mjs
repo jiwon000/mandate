@@ -8,13 +8,16 @@
 // every few seconds, and only at that pace while somebody is looking.
 import fs from "node:fs";
 import path from "node:path";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Contract, ContractFactory, JsonRpcProvider, NonceManager, formatEther, formatUnits, parseEther } from "ethers";
 import { loadArtifact } from "../contracts/script/artifacts.mjs";
 import { CONTRACT_SOURCES, START_PRICE, deployDemoSystem } from "./mandates.mjs";
 import { demoWallets } from "./accounts.mjs";
-import { authorise, buildPolicy } from "./live-policy.mjs";
+import { authorise, authoriseTypedData, buildPolicy } from "./live-policy.mjs";
 import { RollingBudget, gasLimitFor, perKeyQueue, planTopUps } from "./live-gas.mjs";
+import { createBatchDesk, createReporterDesk, gasGate, refuse } from "./live-desks.mjs";
+import { intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
+import { DPReporter } from "../reporter/reporter.mjs";
 import {
   MULTICALL3, ReadCache, packCalls, packable, rpcFailure, rpcResult, sendPatiently, toRpcError, unpackAnswers
 } from "./rpc.mjs";
@@ -452,6 +455,8 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
       const cadence = (active ? config.activeSeconds : config.idleSeconds) * 1000;
       if (Date.now() - lastPushAt < cadence) return;
       await push();
+      // The mark just moved every vault's NAV: one sample for the reporter.
+      runJob("sample", async () => desk("reporter")?.sample());
       if (active && Date.now() - lastObserveAt >= config.observeSeconds * 1000) runJob("observe", () => observeAll("tick"));
       lastError = null;
     } catch (error) {
@@ -554,7 +559,11 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     try {
       const gasLimit = gasLimitFor(gas, config.gasHeadroomPercent, config.maxGasPerTx);
       const response = await submit(signer, () => signer.sendTransaction({ ...request, gasLimit }));
-      settle(signer, response).then(() => reads.clear(), () => reads.clear());
+      const landed = () => {
+        reads.clear();
+        desks.batch?.refresh();
+      };
+      settle(signer, response).then(landed, landed);
       // This account just spent: look at the balances soon rather than at the next regular check.
       lastFundCheckAt = Math.min(lastFundCheckAt, Date.now() - FUND_CHECK_MS + FUND_RECHECK_MS);
       touch();
@@ -569,11 +578,105 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     }
   }
 
+  // The page signs an AllocationIntent the way it would ask a wallet to. The
+  // allocator's key is here, so the request is checked like a transaction is:
+  // this deployment's batch allocator, the allocator's own intent, a vault of
+  // this book. No other typed data is ever signed.
+  async function signIntent(id, params) {
+    const [address, payload] = Array.isArray(params) ? params : [];
+    const verdict = authoriseTypedData(policy, address, payload);
+    if (!verdict.ok) return rpcFailure(id, -32000, `refused: ${verdict.reason}`);
+    if (resets > 0) return rpcFailure(id, -32000, "refused: the demo is being reset; try again in a few seconds");
+    if (!sendBucket.take()) return rpcFailure(id, -32005, "the demo is signing too many transactions; try again in a minute");
+    try {
+      const domain = intentDomain(deployment.chainId, deployment.batch.address);
+      const signature = await wallets.allocator.signTypedData(domain, intentTypes, verdict.intent);
+      touch();
+      log(`[sign] allocator intent: epoch ${verdict.intent.epoch}, vault ${verdict.intent.vault}`);
+      return rpcResult(id, signature);
+    } catch (error) {
+      return { jsonrpc: "2.0", id, error: toRpcError(error) };
+    }
+  }
+
+  // --- batcher and reporter ---------------------------------------------
+  // The server is the batcher and the reporter of a live book, and the deployer
+  // pays for both (web/live-desks.mjs). One desk of each per deployment: a reset
+  // drops the queued intents and the claim proofs with the contracts they were for.
+  const deskBudget = new RollingBudget(BigInt(Math.trunc(number("DESK_GAS_PER_HOUR", 10_000_000))), 3_600_000);
+  const settleBucket = new TokenBucket(number("SETTLE_PER_MINUTE", 3));
+  // The seed of a release's noise. Whoever knows it can take the noise back out.
+  const reporterSecret = env.DEMO_REPORTER_SECRET || randomBytes(32);
+  let desks = { of: null, batch: null, reporter: null };
+  function desk(name) {
+    if (desks.of !== deployment) desks = { of: deployment, ...openDesks() };
+    return desks[name];
+  }
+  // A settlement or a release in flight is a job like the oracle's: a reset
+  // waits for it to land, and none is sent once a reset has begun.
+  const ownerSends = (kind) => (makeCall) => {
+    if (resets > 0) throw refuse("the demo is being reset; try again in a few seconds", 409);
+    const run = send(signers.owner, makeCall).finally(() => reads.clear());
+    const tracked = run.then(() => {}, () => {}).finally(() => {
+      if (jobs.get(kind) === tracked) jobs.delete(kind);
+    });
+    jobs.set(kind, tracked);
+    touch();
+    return run;
+  };
+  function openDesks() {
+    const resetting = () => resets > 0;
+    const headroomPercent = config.gasHeadroomPercent;
+    const addresses = deployment.vaults.map((vault) => vault.address);
+    const abi = deployment.abis ?? loadAbis();
+    let batch = null;
+    let reporter = null;
+    if (deployment.batch?.address) {
+      const { address, genesis, epochDuration, settlementWindow } = deployment.batch;
+      const states = new Map(addresses.map((vault) => [vault.toLowerCase(), new Contract(vault, abi.vault, provider)]));
+      batch = createBatchDesk({
+        domain: intentDomain(deployment.chainId, address),
+        timing: { genesis: Number(genesis), epochDuration: Number(epochDuration), settlementWindow: Number(settlementWindow) },
+        vaults: addresses,
+        batch: new Contract(address, abi.batch, signers.owner),
+        vaultState: (vault) => states.get(vault.toLowerCase()).state(),
+        chainTime: async () => Number((await chainReading())[2].timestamp),
+        send: ownerSends("settle"),
+        admit: gasGate({
+          what: "a settlement", cap: number("SETTLE_MAX_GAS", 2_000_000), headroomPercent, budget: deskBudget, bucket: settleBucket
+        }),
+        limits: { maxPerEpoch: number("BATCH_MAX_PER_EPOCH", 8), maxPending: number("BATCH_MAX_PENDING", 32) },
+        describe, resetting, log
+      });
+    }
+    if (deployment.registry?.address) {
+      const { address, clipBound, epsilon } = deployment.registry;
+      const quotes = new Contract(deployment.addresses.guard, abi.guard, provider);
+      reporter = createReporterDesk({
+        registry: new Contract(address, abi.registry, signers.owner),
+        address,
+        reporter: new DPReporter({
+          reporterSecret, signer: wallets.owner, registryAddress: address, chainId: deployment.chainId, clipBound, epsilon
+        }),
+        vaults: addresses,
+        navOf: async (vault) => Number(formatUnits((await quotes.quote(vault, deployment.addresses.adapter))[0], 18)),
+        blockNumber: () => provider.getBlockNumber(),
+        send: ownerSends("release"),
+        admit: gasGate({ what: "a release", cap: config.maxGasPerTx, headroomPercent, budget: deskBudget }),
+        settings: { clipBound, epsilon },
+        limits: { minIntervalSeconds: number("REPORT_MIN_SECONDS", 120) },
+        describe, resetting, log
+      });
+    }
+    return { batch, reporter };
+  }
+
   async function handleOne(call) {
     const id = call?.id ?? null;
     const method = call?.method;
     if (method === "eth_accounts") return rpcResult(id, policy.accounts);
     if (method === "eth_sendTransaction") return sendOnBehalf(id, (call.params ?? [])[0]);
+    if (method === "eth_signTypedData_v4") return signIntent(id, call.params);
     if (!READ_METHODS.has(method)) return rpcFailure(id, -32601, `${method} is not available through the demo proxy`);
     return null;
   }
@@ -711,6 +814,13 @@ export async function startLive({ rpcUrl, mnemonic, adminToken = "", deploymentF
     },
     handleRpc,
     control,
+    // Null on a deployment recorded before it had a batch allocator or a registry.
+    get batch() {
+      return desk("batch");
+    },
+    get reporter() {
+      return desk("reporter");
+    },
     touch,
     async close() {
       clearInterval(timer);

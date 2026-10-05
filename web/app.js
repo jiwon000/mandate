@@ -899,7 +899,10 @@ $("#settleBatchButton").addEventListener("click", (event) =>
     const response = await fetch("/api/batch/settle", { method: "POST" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "settlement failed");
-    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)`);
+    // A live batcher leaves out an intent the chain would refuse rather than lose the whole epoch to it.
+    const dropped = result.dropped ?? [];
+    const leftOut = dropped.length ? `; ${dropped.length} left out (${dropped[0].reason})` : "";
+    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)${leftOut}`);
   })
 );
 

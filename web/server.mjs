@@ -9,7 +9,9 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startChain } from "./chain.mjs";
-import { startLive } from "./live.mjs";
+import { JsonRpcProvider } from "ethers";
+import { deploymentFileFor, startLive } from "./live.mjs";
+import { adoptLatestBook } from "./live-recover.mjs";
 import { toRpcError } from "./rpc.mjs";
 
 const port = Number(process.env.PORT || 3000);
@@ -31,6 +33,18 @@ const liveMode = process.argv.includes("--live") || process.env.MANDATE_LIVE ===
 let chain;
 if (liveMode) {
   console.log(`Connecting to ${process.env.MONAD_RPC_URL ?? "(MONAD_RPC_URL unset)"}…`);
+  // A restart on a host with a throwaway disk lands on the committed record;
+  // pick up the newest book on chain first so it does not redeploy again.
+  if (process.env.MONAD_RPC_URL && process.env.RECOVER_BOOK !== "0") {
+    const rpc = new JsonRpcProvider(process.env.MONAD_RPC_URL, undefined, { batchMaxCount: 1 });
+    const chainId = Number(await rpc.send("eth_chainId", []));
+    await adoptLatestBook({
+      request: ({ method, params }) => rpc.send(method, params),
+      file: process.env.DEPLOYMENT_FILE ?? deploymentFileFor(chainId),
+      log: (line) => console.log(line)
+    });
+    rpc.destroy();
+  }
   chain = await startLive({
     rpcUrl: process.env.MONAD_RPC_URL,
     mnemonic: process.env.DEMO_MNEMONIC,

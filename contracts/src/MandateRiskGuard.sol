@@ -387,7 +387,11 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     function freezeUnobservable(address vault) external returns (uint256 bounty) {
         if (!configured[vault]) revert LimitsNotConfigured();
         if (IMandateVaultView(vault).totalSupply() == 0) revert NothingToProtect();
-        (, uint256 markedAt) = IMandateVaultView(vault).markedAssets();
+        // A venue that cannot be read at all has no mark: that is the case this exists for.
+        uint256 markedAt;
+        try IMandateVaultView(vault).markedAssets() returns (uint256, uint256 at) {
+            markedAt = at;
+        } catch {}
         uint256 after_ = markedAt + uint256(limitsOf[vault].maxMarkAgeSeconds) * UNOBSERVABLE_MARK_AGES;
         if (block.timestamp <= after_) revert StillObservable(markedAt, after_);
         bounty = _freeze(vault, REASON_UNOBSERVABLE, msg.sender);

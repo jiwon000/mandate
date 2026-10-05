@@ -160,6 +160,10 @@ interface IRiskGuard {
     /// @notice Revert unless a mark taken at `markedAt` is still fresh enough to price against.
     function requireFreshMark(address vault, uint256 markedAt) external view;
 
+    /// @notice The day's opening NAV per share and the last NAV per share the guard
+    ///         marked, both 1e18-scaled; zero before the first mark.
+    function dayOf(address vault) external view returns (uint64 day, uint128 openNav, uint128 lastNav);
+
     /// @notice True once the vault's limits and adapter allowlist can no longer change.
     function termsLocked(address vault) external view returns (bool);
 

@@ -358,3 +358,39 @@ test("a vault whose feed stopped reaches exit: freeze, five unwinds, then withdr
   await (await f.vault.connect(f.allocator).withdraw(shares, allocator)).wait();
   assert.ok((await f.usdc.balanceOf(allocator)) - before > usd(990));
 });
+
+test("a vault whose feed stopped pays a cash-only exit before it is unwound", async (t) => {
+  const f = await fixture(t, { maxMarkAgeSeconds: 10 });
+  await run(f, f.order);
+  const allocator = await f.allocator.getAddress();
+  const shares = await f.vault.balanceOf(allocator);
+  // Active: the cash-only exit is not for a vault that can still be priced or frozen.
+  await assert.rejects(f.vault.connect(f.allocator).withdrawUnpriced(shares, allocator, 0),
+    revertsWith(f.vault, "NotFrozen"));
+
+  await advance(f, 31);
+  await (await f.guard.connect(f.keeper).freezeUnobservable(f.vaultAddress)).wait();
+  const supply = await f.vault.totalSupply();
+  const cash = await f.usdc.balanceOf(f.vaultAddress);
+  const [, , lastNav] = await f.guard.dayOf(f.vaultAddress);
+  const half = shares / 2n;
+  const cashSlice = (half * cash) / supply;
+  const atLastMark = (half * lastNav) / 10n ** 18n;
+  const expected = cashSlice < atLastMark ? cashSlice : atLastMark;
+
+  // A floor above what it pays is refused.
+  await assert.rejects(f.vault.connect(f.allocator).withdrawUnpriced(half, allocator, expected + 1n),
+    revertsWith(f.vault, "BelowMinimum"));
+  const before = await f.usdc.balanceOf(allocator);
+  await (await f.vault.connect(f.allocator).withdrawUnpriced(half, allocator, expected)).wait();
+  assert.equal((await f.usdc.balanceOf(allocator)) - before, expected);
+  assert.equal(await f.vault.balanceOf(allocator), shares - half);
+  // Whoever stays is never worse off per share in cash.
+  const left = await f.usdc.balanceOf(f.vaultAddress);
+  assert.ok(left * supply >= cash * (supply - half), "cash per remaining share did not fall");
+
+  // Once the venue marks again the full-price withdraw() is the way out.
+  await (await f.venue.setPrice(e18(2000))).wait();
+  await assert.rejects(f.vault.connect(f.allocator).withdrawUnpriced(1n, allocator, 0),
+    revertsWith(f.vault, "MarkIsFresh"));
+});

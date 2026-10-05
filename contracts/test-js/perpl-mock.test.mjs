@@ -241,3 +241,27 @@ test("the factory refuses a Perpl adapter that settles in another token", async 
   // Delisting never needs the check.
   await (await factory.listAdapter(wrong.target, false)).wait();
 });
+
+test("a venue that cannot be read at all can still be frozen and exited for cash", async (t) => {
+  const s = await setup(t);
+  await s.trade(0, "0.005", "60600");
+  await s.wait(s.exchange.setBroken(true));
+  await assert.rejects(s.adapter.markEquity(s.vault.target));
+  // No mark at all counts as the oldest mark there is.
+  await s.wait(s.guard.connect(s.keeper).freezeUnobservable(s.vault.target));
+  assert.equal(await s.vault.state(), 1n);
+
+  const shares = (await s.vault.balanceOf(s.allocator.address)) / 2n;
+  const supply = await s.vault.totalSupply();
+  const cash = await s.usdc.balanceOf(s.vault.target);
+  const [,, lastNav] = await s.guard.dayOf(s.vault.target);
+  const bySlice = (shares * cash) / supply;
+  const byMark = (shares * lastNav) / 10n ** 18n;
+  const expected = bySlice < byMark ? bySlice : byMark;
+  const before = await s.usdc.balanceOf(s.allocator.address);
+  await s.wait(s.vault.connect(s.allocator).withdrawUnpriced(shares, s.allocator.address, expected));
+  assert.equal((await s.usdc.balanceOf(s.allocator.address)) - before, expected);
+  // Those who stay keep at least the cash per share they had.
+  const cashAfter = await s.usdc.balanceOf(s.vault.target);
+  assert.ok(cashAfter * supply >= cash * (supply - shares));
+});

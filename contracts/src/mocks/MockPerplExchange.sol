@@ -55,6 +55,7 @@ contract MockPerplExchange {
     IERC20 public immutable collateral;
     address public immutable owner;
     bool public withdrawBlocked;
+    bool public broken;
     uint256 public nextAccountId = 1;
 
     mapping(uint256 => Perp) public perps;
@@ -90,6 +91,11 @@ contract MockPerplExchange {
     /// @notice Book funding against a position, as Perpl's premium PnL.
     function setPremium(uint256 perpId, uint256 accountId, int256 premiumCNS) external {
         positions[perpId][accountId].premiumCNS = premiumCNS;
+    }
+
+    /// @notice Make every view revert, as a paused or mid-upgrade proxy would.
+    function setBroken(bool broken_) external {
+        broken = broken_;
     }
 
     function setWithdrawBlocked(bool blocked) external {
@@ -213,6 +219,7 @@ contract MockPerplExchange {
     // ----------------------------------------------------------------- views
 
     function getAccountByAddr(address accountAddress) external view returns (IPerplExchange.AccountInfo memory a) {
+        if (broken) revert ContractNotOperational(0);
         a.accountId = accountOf[accountAddress];
         a.balanceCNS = balanceOf[a.accountId];
         a.accountAddr = accountAddress;
@@ -221,6 +228,7 @@ contract MockPerplExchange {
     function getPositionV2(uint256 perpId, uint256 accountId)
         external view returns (IPerplExchange.PositionInfo memory info, uint256 markPricePNS, bool markPriceValid)
     {
+        if (broken) revert ContractNotOperational(0);
         Position memory pos = positions[perpId][accountId];
         Perp memory p = perps[perpId];
         info.accountId = accountId;
@@ -234,6 +242,7 @@ contract MockPerplExchange {
     }
 
     function getPerpetualInfoV2(uint256 perpId) external view returns (IPerplExchange.PerpetualInfo memory info) {
+        if (broken) revert ContractNotOperational(0);
         Perp memory p = perps[perpId];
         info.priceDecimals = p.priceDecimals;
         info.lotDecimals = p.lotDecimals;

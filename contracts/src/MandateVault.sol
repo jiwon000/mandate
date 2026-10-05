@@ -27,6 +27,8 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     error UnwindCooldown();
     error TermsNotLocked();
     error ZeroAgent();
+    error MarkIsFresh();
+    error BelowMinimum(uint256 assets, uint256 minAssets);
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -80,6 +82,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
 
     event Allocated(address indexed allocator, uint256 assets, uint256 shares);
     event Withdrawn(address indexed allocator, uint256 assets, uint256 shares);
+    event WithdrawnUnpriced(address indexed allocator, uint256 assets, uint256 shares);
     event Executed(address indexed adapter, bytes32 indexed orderHash, int256 realizedPnl);
     event SharesTransferred(address indexed from, address indexed to, uint256 shares);
     event Frozen(address indexed beneficiary, uint256 bounty);
@@ -110,6 +113,17 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     /// @notice What the vault is worth: cash plus unrealised PnL on the open position.
     function markedAssets() public view returns (uint256 assets, uint256 markedAt) {
         (assets, markedAt) = venueAdapter.markEquity(address(this));
+    }
+
+    /// @dev markedAssets(), but a venue that cannot be read at all counts as a mark that
+    ///      never happened (0, 0) instead of reverting. A dead venue must not also close
+    ///      the freeze and the cash-only exit, which exist for exactly that case.
+    function _tryMarkedAssets() private view returns (uint256 assets, uint256 markedAt) {
+        try venueAdapter.markEquity(address(this)) returns (uint256 a, uint256 at) {
+            return (a, at);
+        } catch {
+            return (0, 0);
+        }
     }
 
     function allocate(uint256 assets, address receiver) external nonReentrant returns (uint256 shares) {
@@ -182,6 +196,47 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         totalSupply = supply - shares;
         asset.safeTransfer(receiver, assets);
         emit Withdrawn(msg.sender, assets, shares);
+    }
+
+    /// @notice Exit a frozen vault whose mark has stopped, for cash alone.
+    /// @dev withdraw() prices shares off a fresh mark, and a vault frozen because its
+    ///      venue went quiet has none; unwinding it may also need the venue back. Rather
+    ///      than hold allocators until it returns, this pays the shares' pro-rata slice
+    ///      of the vault's cash, capped at what they were worth at the guard's last
+    ///      mark, and burns them. The caller gives up their part of whatever is still
+    ///      at the venue to the allocators who stay, so this never moves value from
+    ///      the ones who stay to the one who leaves, except for any loss since the
+    ///      last mark that the cap cannot see (the cap is as of the last poke or
+    ///      trade). It is the exit of last resort: once the mark is fresh again, or
+    ///      the vault is Closed, withdraw() pays the full share. A frozen vault with
+    ///      nothing left at the venue closes on its first unwind() step, which is the
+    ///      better exit there.
+    function withdrawUnpriced(uint256 shares, address receiver, uint256 minAssets)
+        external nonReentrant returns (uint256 assets)
+    {
+        if (receiver == address(0)) revert InvalidReceiver();
+        if (shares == 0) revert ZeroShares();
+        if (balanceOf[msg.sender] < shares) revert InsufficientShares();
+        if (state != AgentState.Frozen) revert NotFrozen();
+        (, uint256 markedAt) = _tryMarkedAssets();
+        try riskGuard.requireFreshMark(address(this), markedAt) {
+            revert MarkIsFresh();
+        } catch {}
+
+        uint256 supply = totalSupply;
+        assets = Math.mulDiv(shares, totalAssets(), supply);
+        (,, uint128 lastNav) = riskGuard.dayOf(address(this));
+        if (lastNav != 0) {
+            uint256 atLastMark = Math.mulDiv(shares, lastNav, 1e18);
+            if (atLastMark < assets) assets = atLastMark;
+        }
+        if (assets == 0) revert ZeroAmount();
+        if (assets < minAssets) revert BelowMinimum(assets, minAssets);
+
+        balanceOf[msg.sender] -= shares;
+        totalSupply = supply - shares;
+        asset.safeTransfer(receiver, assets);
+        emit WithdrawnUnpriced(msg.sender, assets, shares);
     }
 
     /// @notice Move only the caller's shares; no approval or agent spending authority.
@@ -265,7 +320,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (state != AgentState.Active || supply == 0 || lastFeeAccrual == 0) return (0, 0, 0, 0);
         FeeTerms memory fee = riskGuard.feesOf(address(this));
         if (fee.managementFeeBps == 0 && fee.performanceFeeBps == 0) return (0, 0, 0, 0);
-        (uint256 equity, uint256 markedAt) = markedAssets();
+        (uint256 equity, uint256 markedAt) = _tryMarkedAssets();
         if (equity == 0) return (0, 0, 0, 0);
         // Fees are charged on a mark the guard would trade against, never on a stale one.
         try riskGuard.requireFreshMark(address(this), markedAt) {} catch {

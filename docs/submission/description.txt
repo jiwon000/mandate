@@ -49,6 +49,7 @@ We would rather say this here than have a judge find it.
 - Differential privacy covers public data only. The reporter clips per-tick NAV returns, adds Laplace noise and publishes a mean, a Sharpe ratio and a maximum drawdown. The inputs are public marks, so today this demonstrates the mechanism and the on-chain budget, not protection of anything private. The noise is calibrated to the clipped mean, so the stated epsilon is exact for the mean only. Private-demand aggregates and a private intent API are not built. Intents in a batch are visible in settlement calldata.
 - The demo's batcher and reporter are our own server. Fee terms are recorded in the registry and nothing deducts them yet. There is no baseline agent bot. No external audit has been completed.
 - The guard limits behaviour. It does not make a strategy good and it does not prevent losses inside the mandate. After a freeze the realised loss can exceed the drawdown term by slippage and gaps.
+- Withdrawals wait for a fresh price. Shares are never priced off an old mark, so a vault whose price feed stops also pauses withdrawals until the next mark, frozen or not. The contracts now let anyone freeze such a vault (freezeUnobservable, not yet on the hosted demo). Letting holders take their share of the cash while the price is missing is designed, not built.
 
 WHY IT IS USEFUL
 

@@ -127,6 +127,8 @@ Privacy 화면 연결 [구현 기준 2026-10-04]: `chain.mjs`가 배포 시 4개
 
 실사용을 위해 남은 것 [2026-10-05 정리]: 지금 데모는 서버가 데모 계정 6개로 대신 서명하고, 자산은 mock USDC, 거래소는 mock venue이며, 에이전트는 배포 스크립트가 만든 4개뿐입니다. 남은 순서는 (1) 지갑 연결: 사용자가 자기 키로 서명하고 테스트용 mock USDC를 받아 예치·배분·인출, (2) 에이전트 온보딩: 외부 운영자가 볼트를 만들고 한도를 잠가 레지스트리에 등록하는 화면과 절차(운영자 승인 방식인지 무허가인지 결정 포함), (3) 실제 거래소 어댑터: mock venue 대신 Monad의 perp 거래소 Perpl 테스트넷에 주문하고 Perpl 인덱스 가격으로 평가, (4) 외부 감사 뒤 실제 USDC로 메인넷 배포입니다. 영문 Roadmap 14~17번이 같은 내용입니다.
 
+동결 조건과 동결 이후 처리 [2026-10-05 설계안, 미구현]: 무엇이 동결을 일으키는지, 동결 기준값을 누가 정하는지, 동결 뒤 정리·인출·기록·복귀를 어떻게 하는지, 조건 종류를 어떻게 늘리는지를 [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)에 정리했습니다. 팀 결정 3가지가 남아 있습니다.
+
 자세한 인터페이스와 상태 전이는 [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md)와 [BatchAllocator 마일스톤 문서](docs/batch-allocator-milestone2.md)를 참고하세요.
 
 ---
@@ -372,6 +374,8 @@ From demo to real use (2026-10-05). Today the live demo signs for its visitors w
 15. Agent onboarding. An outside operator deploys a vault, sets and locks its limits and registers it in `MandateRegistry` from a page instead of the deploy script. Whether onboarding needs the guard owner's approval (as `configure()`, `lockTerms()` and `registerAgent()` do today) or is permissionless with a guard per operator is the open design question.
 16. A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's index price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
 17. Mainnet with real USDC, only after item 12's external audit.
+
+The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (proposed 2026-10-05, not implemented).
 
 ## Stack
 

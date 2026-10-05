@@ -128,7 +128,7 @@ test("a mark older than the limit is refused instead of trusted", async (t) => {
 });
 
 test("leverage is measured against mark equity, not the idle cash balance", async (t) => {
-  const f = await fixture(t, { maxLeverageX100: 120, maxDrawdownBps: 0 });
+  const f = await fixture(t, { maxLeverageX100: 120, maxDrawdownBps: 5_000 });
   await (await f.vault.connect(f.agent).execute(f.adapterAddress, f.order)).wait();
 
   // Equity falls to $700 while the USDC balance still reads $1000.

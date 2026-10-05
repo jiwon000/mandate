@@ -47,6 +47,17 @@ contract MandateRegistry is Ownable, EIP712 {
         uint256 registeredAt;
     }
 
+    /// @notice What became of a registered mandate, as read from the chain.
+    /// @dev `state` and `reason` mirror MandateVault.AgentState and
+    ///      IRiskGuard.freezeOf(). `frozenAt` is the guard's own timestamp for the
+    ///      freeze; `recordedAt` is when the last state change was recorded here.
+    struct Outcome {
+        uint8 state;
+        uint8 reason;
+        uint64 frozenAt;
+        uint64 recordedAt;
+    }
+
     struct Release {
         uint256 pinnedBlock;
         bytes32 statsDigest;
@@ -73,12 +84,20 @@ contract MandateRegistry is Ownable, EIP712 {
     error EpsilonAccountingMismatch();
     error EpsilonCapExceeded();
     error ZeroReporter();
+    error NotRegistered();
+    error NothingToRecord();
+    error OnlyVaultAgent();
+    error AlreadyLinked();
 
     address public reporter;
     /// @notice Hard ceiling on cumulative epsilon ever released. 0 means no cap.
     uint256 public epsilonCap;
 
     mapping(address => Agent) public agentOf;
+    mapping(address => Outcome) public outcomeOf;
+    /// @notice Registered vaults an agent has linked to its own address, in order.
+    mapping(address => address[]) private vaultsByAgent;
+    mapping(address => bool) public linked;
     mapping(uint256 => Release) public releaseOf;
     uint256 public lastEpoch;
     uint256 public lastPinnedBlock;
@@ -94,6 +113,8 @@ contract MandateRegistry is Ownable, EIP712 {
         bytes32 termsHash,
         bytes32 modelHash
     );
+    event OutcomeRecorded(address indexed vault, uint8 state, uint8 reason, uint64 frozenAt);
+    event VaultLinked(address indexed agent, address indexed vault);
     event ReporterUpdated(address indexed reporter);
     event EpsilonCapUpdated(uint256 cap);
     event LeaderboardPosted(
@@ -208,6 +229,45 @@ contract MandateRegistry is Ownable, EIP712 {
         cumulativeEpsilonE6 = cumulativeEpsilonE6_;
         hasReleased = true;
         emit LeaderboardPosted(epoch, pinnedBlock, statsDigest, epsilonPerfE6, epsilonIntentE6, cumulativeEpsilonE6_);
+    }
+
+    /// @notice Record that a registered vault has frozen or closed. Permissionless.
+    /// @dev Reads the vault's state and the guard's freeze record directly, so no
+    ///      reporter is trusted for a fact the chain already holds. A vault moves
+    ///      Active -> Frozen -> Closed only, so each call can only move the record
+    ///      forward; calling twice for the same state reverts.
+    function recordOutcome(address vault) external {
+        Agent storage entry = agentOf[vault];
+        if (entry.registeredAt == 0) revert NotRegistered();
+        uint8 state = IMandateVaultView(vault).state();
+        Outcome storage outcome = outcomeOf[vault];
+        if (state == 0 || state <= outcome.state) revert NothingToRecord();
+        (uint8 reason, uint64 frozenAt) = IRiskGuard(entry.guard).freezeOf(vault);
+        outcome.state = state;
+        outcome.reason = reason;
+        outcome.frozenAt = frozenAt;
+        outcome.recordedAt = uint64(block.timestamp);
+        emit OutcomeRecorded(vault, state, reason, frozenAt);
+    }
+
+    /// @notice The vault's own agent lists a registered vault under its address, so
+    ///         an allocator sees every mandate that agent has run and how each ended.
+    /// @dev Only the agent may link. Registration is done by the guard owner, and
+    ///      indexing on vault.agent() alone would let anyone deploy a vault naming
+    ///      someone else's address and pin a bad outcome on them. An agent can still
+    ///      start over from a new address; the list shows what one address has
+    ///      accepted, not who is behind it.
+    function linkVault(address vault) external {
+        if (agentOf[vault].registeredAt == 0) revert NotRegistered();
+        if (IMandateVaultView(vault).agent() != msg.sender) revert OnlyVaultAgent();
+        if (linked[vault]) revert AlreadyLinked();
+        linked[vault] = true;
+        vaultsByAgent[msg.sender].push(vault);
+        emit VaultLinked(msg.sender, vault);
+    }
+
+    function vaultsOf(address agent) external view returns (address[] memory) {
+        return vaultsByAgent[agent];
     }
 
     /// @notice EIP-712 digest a reporter signs over to authorize postLeaderboard().

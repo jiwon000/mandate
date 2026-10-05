@@ -54,7 +54,7 @@ test("allocation, adapter execution, RiskGuard revert, and withdrawal", async (t
   await (await guard.configure(vaultAddress, {
     maxLeverageX100: 100,
     maxDrawdownBps: 2_000,
-    maxMarkAgeSeconds: 3_600,
+    maxMarkAgeSeconds: 60,
     minBlocksBetweenTrades: 0,
     maxOrderNotional: parseUnits("500", 18),
     maxPositionNotional: parseUnits("800", 18),

@@ -33,7 +33,7 @@ Monad Metropolis Track 1인 Onchain Finance & Trading을 대상으로 제작되�
 - EIP-712 intent 기반 에폭 배치 예치, Merkle claim, 취소와 환불 — `web/`의 Batch 화면에서 서명·제출·정산·클레임까지 end-to-end로 연결됨
 - `reporter/`: 공개 정산 금액과 거래 수익률(`[-c,c]` clip)의 mean/Sharpe/max drawdown을 순수 ε-DP(Laplace 메커니즘, scale = `2·clipBound/(N·ε)`)로 집계. 노이즈는 `HMAC_SHA256(reporterSecret, domainSeparator||epochId||pinnedBlock||statsVersion)` 시드로 결정론적으로 생성되고, `EpsilonLedger`가 `MandateRegistry`와 동일한 누적 ε 산식·상한을 먼저 체크해서 온체인에서 거부될 release는 애초에 서명하지 않음. Privacy Simulator(`reporter/simulator.mjs`)는 같은 scale 공식을 쓰되 ledger·secret에 전혀 접근하지 않는 별도 모듈 — 슬라이더가 실제 ε 예산을 쓸 수 없는 구조
 
-로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 61개(Hardhat/node:test, MandateRegistry 12개·DP Reporter 14개 포함)와 데모 서버 테스트 43개(`npm run test:web`, 서명 allowlist·gas 한도·batcher/reporter 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
+로컬 테스트는 in-memory EVM에 전체 경로를 배포합니다. 현재 컴파일과 계약 테스트 61개(Hardhat/node:test, MandateRegistry 12개·DP Reporter 14개 포함)와 데모 서버 테스트 46개(`npm run test:web`, 서명 allowlist·gas 한도·batcher/reporter·부팅 시 최신 장부 복구 포함)가 통과합니다. 여기에 Foundry 기반 stateful invariant 테스트(Vault/RiskGuard 핵심 불변식 9개 + Registry의 ε 장부 불변식 4개, 각 128 runs × depth 32)와 malicious-token reentrancy 테스트 3개가 추가되어 `npm run test:contracts`가 다루지 않는 임의 호출 순서·악의적 asset 시나리오를 검증합니다 (`npm run test:invariant`).
 
 ## 동작 흐름
 
@@ -166,7 +166,7 @@ The first executable contract milestone is complete:
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (61 cases). `npm run test:web` covers the demo server (43 cases): the signing allowlist, the gas bounds, and the live batcher and reporter. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (61 cases). `npm run test:web` covers the demo server (46 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 
@@ -427,7 +427,7 @@ How the server keeps itself safe on a public URL:
 
 ### Recorded run on Monad testnet
 
-The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one. These addresses and transactions stay on chain either way.
+The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one; a restarted server finds that newer book on chain and stays on it. These addresses and transactions stay on chain either way.
 
 | Contract | Address |
 | --- | --- |

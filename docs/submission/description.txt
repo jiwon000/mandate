@@ -36,10 +36,10 @@ The live demo was also built around how Monad testnet behaves. Gas is billed on 
 
 WHAT IS LIVE TODAY
 
-- Contracts on Monad testnet (chain 10143): MandateRiskGuard, four MandateVaults with different mandates, the venue adapter, a mock venue and a mock USDC. Addresses and a recorded run with transaction links are in the README. BatchAllocator and MandateRegistry are implemented, tested and running in the local build. They join the testnet book at its next redeploy, and the hosted link shows the Batch and Privacy screens from then on.
+- Contracts on Monad testnet (chain 10143): MandateRiskGuard, four MandateVaults with different mandates, the venue adapter, a mock venue and a mock USDC. Addresses and a recorded run with transaction links are in the README. BatchAllocator and MandateRegistry are implemented, tested and running in the local build. The hosted server's own redeploys already put them on testnet, and the hosted link shows the Batch and Privacy screens once its current build is deployed.
 - A six-screen web app: Market, Agent, Allocate, Batch, Privacy, Live Risk. Every number is a contract read and every button is a real transaction. A visitor needs no wallet and no faucet: the server signs with testnet-only demo keys behind a per-role allowlist, a gas cap and rate limits.
 - A recorded pass on testnet: a deposit, an order inside the mandate, an over-limit order refused with OrderNotionalExceeded, a 10% price shock, poke() freezing three of the four vaults, the frozen agent refused with AgentNotActive, and the first unwind() step.
-- 61 contract tests, 43 server tests and Foundry invariant and reentrancy suites, run in CI. An internal security review (static analysis plus a second pass) found and fixed one real bug in registry registration.
+- 61 contract tests, 46 server tests and Foundry invariant and reentrancy suites, run in CI. An internal security review (static analysis plus a second pass) found and fixed one real bug in registry registration.
 
 WHAT IS NOT BUILT YET
 

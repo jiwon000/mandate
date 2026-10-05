@@ -14,7 +14,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`을 이 장부로 갱신했습니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
-- 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). Go-to-market과 접근 안내 칸은 저장소 문안과 아직 다릅니다.
+- 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). 같은 날 Go-to-market과 접근 안내 칸도 저장소 문안으로 다시 저장해 일치를 확인했습니다.
 - 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
 
 ## 이 폴더의 파일

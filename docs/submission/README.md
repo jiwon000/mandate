@@ -15,6 +15,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 기준 `949d258` 빌드를 서빙합니다. Batch·Privacy 화면이 떠 있고, 체인에서 찾은 최신 장부(BatchAllocator·MandateRegistry 포함, genesis 2026-10-05 07:08:55 UTC)로 부팅했습니다. README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`도 이 장부로 갱신했습니다. 남은 일 1~3번은 끝났습니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
 - 제출 폼 Description 문구를 저장소 `description.txt`와 다시 맞추는 일(남은 일 3-1)은 아직 남아 있습니다.
+- 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
 
 ## 이 폴더의 파일
 
@@ -73,6 +74,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~1~~ | ~~브랜치 `docs/roadmap-feedback-0923`의 main 대상 PR 리뷰와 머지~~ | @jiwon000 | 완료 (PR #9 머지됨) |
 | ~~2~~ | ~~Render에 새 커밋 배포~~ | @jiwon000 | 완료 (`949d258` 배포, `ORACLE_IDLE_SECONDS=3600` 설정) |
 | ~~3~~ | ~~README 주소 표에 BatchAllocator·MandateRegistry 행 추가, `10143.json` 갱신~~ | @jiwon000 | 완료 (2026-10-05 07:08:55 UTC 장부로 갱신) |
+| 2-1 | 브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지. PR #9 머지 뒤의 커밋들입니다 | @jiwon000 | 대기 |
 | 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 10-05 오후에 테스트 수(43 → 46)와 Batch·Privacy 문장을 고쳤고, 폼에는 그 전 문안이 저장돼 있음 | 팀 | 대기 |
 | 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
@@ -122,6 +124,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 8. Sponsor bounty를 추가할지. 주제가 가까운 것은 Perpl "Best Analytics / Risk Tool", Perpl "Best use of Perpl's API", Monad Foundation "Best Community Team Project"입니다. 각 bounty의 요건은 아직 확인하지 않았습니다.
 9. Go-to-market 초안의 가정을 받아들일지. 첫 단계는 Monad의 실제 무기한선물 거래소 한 곳의 어댑터, 초기 볼트는 팀이 직접 운영, 수익 모델은 운용자 성과보수의 일부이고 미확정이라고 적었습니다.
 10. 데모 영상에 Batch·Privacy 장면을 넣을지. 본편이 이미 2분 50초라 넣으려면 다른 장면을 줄여야 합니다 (`demo-video-script.md`의 선택 장면).
+11. 공개 데모를 새 컨트랙트(동결 규칙 구현)로 재배포할지. 재배포하지 않으면 동결 규칙은 코드와 문서에만 있고 공개 데모는 기존 동작 그대로입니다. 재배포하면 배포 비용(약 1.8 MON 추정)이 들고, 접속자가 없을 때 오라클이 `ORACLE_IDLE_SECONDS=3600`마다만 가격을 갱신하므로 마지막 접속 뒤 몇 분이면 누구나 데모 볼트를 `freezeUnobservable()`로 동결할 수 있습니다. 이 경우 (a) 접속자가 없어도 가장 짧은 유효시간(4초 mandate 기준 12초) 안에 갱신해 MON을 더 쓰거나, (b) 동결을 받아들이고 기존 자동 재배포로 복구되게 둡니다. 영상 녹화(남은 일 4) 전에 정해야 화면이 맞습니다.
 
 ## 글과 영상에서 지킬 것
 

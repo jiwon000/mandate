@@ -12,7 +12,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 ## 요약
 
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
-- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`을 이 장부로 갱신했습니다.
+- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). 같은 날 09:47 UTC에 최신 커밋 빌드 뒤 다시 `Reset demo`로 현재 컨트랙트 장부를 배포했고, 가드 런타임 코드가 로컬 새 컴파일과 일치함을 확인했습니다. README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 09:47 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
 - 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). 같은 날 Go-to-market과 접근 안내 칸도 저장소 문안으로 다시 저장해 일치를 확인했습니다.
 - 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
@@ -88,7 +88,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 - 호스트는 Render 웹 서비스이고, 브랜치 `docs/roadmap-feedback-0923`에서 빌드해 라이브 모드(chainId 10143)로 돕니다.
 - 현재 빌드는 `949d258`입니다 (2026-10-05 배포). `web/live-recover.mjs`가 부팅할 때 체인에서 가장 최근 완성 장부를 찾아 쓰므로, 더 이상 커밋된 `10143.json`이나 재배포 가능성에 의존하지 않습니다.
-- 공개 데모에 Batch·Privacy 화면이 보입니다. 지금 장부는 2026-10-05 08:08 UTC에 관리자 `Reset demo`로 배포한 동결 규칙 컨트랙트 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 그 전 장부(07:08:55 UTC, 옛 컨트랙트)는 체인에 남아 있습니다. 이 장부 뒤에 들어간 컨트랙트 수정 두 건(`poke()`·`observe()`가 볼트 자신의 어댑터만 받음, 청산할 것이 없는 `unwind()`는 보상 없음)은 다음 리셋 때 반영됩니다. 데모 흐름에는 영향이 없습니다.
+- 공개 데모에 Batch·Privacy 화면이 보입니다. 지금 장부는 2026-10-05 09:47 UTC에 관리자 `Reset demo`로 배포한 현재 컨트랙트 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 동결 규칙 뒤에 들어간 컨트랙트 수정 두 건(`poke()`·`observe()`가 볼트 자신의 어댑터만 받음, 청산할 것이 없는 `unwind()`는 보상 없음)도 이 장부에 들어 있습니다. 그 전 장부들(08:08·09:08 UTC 등)은 체인에 남아 있습니다.
 - Render의 파일시스템은 재시작과 재배포 때 초기화되지만, `949d258` 이후 빌드는 그때마다 배포 계정의 트랜잭션을 거꾸로 훑어 가장 최근 완성 장부로 부팅하므로(읽기만 하고 MON은 들지 않음, 테스트넷에서 약 40초) 더 이상 재시작마다 재배포가 일어나지 않습니다.
 - 대기 중인 의향, claim 증명, 리포터 표본은 메모리에만 있습니다. 재시작하면 사라집니다.
 - 공개 데모의 페이지나 `/api`를 열면 오라클이 60초 동안 5초 간격으로 가격을 갱신하고, 그만큼 배포 계정의 테스트넷 MON을 씁니다. 상태 확인은 필요한 만큼만 합니다.

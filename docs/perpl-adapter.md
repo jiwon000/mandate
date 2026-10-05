@@ -23,7 +23,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 - **One Perpl account per vault.** Perpl keys accounts by `msg.sender`. On a vault's first trade the adapter deploys a `PerplSubaccount` for it (CREATE2, salted by the vault address) and opens a Perpl account with it. Only the adapter can tell the subaccount what to do. Withdrawn money can only go to its vault.
 - **Margin moves only during a trade.** `MandateVault.execute()` approves its own cash to its adapter, calls the adapter, and sets the approval back to zero in the same call. The adapter pulls what the worst fill the limit allows would need: the added notional at the venue leverage plus 2%, the loss against the mark that Perpl makes an entry collateralise one for one, and a fee float. It never pulls more than the vault holds. The first trade needs at least Perpl's 100 aUSD account minimum in the vault, and reverts `BelowAccountMinimum` otherwise. After the fill it sends every free unit in the Perpl account back to the vault. Between trades the vault's money is its own cash plus the margin locked in open positions.
 - **Fills are all or nothing.** Orders are sent immediate-or-cancel and fill-or-kill at the agent's limit price. The vault then checks that the position Perpl reports matches what `preview()` promised and reverts the whole transaction otherwise, as it does for the mock venue.
-- **Equity at Perpl's mark.** `markEquity()` is the vault's cash, plus the free and locked balance of its Perpl account, plus each open position's margin and its price PnL at Perpl's mark. `markedAt` is the oldest `markTimestamp` among the markets held, or market 0's when flat. That is Perpl's clock, never `block.timestamp`.
+- **Equity at Perpl's mark.** `markEquity()` is the vault's cash, plus the free and locked balance of its Perpl account, plus each open position's margin, its price PnL at Perpl's mark and the funding Perpl has booked against it (`premiumPnlCNS`, the term Perpl's SDK adds to delta PnL). `markedAt` is the oldest `markTimestamp` among the markets held, or market 0's when flat. That is Perpl's clock, never `block.timestamp`.
 - **Unwind.** `reduce()` sends Perpl's reduce-only close orders, at most 1% through the mark, for the requested fraction of every open position. So an unwind step can never flip or grow a position. Close orders may fill in part. If Perpl refuses a market's order (paused, stale mark, no liquidity within 1%, a slice under its minimum), the adapter tries once more for the whole position and otherwise skips that market for this step. One stuck market never holds up the rest. Free collateral goes back to the vault after each step.
 - **Sweep.** Anyone may call `sweep(vault)`. It moves free collateral from the vault's Perpl account to the vault and nowhere else.
 
@@ -48,6 +48,20 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 
 `npm test` skips it, because it needs the network.
 
+## What the offline tests show
+
+`contracts/test-js/perpl-mock.test.mjs` runs the adapter against `MockPerplExchange`, a small stand-in for Perpl's exchange, with no network. It reaches what a fork cannot choose. It runs in `npm test` and in CI.
+
+- An open moves only its margin to Perpl, and equity counts both sides.
+- A fill above the agent's limit is killed whole, and no money moves.
+- A vault under Perpl's 100-unit account minimum is refused before any transfer.
+- Unwind closes one market while Perpl refuses the other, and finishes once it reopens.
+- Closes that fill in part keep unwinding until the position is gone.
+- A stale mark on one market is skipped like a refusal.
+- A withdrawal Perpl holds back stays in equity, and `sweep` returns it later.
+- Funding booked against a position lowers equity and settles on close.
+- A venue whose views revert can still be frozen, and allocators can take the cash-only exit.
+
 ## Findings while building it
 
 - **Contract accounts work.** A contract can create a Perpl account, trade as a taker and rest a post-only order. Verified on the fork, 2026-10-06. Perpl's ABI has a whitelist event, but it was not enforced on testnet that day.
@@ -57,10 +71,10 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 
 ## Limits
 
-- **Funding is not in equity.** Perpl's funding payments (`premiumPnlCNS`) are left out of `markEquity()`. A long-held position's NAV drifts from the truth by the funding it has paid or earned.
+- **Funding is as fresh as Perpl's position record.** `markEquity()` reads `premiumPnlCNS` as Perpl reports it. Whether Perpl's view accrues funding up to the current block or only to its last settlement was not checked on the fork, where every position was seconds old.
 - **Perpl's own liquidation is not modelled.** Perpl liquidates an isolated position whose margin runs out. The mandate's drawdown term should freeze the vault long before that, at the venue leverage the adapter uses. But a gap past both would show up as a lost margin, not as an unwind.
-- **A stalled feed stalls the exit.** When Perpl's mark goes stale, Perpl refuses orders. An unwind step then closes nothing in that market, and the vault stays `Frozen` until the feed returns. Withdrawal still needs a fresh mark until the vault is `Closed`. On the mock venue the stale-feed exit (`freezeUnobservable`, five unwinds, withdraw) works because the mock venue fills without a fresh price.
+- **A stalled feed stalls the exit.** When Perpl's mark goes stale, Perpl refuses orders. An unwind step then closes nothing in that market, and the vault stays `Frozen` until the feed returns. Full-price withdrawal needs a fresh mark until the vault is `Closed`. Meanwhile an allocator can take `withdrawUnpriced()`: their share of the vault's cash, capped at the share's worth at the last mark, in exchange for their part of what is still at Perpl. If Perpl's exchange cannot be read at all, the vault counts that as no mark, so `freezeUnobservable()` and this exit still work.
 - **Withdrawal rate limit.** Perpl rate-limits withdrawals (`getWithdrawAllowanceData`). If the adapter's sweep is refused, the money stays in the Perpl account and is still counted in equity. Anyone can retry it with `sweep(vault)`.
 - **One venue leverage per adapter.** The adapter opens every position at one venue leverage, set when it is deployed. That decides how much margin sits at Perpl. The mandate's own leverage term is measured separately, against the vault's whole equity.
-- **Unwind is not tested against a refused market.** The skip path for a paused or illiquid market is reasoned from Perpl's errors seen on the fork, not exercised by a test, because the fork cannot pause a Perpl market.
+- **Refusals are tested against a mock.** The skip path for a paused, stale or illiquid market is exercised against `MockPerplExchange`, whose errors follow those seen on the fork. Perpl's real exchange has not been seen refusing a market mid-unwind.
 - **Not audited.** Like the rest of the contracts, the adapter has had internal review only.

@@ -12,8 +12,8 @@ import {MandateHandler} from "./handlers/MandateHandler.sol";
 
 /// @notice Stateful fuzzing of core invariant #6 in mandate-technical-spec-v0.2.md
 ///         ("핵심 불변식"), restricted to the pieces that exist today: Vault,
-///         RiskGuard and the mock Adapter/venue. Registry/DP Reporter invariants
-///         (#8, #9) have no contract to fuzz yet and are out of scope here.
+///         RiskGuard and the mock Adapter/venue. Registry invariants are fuzzed
+///         separately in Registry.invariant.t.sol.
 contract MandateInvariants is Test {
     MandateVault internal vault;
     MandateRiskGuard internal guard;

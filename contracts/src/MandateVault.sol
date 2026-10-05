@@ -212,9 +212,10 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     /// @dev Only the RiskGuard may call. Withdrawals stay open while Frozen so
     ///      allocators keep their exit; only allocate() and execute() are closed.
     ///      The position is not touched here: closing it is unwind()'s job, and a
-    ///      freeze must not depend on a fill going through. Deliberately not
-    ///      `nonReentrant`: it is reached from inside execute()'s guarded frame.
-    ///      State is written before the single ERC20 transfer.
+    ///      freeze must not depend on a fill going through. Not `nonReentrant`:
+    ///      it is reached from inside execute()'s guarded frame, and also from
+    ///      poke() and freezeUnobservable(), which are not. State is written
+    ///      before the single ERC20 transfer, so a second bounty is impossible.
     function freeze(address beneficiary) external returns (uint256 bounty) {
         if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
         if (state != AgentState.Active) revert AgentNotActive();

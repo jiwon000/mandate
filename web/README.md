@@ -42,6 +42,8 @@ under "Live testnet demo".
 | `MockVenueAdapter` | Previews and executes orders; marks each vault's equity to the venue price |
 | `MandateRiskGuard` | Holds each mandate's limits, decides before and after every trade, freezes on `poke()` |
 | `MandateVault` x4 | One per mandate: allocator shares in, execute-only agent |
+| `BatchAllocator` | Escrow and signed allocation intents, netted into each vault per epoch |
+| `MandateRegistry` | Terms registry, outcome records and the privacy budget for published statistics |
 
 The four mandates carry deliberately different terms — Tight Mandate accepts a 3%
 drawdown and a 4-second mark age, Momentum Vector accepts 20% and 30 seconds — so a

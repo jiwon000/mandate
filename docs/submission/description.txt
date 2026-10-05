@@ -4,7 +4,7 @@ THE PROBLEM
 
 Agents can generate trades. Someone who wants to back one still needs three answers.
 
-1. Can the agent take the money? With exchange copy-trading or a managed account, the operator can trade and also withdraw. The allocator is back to trusting a person.
+1. Can the agent take the money? With a managed account or an API key handed to an operator, the operator can trade and can also withdraw. Exchange copy-trading moves custody to the exchange, which changes who is trusted, not whether. The allocator is back to trusting someone.
 2. Can the agent exceed the risk it agreed to? Where the operator trades at discretion, the limits are a description, and the allocator learns they were exceeded after the loss. An agent makes this worse: it trades around the clock and nobody reads every order.
 3. Can vaults be compared without publishing every private expression of interest? Full transparency lets others copy a strategy and herd behind large allocators.
 
@@ -30,7 +30,7 @@ The mark-age term has a floor, and the floor is the block interval. A mark is re
 
 The local build simulates this with a switch that holds the oracle to one mark per 12 seconds, the most a 12-second chain can deliver, while the local chain keeps mining. At 1-second cadence, orders on the Tight Mandate vault pass its 4-second term. At 12-second cadence the same order reverts with MarkTooOld for most of each interval; on a real 12-second chain it would pass only in the oracle's own block. The guard measures age from the venue's own price timestamp, so short blocks cannot make a stale feed look fresh.
 
-On Monad testnet our demo oracle is a paid transaction every 5 seconds, so the tightest live mandate asks for a 10-second mark. Eight consecutive poke() calls on that vault, 4.5 seconds apart, all passed the term.
+The block interval is the floor, not the whole bound: the price feed has to arrive that often too. On Monad testnet our demo oracle is a paid transaction every 5 seconds, so the tightest live mandate asks for a 10-second mark. Eight consecutive poke() calls on that vault, 4.5 seconds apart, all passed the term; the 4-second term runs on the local build.
 
 The live demo was also built around how Monad testnet behaves. Gas is billed on the limit, not on what a transaction uses, so the server signs at a measured estimate plus headroom under a hard cap. The public RPC answers 15 eth_call a second per IP, so the proxy folds a page's reads into one Multicall3 call and shares a short cache between visitors.
 
@@ -38,8 +38,8 @@ WHAT IS LIVE TODAY
 
 - Contracts on Monad testnet (chain 10143): MandateRiskGuard, four MandateVaults with different mandates, the venue adapter, a mock venue and a mock USDC. Addresses and a recorded run with transaction links are in the README. BatchAllocator and MandateRegistry are deployed in the same book, and the hosted link shows the Batch and Privacy screens.
 - A six-screen web app: Market, Agent, Allocate, Batch, Privacy, Live Risk. Every number is a contract read and every button is a real transaction. A visitor needs no wallet and no faucet: the server signs with testnet-only demo keys behind a per-role allowlist, a gas cap and rate limits.
-- A recorded pass on testnet: a deposit, an order inside the mandate, an over-limit order refused with OrderNotionalExceeded, a 10% price shock, poke() freezing three of the four vaults, the frozen agent refused with AgentNotActive, and the first unwind() step.
-- 61 contract tests, 46 server tests and Foundry invariant and reentrancy suites, run in CI. An internal security review (static analysis plus a second pass) found and fixed one real bug in registry registration.
+- A recorded pass on testnet: a deposit, an order inside the mandate, an over-limit order refused with OrderNotionalExceeded (the live button targets the leverage term and shows LeverageExceeded), a 10% price shock, poke() freezing three of the four vaults, the frozen agent refused with AgentNotActive, and the first unwind() step.
+- 67 contract tests, 46 server tests and Foundry invariant and reentrancy suites, run in CI. An internal security review (static analysis plus a second pass) found and fixed one real bug in registry registration.
 
 WHAT IS NOT BUILT YET
 
@@ -48,8 +48,9 @@ We would rather say this here than have a judge find it.
 - The venue is a deterministic mock and the USDC is a mock token. On testnet the price comes from our own keeper. A production deployment needs an adapter for a real venue and a guarded price source.
 - Differential privacy covers public data only. The reporter clips per-tick NAV returns, adds Laplace noise and publishes a mean, a Sharpe ratio and a maximum drawdown. The inputs are public marks, so today this demonstrates the mechanism and the on-chain budget, not protection of anything private. The noise is calibrated to the clipped mean, so the stated epsilon is exact for the mean only. Private-demand aggregates and a private intent API are not built. Intents in a batch are visible in settlement calldata.
 - The demo's batcher and reporter are our own server. Fee terms are recorded in the registry and nothing deducts them yet. There is no baseline agent bot. No external audit has been completed.
-- The guard limits behaviour. It does not make a strategy good and it does not prevent losses inside the mandate. After a freeze the realised loss can exceed the drawdown term by slippage and gaps.
-- Withdrawals wait for a fresh price. Shares are never priced off an old mark, so a vault whose price feed stops also pauses withdrawals until the next mark, frozen or not. The contracts now let anyone freeze such a vault (freezeUnobservable, not yet on the hosted demo). Letting holders take their share of the cash while the price is missing is designed, not built.
+- On testnet one deployer key owns the guard, the mock venue's price, the batcher and the reporter: it set and locked every vault's terms and registered them. After lockTerms() that key can change nothing in a vault's terms. Whether creating a vault should need it at all is the open question behind roadmap item 15.
+- The guard limits behaviour. It does not make a strategy good and it does not prevent losses inside the mandate. After a freeze the realised loss can exceed the drawdown term by slippage and gaps. The leverage, notional, spacing and stress terms are checked per order; between orders only the drawdown and mark-age terms act on the vault's state, so a price move can carry a position above its leverage term until the drawdown term trips.
+- Withdrawals wait for a fresh price. Shares are never priced off an old mark, so a vault whose price feed stops also pauses withdrawals until the next mark, frozen or not. Anyone can freeze such a vault (freezeUnobservable, on the hosted demo since 2026-10-05). Letting holders take their share of the cash while the price is missing is designed, not built.
 
 WHY IT IS USEFUL
 

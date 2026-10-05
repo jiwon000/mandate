@@ -89,7 +89,7 @@ npm run web:live            # 페이지 서빙 + 오라클 + 대리 서명
 
 니모닉의 0번 계정이 배포·지불합니다(테스트넷 가스 가격 약 100 gwei에서 배포와 시드에 약 1.8 MON으로 추정합니다. 배치 정산 컨트랙트와 레지스트리를 포함해 약 1,800만 gas이고, 두 컨트랙트가 없던 2026-10-04 배포의 실측은 약 1.25 MON이었습니다. 여기에 데모 계정 6개에 각 0.4 MON을 송금합니다. 스크립트는 시작 전에 4.5 MON을 요구합니다). 데모 계정 잔액이 0.2 MON 아래로 내려가면 0번 계정이 시간당 6 MON 한도 안에서 다시 채웁니다. 1~5번과 9번이 배분자·에이전트 4·keeper이고 서버는 이 6개로만 서명합니다. 공개 URL에서의 안전장치는 역할별 함수 allowlist(배분자는 `execute` 불가, 에이전트는 `withdraw` 불가, value 전송 불가), 트랜잭션당 가스 상한, 분당 서명·충격 횟수 제한, 운영자 토큰(`?admin=<토큰>`)이 있어야 보이는 Reset 버튼입니다. 오라클은 누가 보고 있으면 5초, 아니면 5분 간격으로 마크를 갱신하므로 Tight Mandate의 mark age 조건은 로컬 4초 대신 10초입니다. 공개 테스트넷 RPC는 IP당 `eth_call`을 초당 15건만 받는데(2026-10-04 실측) 페이지 새로고침 한 번이 32~34건이라, 서버가 한 묶음의 읽기를 Multicall3 `aggregate3` 호출 하나로 합치고 제한에 걸린 호출은 잠깐 뒤 다시 보냅니다. 방문자가 떠난 뒤 Vault 2개 이상이 동결돼 있으면 서버가 스스로 재배포합니다. Batch와 Privacy 화면도 라이브에서 동작합니다(배치 정산 컨트랙트와 레지스트리가 포함된 배포 기록일 때). 서버가 배처와 리포터 역할을 맡아 배분자의 `AllocationIntent`만 EIP-712로 서명하고, epoch이 끝나면 `settleEpoch()`를, 표본이 모이면 `postLeaderboard()`를 배포 계정 비용으로 보냅니다. 두 트랜잭션은 시간당 가스 한도와 횟수 제한 안에서만 나갑니다. Linux 호스트용 systemd 유닛은 `deploy/systemd/mandate-web.service`에 있고, 전체 절차와 환경 변수는 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. 실제 네트워크에 올리기 전에 `npx hardhat node`를 띄우고 `MONAD_RPC_URL=http://127.0.0.1:8545`로 같은 절차를 리허설할 수 있습니다.
 
-2026-10-04에 Monad 테스트넷(chain 10143)에 배포했습니다. 컨트랙트 주소 8개와, 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다. AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
+Monad 테스트넷(chain 10143)에 배포했습니다. 호스팅된 데모는 재시작 때마다 낡은 장부를 신뢰해 불필요하게 재배포하던 문제를 고친 뒤 2026-10-05에 확정된 10개 주소 장부(핵심 컨트랙트 4개, Vault 4개, BatchAllocator, MandateRegistry) 위에서 현재 돌아가고 있습니다. 2026-10-04 최초 배포 때 기록한 예치·주문·가격 충격·`poke()` 동결·동결 후 주문 거절·`unwind()`까지 한 바퀴를 돈 트랜잭션 해시는 그대로 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet) 절에 있습니다(해당 주소는 이후 교체됨, 같은 컨트랙트 코드의 동작 증거로 남겨둠). AI 코딩 도구 사용 고지와 서드파티 코드 출처는 [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code) 절에 있습니다.
 
 ## 저장소 구조
 
@@ -427,20 +427,24 @@ How the server keeps itself safe on a public URL:
 
 ### Recorded run on Monad testnet
 
-The book below was deployed to Monad testnet (chain 10143) on 2026-10-04 by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684`. The table is a copy of `web/deployments/10143.json`, the file the server boots from, as it stood after that deployment. A hosted demo redeploys itself after visitors leave vaults frozen, so a live page may be on a newer book than this one; a restarted server finds that newer book on chain and stays on it. These addresses and transactions stay on chain either way.
+The book below was deployed to Monad testnet (chain 10143) by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684` and is the one the hosted demo is currently running, confirmed live on 2026-10-05 after the boot-recovery fix (`web/live-recover.mjs`) landed. It supersedes an earlier book from 2026-10-04: that one does not appear anywhere in this table because several of the hosted demo's own restarts redeployed over it before the fix shipped, each time the old process came back up on a stale committed file, found its vaults frozen, and paid for a fresh book — the exact waste `live-recover.mjs` exists to stop. From here on a restart finds this book on chain by walking the owner's own transaction history, rather than trusting a committed file, so it should not need to move again.
 
 | Contract | Address |
 | --- | --- |
-| MockUSDC | [`0x276A14be2b5D62580A58c74A29D348CF509AA4f6`](https://testnet.monadscan.com/address/0x276A14be2b5D62580A58c74A29D348CF509AA4f6) |
-| MandateRiskGuard | [`0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5`](https://testnet.monadscan.com/address/0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5) |
-| DeterministicMockVenue | [`0xC23e3fE7F931207233a804765c024DEf9C1F7BA4`](https://testnet.monadscan.com/address/0xC23e3fE7F931207233a804765c024DEf9C1F7BA4) |
-| MockVenueAdapter | [`0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354`](https://testnet.monadscan.com/address/0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354) |
-| MandateVault · Steady Basis | [`0x0309A8c6C9D416251D2786042857DAba9AE64388`](https://testnet.monadscan.com/address/0x0309A8c6C9D416251D2786042857DAba9AE64388) |
-| MandateVault · Range Carry | [`0xEAF037275B74f0536c38387130Fe4b758e395341`](https://testnet.monadscan.com/address/0xEAF037275B74f0536c38387130Fe4b758e395341) |
-| MandateVault · Momentum Vector | [`0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318`](https://testnet.monadscan.com/address/0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318) |
-| MandateVault · Tight Mandate | [`0x3de51B731E5F145B44a0d5D5F684459ff120505c`](https://testnet.monadscan.com/address/0x3de51B731E5F145B44a0d5D5F684459ff120505c) |
+| MockUSDC | [`0xB2d24425cB5CE34C95De396976E63Cf08Fa3B28F`](https://testnet.monadscan.com/address/0xB2d24425cB5CE34C95De396976E63Cf08Fa3B28F) |
+| MandateRiskGuard | [`0x3D073Eee90845737836567796d6941F232018c89`](https://testnet.monadscan.com/address/0x3D073Eee90845737836567796d6941F232018c89) |
+| DeterministicMockVenue | [`0x2Ea1A5ed585667af49E0E297FB49Bd4Cb22fA171`](https://testnet.monadscan.com/address/0x2Ea1A5ed585667af49E0E297FB49Bd4Cb22fA171) |
+| MockVenueAdapter | [`0x42031CB72319C3a740949063235e3C21642bfe1b`](https://testnet.monadscan.com/address/0x42031CB72319C3a740949063235e3C21642bfe1b) |
+| MandateVault · Steady Basis | [`0x473828276f958ea075E7eC37D60847ab882e0a31`](https://testnet.monadscan.com/address/0x473828276f958ea075E7eC37D60847ab882e0a31) |
+| MandateVault · Range Carry | [`0xfe2D4aBA3B8fb31297aa183b62e76461B2556C55`](https://testnet.monadscan.com/address/0xfe2D4aBA3B8fb31297aa183b62e76461B2556C55) |
+| MandateVault · Momentum Vector | [`0xaF1a39ba150C837699d2c7348803fD215cC48a17`](https://testnet.monadscan.com/address/0xaF1a39ba150C837699d2c7348803fD215cC48a17) |
+| MandateVault · Tight Mandate | [`0xEd159620f3BaC63dDb21cbeeb9BD71b4d1dAE95F`](https://testnet.monadscan.com/address/0xEd159620f3BaC63dDb21cbeeb9BD71b4d1dAE95F) |
+| BatchAllocator | [`0xF5C0e1200844f624728412EE77d3bcc0F3C5f89C`](https://testnet.monadscan.com/address/0xF5C0e1200844f624728412EE77d3bcc0F3C5f89C) |
+| MandateRegistry | [`0x0873eCcf457195811a7DFD9E7380D5b65E78626f`](https://testnet.monadscan.com/address/0x0873eCcf457195811a7DFD9E7380D5b65E78626f) |
 
-One pass through the demo against that book, every step sent through the page's `/rpc` proxy and signed by the server's demo keys:
+The walkthrough below predates this table: it was recorded against the 2026-10-04 predecessor book, before that book was replaced by the restarts described above. The addresses it names are no longer live, but the mechanisms it exercised (order limits, price-shock freeze, frozen-vault rejection, `unwind()`) are the same contract code running in the book above, so the run is kept as evidence of behavior rather than of these specific addresses.
+
+One pass through the demo against that earlier book, every step sent through the page's `/rpc` proxy and signed by the server's demo keys:
 
 | Step | What the chain did | Transaction |
 | --- | --- | --- |

@@ -2,15 +2,26 @@
   "chainId": 10143,
   "profile": "live",
   "addresses": {
-    "usdc": "0x276A14be2b5D62580A58c74A29D348CF509AA4f6",
-    "guard": "0xF340f0ae74585ecCF806e94Cbc507c18BC91d5f5",
-    "venue": "0xC23e3fE7F931207233a804765c024DEf9C1F7BA4",
-    "adapter": "0x97AD5BA742297f4c3CEA5841f1c825B581Bc3354"
+    "usdc": "0xB2d24425cB5CE34C95De396976E63Cf08Fa3B28F",
+    "guard": "0x3D073Eee90845737836567796d6941F232018c89",
+    "venue": "0x2Ea1A5ed585667af49E0E297FB49Bd4Cb22fA171",
+    "adapter": "0x42031CB72319C3a740949063235e3C21642bfe1b"
   },
   "accounts": {
     "owner": "0xFCb12322Cd13e5aC40155a46CA6D353625B97684",
     "allocator": "0x3980d9a435a9463378C2892364782B2B4B74f410",
     "keeper": "0xBa66888Ab2520c337E4898a01CAEe6ABa96321c3"
+  },
+  "batch": {
+    "address": "0xF5C0e1200844f624728412EE77d3bcc0F3C5f89C",
+    "genesis": 1791184135,
+    "epochDuration": 20,
+    "settlementWindow": 600
+  },
+  "registry": {
+    "address": "0x0873eCcf457195811a7DFD9E7380D5b65E78626f",
+    "clipBound": 0.1,
+    "epsilon": 0.5
   },
   "vaults": [
     {
@@ -33,7 +44,7 @@
         "stressHorizonSeconds": 300,
         "stressSigmasX10": 30
       },
-      "address": "0x0309A8c6C9D416251D2786042857DAba9AE64388",
+      "address": "0x473828276f958ea075E7eC37D60847ab882e0a31",
       "agent": "0xFCC74b23BED38b2b67cfd33Fef31A21a4914A7D2",
       "termsHash": "0xd97edeb23ff109b61d1f9bd4e6fe9cf82d2b2b7f58c7e8bcd59f07fb6c9877c0"
     },
@@ -57,7 +68,7 @@
         "stressHorizonSeconds": 120,
         "stressSigmasX10": 30
       },
-      "address": "0xEAF037275B74f0536c38387130Fe4b758e395341",
+      "address": "0xfe2D4aBA3B8fb31297aa183b62e76461B2556C55",
       "agent": "0x20544f94547226574f5e0AaD0aC61B8914866aA3",
       "termsHash": "0x75810f77cbef427c1c42bad56378e84754974a89272d5a592938353364af3524"
     },
@@ -81,7 +92,7 @@
         "stressHorizonSeconds": 60,
         "stressSigmasX10": 20
       },
-      "address": "0xd1092e7637DADBa48873B8ed2B35CfEcc0eF6318",
+      "address": "0xaF1a39ba150C837699d2c7348803fD215cC48a17",
       "agent": "0x3F56cE0ca324dBd32Afc2F85E1b2860517dFA88F",
       "termsHash": "0x164202e96065806a4a3d42c3c53942074477f7f44c4d4d135fdd73f819f447cb"
     },
@@ -105,14 +116,14 @@
         "stressHorizonSeconds": 60,
         "stressSigmasX10": 30
       },
-      "address": "0x3de51B731E5F145B44a0d5D5F684459ff120505c",
+      "address": "0xEd159620f3BaC63dDb21cbeeb9BD71b4d1dAE95F",
       "agent": "0x55e8e5FAb663e7F00D7C52dfB345545B56BfCA6B",
       "termsHash": "0x397bb30aa867a35f404edd62a7205b1399e0ae96313cdcac4756874efacd38bc"
     }
   ],
-  "startBlock": 68074576,
-  "startedAt": 1791104643720,
-  "deployedAt": "2026-10-04T09:04:03.720Z",
+  "startBlock": 68339069,
+  "startedAt": 1791184080000,
+  "deployedAt": "2026-10-05T07:08:00.000Z",
   "network": {
     "label": "Monad testnet",
     "explorer": "https://testnet.monadscan.com"

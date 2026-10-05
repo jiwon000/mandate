@@ -74,7 +74,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~1~~ | ~~브랜치 `docs/roadmap-feedback-0923`의 main 대상 PR 리뷰와 머지~~ | @jiwon000 | 완료 (PR #9 머지됨) |
 | ~~2~~ | ~~Render에 새 커밋 배포~~ | @jiwon000 | 완료 (`949d258` 배포, `ORACLE_IDLE_SECONDS=3600` 설정) |
 | ~~3~~ | ~~README 주소 표에 BatchAllocator·MandateRegistry 행 추가, `10143.json` 갱신~~ | @jiwon000 | 완료 (2026-10-05 07:08:55 UTC 장부로 갱신) |
-| 2-1 | 브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지. PR #9 머지 뒤의 커밋들입니다 | @jiwon000 | 대기 |
+| ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | 2-2 | 공개 데모를 새 컨트랙트로 전환 (정해야 할 것 11, 2026-10-05 진행 결정). ① 2-1 머지 뒤 또는 이 브랜치 그대로 Render에서 최신 커밋 배포. 빌드가 컨트랙트를 새로 컴파일하지만 부팅은 체인의 최신 장부(옛 컨트랙트)를 그대로 씁니다. ② 페이지를 `?admin=<DEMO_ADMIN_TOKEN>`으로 열어 `Reset demo`를 한 번 누릅니다. 서버가 새 컨트랙트로 장부를 배포합니다(배포와 데모 계정 충전 약 4.2 MON 추정, 10-05 배포 계정 잔액 약 18 MON). 이후 재시작은 이 장부로 부팅합니다. ③ README 주소 표와 `10143.json` 갱신 | Render 권한자 | 대기 |
 | 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 10-05 오후에 테스트 수(43 → 46)와 Batch·Privacy 문장을 고쳤고, 폼에는 그 전 문안이 저장돼 있음 | 팀 | 대기 |
 | 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |

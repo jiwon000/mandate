@@ -14,14 +14,14 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`을 이 장부로 갱신했습니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
-- 제출 폼 Description 문구를 저장소 `description.txt`와 다시 맞추는 일(남은 일 3-1)은 아직 남아 있습니다.
+- 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). Go-to-market과 접근 안내 칸은 저장소 문안과 아직 다릅니다.
 - 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
 
 ## 이 폴더의 파일
 
 | 파일 | 내용 |
 | --- | --- |
-| [`description.txt`](description.txt) | 폼 "Description"에 저장한 영문 본문. 7,921자 (한도 8,000자) |
+| [`description.txt`](description.txt) | 폼 "Description"에 저장한 영문 본문. 7,956자 (한도 8,000자) |
 | [`go-to-market.txt`](go-to-market.txt) | 폼 "Go-to-market and user acquisition strategy"에 저장한 영문 본문. 5,079자 (한도 8,000자) |
 | [`judge-access.txt`](judge-access.txt) | 폼 "Judge access instructions"에 저장한 영문 본문. 4,427자 (한도 8,000자) |
 | [`demo-video-script.md`](demo-video-script.md) | Technical demo video (3분 이하) 대본 초안 |
@@ -76,7 +76,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~3~~ | ~~README 주소 표에 BatchAllocator·MandateRegistry 행 추가, `10143.json` 갱신~~ | @jiwon000 | 완료 (2026-10-05 07:08:55 UTC 장부로 갱신) |
 | ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | ~~2-2~~ | ~~공개 데모를 새 컨트랙트로 전환 (Render 배포 → 관리자 `Reset demo` → 주소 표와 `10143.json` 갱신)~~ | @jiwon000, @yahamang | 완료 (2026-10-05 08:08 UTC 장부) |
-| 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 10-05 오후에 테스트 수(43 → 46)와 Batch·Privacy 문장을 고쳤고, 폼에는 그 전 문안이 저장돼 있음 | 팀 | 대기 |
+| 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 한도에 맞게 9,565자에서 7,956자로 줄여 저장, One-line description도 함께 저장 | 팀 | 완료 (2026-10-05) |
 | 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
 | 6 | 아래 "정해야 할 것" 정리 | 팀 | 진행 중 |

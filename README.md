@@ -413,7 +413,7 @@ npm run test:invariant
 
 Open `http://localhost:3000` for the interactive demo. Every number on screen is a contract read and every button is a transaction against the in-process chain the server deploys on boot. See [web/README.md](web/README.md) for the screen list and demo interactions.
 
-Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the in-process Hardhat tests work without network access. `foundry.toml` configures `contracts/test/`'s stateful invariant suites and reentrancy tests, run with `forge test` (`npm run test:invariant`); the production path is still compiled separately by `contracts/tools/compile.mjs` for Hardhat and the web demo, so Foundry's `via_ir` build flag (needed by one test handler) never affects what ships. CI (`.github/workflows/ci.yml`) runs both suites on every push and pull request.
+Use Node 22.14 or newer. After `npm ci`, the local `solc` 0.8.37 runner and the in-process Hardhat tests work without network access. `foundry.toml` configures `contracts/test/`'s stateful invariant suites and reentrancy tests, run with `forge test` (`npm run test:invariant`); the production path is still compiled separately by `contracts/tools/compile.mjs` for Hardhat and the web demo, so Foundry's `via_ir` build flag (needed by one test handler) never affects what ships. CI (`.github/workflows/ci.yml`) runs both suites on every push and pull request, and the Perpl fork test when started by hand with `perpl_fork` checked.
 
 ## Live testnet demo
 

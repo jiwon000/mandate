@@ -122,17 +122,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 2. ~~Render 재시작마다 재배포 비용이 나가는 문제~~ — 해결됨: `949d258` 배포로 재시작 재배포가 멈췄고, 부팅이 약 40초 늘어나는 것은 확인됐습니다(Render가 그 사이 포트를 기다려 줬습니다 — 배포가 정상 완료됨). `ORACLE_IDLE_SECONDS=3600`도 적용해서 대기 비용을 하루 약 0.13 MON으로 낮췄습니다. 문제가 생기면 `RECOVER_BOOK=0`으로 옛 방식(커밋된 파일 신뢰)으로 되돌릴 수 있습니다.
 3. ~~외부 감사 문구~~ — 해결됨: 진행 중인 외부 감사 없음 확인. README 세 군데(한국어 "한계", 영문 구현 현황 문단, 영문 Roadmap 12번)는 "외부 감사는 아직 받지 않았습니다"로 이미 일치합니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰뿐입니다. 별도로 만든 발표 슬라이드(claude.ai 아티팩트)에 "외부 감사 진행 중"이라고 잘못 적혀 있던 걸 발견해 같은 문구로 고쳤습니다.
 4. ~~Batch 화면 제목~~ — 완료 확인: `web/index.html`에 "Anyone can ask for settlement; only the batcher sends it"로 이미 반영돼 있습니다.
-5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 2026-10-06에 다시 확인한 결과, 트레일러가 없는 병합 외 커밋은 여전히 아래 8개입니다. 트레일러에 나온 모델(Claude Fable 5.1, Opus 5, Opus 5.5, Sonnet 5)은 README에 모두 반영했습니다.
-   - `fed3608` docs: add Korean MIT license translation (@jiwon000)
-   - `21e2602` docs: add Korean README before English documentation (@jiwon000)
-   - `4bcbc9e` chore: include frontend milestone project snapshot (@jiwon000)
-   - `f43e042` fix: label synthetic privacy preview and update epsilon display (@jiwon000)
-   - `545b850` feat(risk): mark-to-market equity, permissionless poke(), and mark-age limits (@yahamang)
-   - `df8100d` feat: add interactive frontend demo (@jiwon000)
-   - `65213b6` fix: remove vulnerable Ganache dependency from contract tests (@jiwon000)
-   - `1d23d34` Initial import: Mandate mock core and batch allocator draft (@jiwon000)
-
-   커밋 기록만으로는 이 8개에 AI 도구를 썼는지 알 수 없습니다. 쓴 사람이 확인해서, 썼다면 "AI tool disclosure" 절 끝에 다음 문장을 붙이면 됩니다: "Commits before 2026-10-04 carry no trailer; some of them were also written with AI coding tools." 쓰지 않았다면 그대로 둡니다.
+5. ~~AI 사용 공개 문구~~ — 해결됨 (2026-10-06): 트레일러 없는 병합 외 커밋 8개(2026-09-20~09-22, @jiwon000 7개, @yahamang 1개)도 대부분 Claude로 작성했다고 팀이 확인했습니다. README "AI tool disclosure" 절에 "The eight earlier commits without a trailer (2026-09-20 to 09-22) were also written with AI coding tools, mostly Claude."를 추가했습니다.
 6. ~~한 줄 설명의 "market signals" 문구~~ — 해결됨 (2026-10-05): "시장 신호"가 실제로 게시하는 것(공개된 볼트 성과 통계)보다 넓게 읽혀서, README 한국어·영문 첫 줄을 "published performance stats carry a verifiable, on-chain differential-privacy budget" (공개된 성과 통계는 온체인에서 검증 가능한 차등 프라이버시 예산 안에서 게시됩니다)로 바꿨습니다. 폼의 "One-line description"도 이 문구로 다시 붙여넣어야 합니다 (영문 172자, 한도 200자).
 7. ~~DP 리포터의 단일 Laplace 스케일 문제~~ — 결정됨 (2026-10-05): 코드는 그대로 둡니다. Sharpe와 최대 낙폭은 clip된 입력에서의 실제 민감도(sensitivity)가 아직 유도되지 않았는데, 지금 시간 압박 속에서 직접 새 수식을 유도하면 틀릴 위험이 검증 안 된 주장을 하나 더 만드는 것과 같습니다 — "평균에 대해서만 정확하다"고 솔직하게 범위를 좁히는 쪽이 더 안전합니다. 이미 `description.txt`에 정확히 그렇게 적혀 있었고, README "Published ε vs Privacy Simulator" 절과 `reporter/reporter.mjs`의 코드 주석에도 같은 설명을 추가해 세 곳이 일치하도록 맞췄습니다.
 8. Sponsor bounty를 추가할지. 팀이 정할 일이고, 아래는 저장소 기준 사실만 정리한 것입니다 (2026-10-06). 바운티 이름과 금액(Perpl "Best use of Perpl's API" $5,000, "Best Analytics / Risk Tool" $3,000, 마감 10-13)은 10-05 웹 검색 결과라, 세부 요건은 대시보드 원문으로 확인해야 합니다.

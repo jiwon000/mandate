@@ -326,6 +326,66 @@ Re-ran the full suite after the fix — 61 contract tests
 (`npm run test:contracts`) and 23 web tests (`npm run test:web`), including
 `live-gas`/`live-policy`/`rpc` coverage — all green.
 
+## Round 4: the marketplace surface (2026-10-06, `MandateFactory`, `TradeTerms`/`FeeTerms`, `PerplAdapter`)
+
+Scope: everything merged via PR #12 (`feat/marketplace-complete`), diffed
+against the commit right before that merge (`ba1b4cb..cbf4f11`,
+`contracts/src/` only — 1,705 lines added across 11 files). This is the
+first adversarial pass over `MandateFactory.sol` (permissionless vault
+creation), the `TradeTerms`/`FeeTerms` additions to `MandateRiskGuard.sol`
+and `MandateVault.sol` (fee minting, daily-loss/holding-time/trades-per-day
+terms), and the Perpl integration (`perpl/PerplAdapter.sol`,
+`perpl/PerplSubaccount.sol`, `perpl/IPerplExchange.sol`) — none of it existed
+when Rounds 1–3 ran, and all of it is real-money-relevant surface (minted
+shares, permissionless creation, a real external exchange) that had only had
+Foundry fuzz/fork testing before this review.
+
+**No HIGH or MEDIUM finding cleared the confidence bar.** Specifically
+checked and ruled out:
+
+- **`MandateRegistry.canonicalGuard` left unset (0).** `registerAgent()`
+  then falls back to the exact pre-marketplace behavior Round 1 already
+  accepted: a caller can self-register their own fake vault+guard pair, but
+  only ever under an address they themselves control, never hijacking a
+  real vault. Not a new issue.
+- **Fee minting (`MandateVault._accrueFees` / `MandateRiskGuard.onFeeMint`).**
+  Management fee scales with `elapsed × equity × bps / year`; performance
+  fee only above `feeHighWaterNavPerShare`; a fee mint that would push total
+  supply past equity mints zero instead. `onFeeMint` rebases the guard's
+  drawdown and daily-loss high-water marks by the exact dilution ratio a fee
+  mint moves NAV-per-share by, so a mint can neither inflate nor mask a real
+  drawdown. The caller check (`configured[msg.sender]`, settable only
+  through the owner/factory-gated `_configure()`) has no spoofing path.
+- **`PerplSubaccount.sweep()` being permissionless.** `release()` always
+  pays out to the immutable `vault` address fixed at construction; a
+  permissionless caller can trigger the sweep but can never redirect where
+  it lands.
+- **`PerplAdapter`'s margin pull.** Bounded by a live, same-transaction
+  `totalAssets()`-sized approval that is reset to zero immediately after the
+  call (the same pattern `MockVenueAdapter` already used), and the
+  worst-fill margin sizing (`_marginFor()`) was checked algebraically to
+  always collateralize at least as much as the limit-price scenario, for
+  both buy and sell.
+- **Reentrancy through the external Perpl call in `execute()`.** The
+  function is `nonReentrant`; Perpl's collateral (aUSD) is a standard ERC20
+  with no transfer hooks, and no callback surface back into the vault was
+  found on the exchange interface — too speculative to report without a
+  concrete trigger.
+- **`MandateFactory.createMandate()` not itself validating `TradeTerms`/
+  `FeeTerms`/loss-term ranges.** Fully covered by `guard.configureTerms()`
+  reverting the whole transaction on an out-of-range value, on both the
+  factory and the direct-owner path.
+
+Out of scope for this round (already covered by Rounds 1–3 and unchanged
+since): `BatchAllocator.sol`, `reporter/`, and the pre-marketplace
+Vault/RiskGuard code paths.
+
+This round does not cover `web/` changes that shipped alongside the
+marketplace contracts (wallet connection, the faucet, the term-sheet and
+launch-form UI) — those are a client surface the contracts themselves don't
+trust, consistent with how earlier rounds scoped `web/` reviews separately
+from contract reviews.
+
 ## What this review does not substitute for
 
 This is static analysis plus one LLM-driven pass, not an audit. It has no

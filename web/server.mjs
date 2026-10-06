@@ -14,8 +14,12 @@ import { deploymentFileFor, startLive } from "./live.mjs";
 import { adoptLatestBook } from "./live-recover.mjs";
 import { toRpcError } from "./rpc.mjs";
 import { HttpError, IpLimiter, clientIp } from "./faucet.mjs";
+import { createPerplReader } from "./perpl.mjs";
 
 const port = Number(process.env.PORT || 3000);
+// The real Perpl-testnet vault, read from the public testnet RPC and cached;
+// independent of the chain this server runs.
+const readPerpl = createPerplReader();
 const root = fileURLToPath(new URL(".", import.meta.url));
 const ethersBundle = fileURLToPath(
   new URL("../node_modules/ethers/dist/ethers.umd.min.js", import.meta.url)
@@ -188,6 +192,16 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/deployment") {
       chain.touch();
       return sendJson(res, 200, await chain.deployment());
+    }
+
+    if (pathname === "/api/perpl" && req.method === "GET") {
+      try {
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timed out")), 10_000).unref());
+        return sendJson(res, 200, await Promise.race([readPerpl(), timeout]));
+      } catch (error) {
+        console.error("GET /api/perpl:", error?.shortMessage ?? error?.message);
+        return sendJson(res, 502, { error: "Perpl testnet unavailable" });
+      }
     }
 
     if (pathname === "/api/batch/status" && req.method === "GET") {

@@ -17,7 +17,7 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 | `MandateFactory` 무허가 볼트 개설 | 공개 데모 Launch 화면 (브라우저 지갑 필요) |
 | 조건 19개: 리스크 한도 11, 거래 조건 6, 수수료 2 | 온체인 강제, 모두 `termsHash` 하나로 잠김 |
 | `BatchAllocator`, `MandateRegistry`, DP 리포터 | 공개 데모 Batch·Privacy 화면 |
-| `PerplAdapter` (Monad의 perp 거래소 Perpl) | 테스트넷 포크에서 전체 흐름 검증. 테스트넷 미배포 |
+| `PerplAdapter` (Monad의 perp 거래소 Perpl) | Monad 테스트넷에 배포. 실제 Perpl 테스트넷 거래소에서 입금, 거래, 출금 왕복 1회 확인 |
 | 거래소와 USDC | mock. 테스트넷 가격은 팀의 키퍼가 넣음 |
 | 보안 검토 | 내부 리뷰 4라운드. 외부 감사 없음 |
 | 테스트 | 계약 93개, 서버 61개, Foundry invariant 13개와 reentrancy 3개. CI에서 실행 |
@@ -80,7 +80,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 - 수익을 약속하지 않습니다. guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다.
 - 위험이 사라진다고 주장하지 않습니다. 언제 주문이 거절되고 언제 Vault가 동결되는지가 정해질 뿐, 조건 안의 손실과 가격 갭으로 조건을 넘는 손실은 여전히 생깁니다.
-- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷 포크에서만 검증했으며 Perpl 팀과의 제휴는 없습니다.
+- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷에서 소액 왕복 1회만 확인했으며 Perpl 팀과의 제휴는 없습니다.
 - 사용자, 배분자, 예치 규모, 파트너가 있다고 주장하지 않습니다. 데모에 미리 올라간 배분자와 에이전트는 팀 서버의 테스트넷 키입니다.
 - 차등 프라이버시가 비공개 데이터를 보호한다고 주장하지 않습니다. 이미 체인에 공개된 수익률에만 적용합니다.
 - 감사를 받았다고 주장하지 않습니다. 검토는 모두 내부 리뷰입니다.
@@ -88,7 +88,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 ## 한계
 
-- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 포크에서만 검증했습니다.
+- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 왕복 1회만 확인했습니다.
 - 차등 프라이버시는 공개 데이터에만 적용됩니다. 리포터는 이미 체인에 있는 수익률을 집계하므로 메커니즘과 온체인 ε 장부를 보여줄 뿐, 비공개 데이터를 보호하지 않습니다. 명시한 ε은 평균에 대해서만 정확합니다. 배치 intent와 서명은 정산 calldata에 공개됩니다.
 - 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다.
 - guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다. 실현 손실은 슬리피지와 가격 갭만큼 drawdown 조건을 넘을 수 있습니다.
@@ -138,7 +138,7 @@ The current repository implements the Vault/Adapter/RiskGuard core with mark-to-
 
 **Current privacy boundary:** included allocation intents and signatures become public in settlement calldata. Net deposits do not hide those allocator-to-vault links. The stronger v0.2 statement that raw intents never go on-chain is not implemented. There is no private Intent API, and `reporter/` is scoped to public data only (2026-10-04): it DP-releases settlement amounts and trade returns, which are already on-chain, rather than the private watchlist/pre-settlement-intent signals the v0.2 spec sketches — those have no corresponding feature in this demo, so there is nothing yet to protect.
 
-As of 2026-10-06 the contracts also carry permissionless registration through `MandateFactory`, trade terms and fees that the guard and vault enforce, several markets per venue, and a venue adapter for Perpl verified on a Monad testnet fork ([`docs/perpl-adapter.md`](docs/perpl-adapter.md)). They are live on the hosted demo since the 2026-10-06 redeploy (chain 10143 exposes a `factory` address and a `markets` list; see [Recorded run on Monad testnet](#recorded-run-on-monad-testnet)), though that deployment still trades against the mock venue, not Perpl's real exchange. The seven-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md) — now including a Round 4 pass over the marketplace surface); no external audit has been done yet.
+As of 2026-10-06 the contracts also carry permissionless registration through `MandateFactory`, trade terms and fees that the guard and vault enforce, several markets per venue, and a venue adapter for Perpl, deployed to Monad testnet and run once through Perpl's testnet exchange ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). They are live on the hosted demo since the 2026-10-06 redeploy (chain 10143 exposes a `factory` address and a `markets` list; see [Recorded run on Monad testnet](#recorded-run-on-monad-testnet)), though that deployment still trades against the mock venue, not Perpl's real exchange. The seven-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting. Foundry invariant/fuzz testing and an internal security review are implemented (`contracts/test/`, [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md) — now including a Round 4 pass over the marketplace surface); no external audit has been done yet.
 
 ## Build status
 
@@ -161,7 +161,7 @@ What the contracts and the demo do today:
 - trade terms (`TradeTerms`): market allowlist, direction (long or short only), limit-price deviation from the mark and trades per day refuse the order; daily loss and maximum holding time let anyone freeze the vault
 - fees (`FeeTerms`): a management fee (at most 5% a year) and a performance fee (at most 30%, only above the fee high-water mark), charged by minting shares to the agent, only on a fresh mark and only while `Active`; `termsHash` binds limits, trade terms and fees
 - several markets on one venue; a 64-byte order still means market 0
-- `PerplAdapter`: trades on Perpl, the perp exchange on Monad, through one sub-account per vault and marks equity at Perpl's on-chain mark and its timestamp; verified on a Monad testnet fork from open to withdrawal (`npm run test:perpl`)
+- `PerplAdapter`: trades on Perpl, the perp exchange on Monad, through one sub-account per vault and marks equity at Perpl's on-chain mark and its timestamp; verified on a Monad testnet fork from open to withdrawal (`npm run test:perpl`), then deployed to testnet and run once from allocation to withdrawal against Perpl's testnet exchange (`npm run deploy:perpl`)
 - web: a term sheet listing each locked term, its current value, what a breach does and a button that sends the order crossing it; browser-wallet connection; a test-USDC faucet limited per address and per IP; a launch form that calls `createMandate`
 - epoch batch allocation: escrow, EIP-712 intents, netting, Merkle claims, cancellation and refunds — connected end to end in `web/`'s Batch screen (sign, queue, settle, claim), not only in the contract tests
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
@@ -209,7 +209,7 @@ Operator → MandateFactory.createMandate() → MandateVault + locked terms on M
 Agent → MandateVault → VenueAdapter → MandateRiskGuard pre-check → venue
                        │              └─ post-trade mark / poke() → freeze + bounty → unwind()
                        ├─ MockVenueAdapter → DeterministicMockVenue   (hosted demo)
-                       └─ PerplAdapter → PerplSubaccount → Perpl      (fork-tested)
+                       └─ PerplAdapter → PerplSubaccount → Perpl      (testnet, one round trip)
 
 reporter/ (DPReporter) → signed stats digest + published ε → MandateRegistry.postLeaderboard()
 ```
@@ -327,7 +327,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 
 - No promise of returns. The guard limits behavior; it does not make a strategy good.
 - No claim that risk goes away. The terms decide when an order is refused and when a vault freezes. Losses inside the mandate, and losses past it on a gap, still happen.
-- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl is verified on a testnet fork only, and there is no partnership with the Perpl team.
+- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl has run one small round trip on testnet, and there is no partnership with the Perpl team.
 - No users, allocators, deposits or partners. The demo's preset allocator and agents are testnet keys on the team's server.
 - No claim that differential privacy protects private data. It is applied only to returns that are already public on-chain.
 - No audit. Every review so far is internal.
@@ -343,7 +343,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
 - A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes. If the feed stays dead, anyone can freeze the vault after three mark ages (`freezeUnobservable()`), and then `withdrawUnpriced()` pays an allocator their share of the vault's cash, capped at the share's worth at the last mark, while their part of the open position stays with those who remain.
 - A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
-- The Perpl adapter does not model Perpl's own liquidation, and cannot unwind while Perpl's mark is stale, because Perpl then refuses orders; the cash-only exit above is what an allocator has meanwhile. Funding is counted as Perpl reports it. It has run against Perpl's real contracts only on a local fork, not as a deployed vault on testnet. Details in [`docs/perpl-adapter.md`](docs/perpl-adapter.md).
+- The Perpl adapter does not model Perpl's own liquidation, and cannot unwind while Perpl's mark is stale, because Perpl then refuses orders; the cash-only exit above is what an allocator has meanwhile. Funding is counted as Perpl reports it. On testnet it has run one small round trip (allocate 150 aUSD, open and close 0.001 BTC, withdraw), not sustained trading. Details in [`docs/perpl-adapter.md`](docs/perpl-adapter.md).
 - Nothing here has had an external audit. The reviews in this repository are internal.
 - Threats, what stops each one and what is left, and what each part's failure costs, are tabulated in [`docs/threat-model.md`](docs/threat-model.md).
 - One vault with a stale mark or in `Frozen` state reverts the whole epoch in `BatchAllocator.settleEpoch()`, since settlement allocates to every vault in a single transaction. The batcher has to leave such vaults out of the batch.
@@ -404,7 +404,7 @@ Beyond the demo (listed 2026-10-05, when the live demo signed for its visitors w
 
 14. Done and live 2026-10-06. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
 15. Done and live 2026-10-06. Agent onboarding. An outside operator deploys a vault, sets and locks its terms and registers it from a page. Decided: permissionless, through `MandateFactory` on one canonical guard; the owner only lists adapters. The registry accepts only vaults on the canonical guard, which closes the self-deployed fake-guard gap.
-16. Built and verified on a fork 2026-10-06, not yet deployed to testnet ([`docs/perpl-adapter.md`](docs/perpl-adapter.md)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
+16. Built and verified on a fork 2026-10-06, deployed to testnet the same day and run once through Perpl's exchange ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
 17. Mainnet with real USDC. Not deployed; it would need item 12's external audit first.
 
 The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is design only).

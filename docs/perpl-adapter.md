@@ -116,11 +116,11 @@ What has to be true before a Perpl-backed vault is deployed to Monad testnet, ho
 
 | Item | How to check | Status | If it is not met |
 |---|---|---|---|
-| Price band on the agent's limit | [PR #19](https://github.com/jiwon000/mandate/pull/19) merged, adapter deployed with a band (the tests use 300) | Open | Do not deploy; an unbanded adapter lets an agent fill the vault against its own order |
-| Testnet aUSD for the vault | Perpl's docs name the testnet token (`0xa901…22dC`) but no faucet | Not found | Ask the Perpl team, or keep Perpl on the fork test only |
+| Price band on the agent's limit | [PR #19](https://github.com/jiwon000/mandate/pull/19) merged, adapter deployed with a band (the tests use 300) | Done: merged, deployed with 300 | Do not deploy; an unbanded adapter lets an agent fill the vault against its own order |
+| Testnet aUSD for the vault | Perpl's docs name the testnet token (`0xa901…22dC`) but no faucet | Done: Perpl airdrops it to wallets with a mainnet account | Ask the Perpl team, or keep Perpl on the fork test only |
 | Account minimum | `getMinAccountOpenCNS()`; docs say $100 on testnet, $10 on mainnet | Checked on the fork | Fund the vault above it before its first trade, or the trade reverts `BelowAccountMinimum` |
 | Margin mode | Docs: Perpl is restricted to isolated margin for now | Matches the adapter, which models isolated positions | Re-check equity and liquidation notes if Perpl enables cross margin |
 | Taker settlement | `maxNegPnlCollatBPS` above 0 | Set to 10000, checked on the fork | See Findings |
 | Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark is at most 10 s old | Use a longer mark-age term on Perpl than on the mock demo |
-| Deploy key | A team member deploys with their own key; nothing in this repository holds one | Pending | No deployment |
-| Team agreement | The team agrees to list the adapter on the factory | Pending | Perpl stays fork-tested only, as the README says |
+| Deploy key | A team member deploys with their own key; nothing in this repository holds one | Done: deployed 2026-10-06 | No deployment |
+| Team agreement | The team agrees to list the adapter on the factory | Done | Perpl stays fork-tested only |

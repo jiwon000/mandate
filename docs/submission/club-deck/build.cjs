@@ -282,9 +282,10 @@ const chip = (s, t, x, y, color = C.acc) => {
   });
   txt(s, "어떻게 확인했나", { x:X0, y:4.7, w:6, h:0.4, bold:true, fontSize:17, color:C.acc });
   const B = [
-    "자동 테스트 154개가 코드를 바꿀 때마다 돈다 (컨트랙트 93, 데모 서버 61)",
+    "자동 테스트 159개가 코드를 바꿀 때마다 돈다 (컨트랙트 95, 데모 서버 64)",
     "함수를 무작위 순서로 수없이 불러도 \"돈은 새지 않는다\" 같은 규칙이 깨지지 않는지 검사",
     "실제 Perpl 거래소를 복사한 환경에서 입금부터 출금까지 10번 연속 성공",
+    "Monad 테스트넷의 실제 Perpl에서 에이전트 스크립트가 1.5시간 거래, 한도 넘는 주문 5번은 체인에서 거부",
   ];
   txt(s, B.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < B.length-1 } })), { x:X0, y:5.2, w:W-1.4, h:1.6, fontSize:15, color:C.text, paraSpaceAfter:8 });
 }

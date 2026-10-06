@@ -26,6 +26,8 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | [`judge-access.txt`](judge-access.txt) | 폼 "Judge access instructions"에 저장한 영문 본문. 4,427자 (한도 8,000자) |
 | [`demo-video-script.md`](demo-video-script.md) | Technical demo video (3분 이하) 대본 초안 |
 | [`pitch-video-script.md`](pitch-video-script.md) | Pitch video (2분 이하) 대본 초안. 팀 소개 줄은 비어 있음 |
+| [`demo-video/`](demo-video/README.md) | 데모 영상 녹화 스크립트와 재녹화 체크리스트. 10-06 영상은 로컬 녹화라 제출 불가 |
+| [`club-deck/`](club-deck/README.md) | HYBLOCK 학회 발표 덱 (PDF와 원본). 제출물 아님 |
 | [`mandate-logo.png`](mandate-logo.png) | 폼에 올린 로고, 1024×1024 |
 | [`mandate-logo.source.html`](mandate-logo.source.html) | 로고 원본 (SVG). 데모 페이지의 브랜드 마크와 같은 그림 |
 
@@ -41,7 +43,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | --- | --- | --- |
 | 공개 GitHub 저장소: 전체 소스, 설치법 README, 오픈소스 라이선스, 외부 코드 출처, 빌드 기간의 커밋 이력 | 충족 | MIT `LICENSE`, README "Third-party code" |
 | README에 AI 코딩 도구 사용 고지 | 충족 | README "AI tool disclosure". 아래 "정해야 할 것" 5번 참고 |
-| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 미착수 | 슬라이드와 목업은 인정되지 않음 |
+| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 재녹화 필요 | 10-06 영상은 로컬 노드 녹화라 Monad 상호작용 장면이 없음. 테스트넷 재배포 뒤 [`demo-video/`](demo-video/README.md) 체크리스트대로 다시 찍음. 슬라이드와 목업은 인정되지 않음 |
 | Monad 메인넷 또는 테스트넷 배포, 컨트랙트 주소 또는 트랜잭션 해시 | 충족 | README "Recorded run on Monad testnet"에 주소 8개와 트랜잭션 9개 |
 | Monad를 쓰는 이유 설명 | 초안 있음 | `description.txt`. 가격 기준 시각(mark age) 논리 |
 | 문서: 프로젝트 설명, 아키텍처, 기술 스택, 설치와 배포 방법 | 충족 | 루트 README |
@@ -77,7 +79,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | ~~2-2~~ | ~~공개 데모를 새 컨트랙트로 전환 (Render 배포 → 관리자 `Reset demo` → 주소 표와 `10143.json` 갱신)~~ | @jiwon000, @yahamang | 완료 (2026-10-05 08:08 UTC 장부) |
 | 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 한도에 맞게 9,565자에서 7,956자로 줄여 저장, One-line description도 함께 저장 | 팀 | 완료 (2026-10-05) |
-| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |
+| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 로컬 녹화본만 있음. 테스트넷 재배포 뒤 재녹화 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
 | 6 | 아래 "정해야 할 것" 정리 | 팀 | 진행 중 |
 | 7 | 제출 전 최종 점검: 공개 데모에서 `judge-access.txt`의 1~11단계를 그대로 따라 하기, README의 수치와 주소 대조, 폼 "REVIEW ENTRY" | 팀 | 3-1, 4, 5번 뒤 |

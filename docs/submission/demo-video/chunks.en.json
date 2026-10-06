@@ -1,0 +1,212 @@
+[
+[
+{
+"text": "This is Mandate, a market where trading agents raise capital",
+"at": 0.0
+},
+{
+"text": "under terms a contract enforces.",
+"at": 3.6
+},
+{
+"text": "An allocator puts money into an agent's vault.",
+"at": 5.77
+},
+{
+"text": "The agent can trade that money and can never withdraw it.",
+"at": 8.59
+},
+{
+"text": "Its terms are locked on chain before the first deposit,",
+"at": 11.58
+},
+{
+"text": "and every order has to pass a risk guard that checks them.",
+"at": 14.48
+},
+{
+"text": "So the allocator stops asking \"can I trust this trader?\" and",
+"at": 17.8
+},
+{
+"text": "asks \"can I accept these terms?\"",
+"at": 21.35
+}
+],
+[
+{
+"text": "Any agent can list itself.",
+"at": 0.0
+},
+{
+"text": "One transaction deploys a vault, sets its terms,",
+"at": 1.95
+},
+{
+"text": "locks them and registers the agent.",
+"at": 4.93
+},
+{
+"text": "Nobody approves it.",
+"at": 7.35
+},
+{
+"text": "The terms cover size per order, per market and per block,",
+"at": 8.66
+},
+{
+"text": "leverage, drawdown, daily loss, how long a position may be",
+"at": 12.18
+},
+{
+"text": "held, which markets and which direction, how far from the mark",
+"at": 15.75
+},
+{
+"text": "an order may be priced, how old the mark may be,",
+"at": 19.58
+},
+{
+"text": "and a stress test on recent volatility.",
+"at": 22.53
+},
+{
+"text": "Fees are capped and paid only in vault shares.",
+"at": 25.19
+}
+],
+[
+{
+"text": "Every vault shows its term sheet: the locked value,",
+"at": 0.0
+},
+{
+"text": "where the vault stands now, and what happens when it is",
+"at": 2.89
+},
+{
+"text": "crossed.",
+"at": 6.01
+}
+],
+[
+{
+"text": "As an allocator, I deposit one thousand test USDC.",
+"at": 0.0
+},
+{
+"text": "It goes into the vault contract, not to the agent.",
+"at": 4.04
+}
+],
+[
+{
+"text": "Now I act as the agent.",
+"at": 0.0
+},
+{
+"text": "An order inside the terms passes the guard and executes,",
+"at": 1.67
+},
+{
+"text": "and each line links to its transaction.",
+"at": 4.89
+},
+{
+"text": "An order past the leverage limit is refused before it reaches",
+"at": 7.39
+},
+{
+"text": "the venue, with the contract's own error.",
+"at": 10.58
+}
+],
+[
+{
+"text": "The market drops two percent, and this vault is now past its",
+"at": 0.0
+},
+{
+"text": "three percent drawdown.",
+"at": 3.38
+},
+{
+"text": "Anyone can prove that.",
+"at": 4.93
+},
+{
+"text": "Poke re-marks the vault, freezes the agent and pays the caller",
+"at": 6.43
+},
+{
+"text": "a small bounty.",
+"at": 10.04
+},
+{
+"text": "The agent's next order is refused.",
+"at": 11.16
+}
+],
+[
+{
+"text": "A frozen position is closed in public steps,",
+"at": 0.0
+},
+{
+"text": "a fifth at a time, and the allocator can withdraw at any",
+"at": 2.67
+},
+{
+"text": "point.",
+"at": 6.08
+},
+{
+"text": "Even if the price feed stops, a cash-only exit stays open.",
+"at": 6.69
+}
+],
+[
+{
+"text": "On the local build this vault asks for a mark under four",
+"at": 0.0
+},
+{
+"text": "seconds.",
+"at": 2.98
+},
+{
+"text": "At one mark every twelve seconds, the most a twelve-second",
+"at": 3.66
+},
+{
+"text": "chain allows, the order reverts a few seconds after each mark.",
+"at": 6.99
+},
+{
+"text": "At Monad's cadence the same order passes.",
+"at": 10.8
+},
+{
+"text": "A mandate can only demand a price as fresh as the chain's",
+"at": 13.46
+},
+{
+"text": "blocks, which is why we build on Monad.",
+"at": 16.71
+}
+],
+[
+{
+"text": "Today the venue and the USDC are mocks.",
+"at": 0.0
+},
+{
+"text": "An adapter for Perpl, a perpetuals exchange on Monad,",
+"at": 2.7
+},
+{
+"text": "is written and tested against a fork of Monad testnet.",
+"at": 5.95
+}
+]
+]

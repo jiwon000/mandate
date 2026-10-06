@@ -516,7 +516,7 @@ See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy 
 
 ## AI tool disclosure
 
-AI coding tools were used to build this repository, and the rules of Monad Metropolis ask for that to be stated. Commits that carry a `Co-Authored-By: Claude …` trailer were written with Claude Code (Anthropic's CLI, models Claude Fable 5.1 and Claude Opus 5) under the committer's direction. They touch the contracts, the tests, the deploy scripts, the demo server and page, and this README; `git log` shows which commits those are. The team set the design and the requirements and decided what was merged.
+AI coding tools were used to build this repository, and the rules of Monad Metropolis ask for that to be stated. Commits that carry a `Co-Authored-By: Claude …` trailer were written with Claude Code (Anthropic's CLI, models Claude Fable 5.1, Claude Opus 5, Claude Opus 5.5 and Claude Sonnet 5) under the committer's direction. They touch the contracts, the tests, the deploy scripts, the demo server and page, and this README; `git log --format="%(trailers:key=Co-Authored-By,valueonly)" | sort -u` shows the exact set, and `git log` shows which commits those are. The team set the design and the requirements and decided what was merged.
 
 ## Third-party code
 

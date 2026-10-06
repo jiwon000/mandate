@@ -69,7 +69,7 @@ test("a Perpl-backed mandate trades, is refused past its cap, freezes and unwind
 
   const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
   const registry = await deploy("MandateRegistry", "MandateRegistry");
-  const adapter = await deploy("perpl/PerplAdapter", "PerplAdapter", [EXCHANGE, AUSD, 200, PERP_IDS]);
+  const adapter = await deploy("perpl/PerplAdapter", "PerplAdapter", [EXCHANGE, AUSD, 200, 300, PERP_IDS]);
   const factory = await deploy("MandateFactory", "MandateFactory", [
     AUSD, await guard.getAddress(), await registry.getAddress()
   ]);
@@ -131,10 +131,11 @@ test("a Perpl-backed mandate trades, is refused past its cap, freezes and unwind
   );
 
   // Selling 0.002 takes the long through flat into a 0.001 short, which Perpl
-  // records as positionType 1. The limit is 10% under the mark: the adapter funds the
-  // worst fill it allows, so a wide limit is not refused for want of collateral.
+  // records as positionType 1. The limit is 3% under the mark, the widest the
+  // adapter's band allows: it funds the worst fill it accepts, so that edge is not
+  // refused for want of collateral.
   await send(() => vault.connect(agent).execute(adapterAddress,
-    coder.encode(["int256", "uint256"], [-e18("0.002"), (mark * 90n) / 100n])));
+    coder.encode(["int256", "uint256"], [-e18("0.002"), (mark * 97n) / 100n])));
   assert.ok((await ausd.balanceOf(vault.target)) < usd(500) - usd(40), "excess collateral came back");
   const [flipped] = await exchange.getPositionV2(16, account.accountId);
   assert.equal(flipped.lotLNS, 100n);

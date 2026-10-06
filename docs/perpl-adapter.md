@@ -22,6 +22,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 - **Same order format.** Orders are encoded exactly as for `MockVenueAdapter`: `abi.encode(int256 sizeDeltaE18, uint256 limitPriceE18)` for market 0, or with a leading `uint256 marketId`. An agent written for the mock venue does not change. A size that is not a whole number of Perpl lots reverts `LotNotRepresentable`.
 - **One Perpl account per vault.** Perpl keys accounts by `msg.sender`. On a vault's first trade the adapter deploys a `PerplSubaccount` for it (CREATE2, salted by the vault address) and opens a Perpl account with it. Only the adapter can tell the subaccount what to do. Withdrawn money can only go to its vault.
 - **Margin moves only during a trade.** `MandateVault.execute()` approves its own cash to its adapter, calls the adapter, and sets the approval back to zero in the same call. The adapter pulls what the worst fill the limit allows would need: the added notional at the venue leverage plus 2%, the loss against the mark that Perpl makes an entry collateralise one for one, and a fee float. It never pulls more than the vault holds. The first trade needs at least Perpl's 100 aUSD account minimum in the vault, and reverts `BelowAccountMinimum` otherwise. After the fill it sends every free unit in the Perpl account back to the vault. Between trades the vault's money is its own cash plus the margin locked in open positions.
+- **The limit stays near the mark.** On an order book the limit is the price the vault may be filled at. With no bound, an agent could rest a far-off order from an account of its own and have the vault take it, moving the vault's money to itself in one fill. The guard's `maxPriceDeviationBps` covers this only when a mandate sets it, and 0 disables it. So the adapter has its own bound, `maxAdverseLimitBps`, set once at deployment and the same for every vault on it: a buy limit more than that above Perpl's mark, or a sell limit more than that below it, reverts `LimitTooFarFromMark` before any money moves. Only the costly side is bounded. The tests deploy with 300 (3%). It caps what one fill can move to an agent's own order, it does not remove it: within the band, self-dealing is still possible, and the mandate's own deviation term should be set tighter.
 - **Fills are all or nothing.** Orders are sent immediate-or-cancel and fill-or-kill at the agent's limit price. The vault then checks that the position Perpl reports matches what `preview()` promised and reverts the whole transaction otherwise, as it does for the mock venue.
 - **Equity at Perpl's mark.** `markEquity()` is the vault's cash, plus the free and locked balance of its Perpl account, plus each open position's margin, its price PnL at Perpl's mark and the funding Perpl has booked against it (`premiumPnlCNS`, the term Perpl's SDK adds to delta PnL). `markedAt` is the oldest `markTimestamp` among the markets held, or market 0's when flat. That is Perpl's clock, never `block.timestamp`.
 - **Unwind.** `reduce()` sends Perpl's reduce-only close orders, at most 1% through the mark, for the requested fraction of every open position. So an unwind step can never flip or grow a position. Close orders may fill in part. If Perpl refuses a market's order (paused, stale mark, no liquidity within 1%, a slice under its minimum), the adapter tries once more for the whole position and otherwise skips that market for this step. One stuck market never holds up the rest. Free collateral goes back to the vault after each step.
@@ -35,7 +36,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 2. An allocation of 500 aUSD.
 3. A 0.001 BTC long. Perpl records 100 lots, side long. The margin sits at Perpl, and equity stays within fees of 500.
 4. An order that would take the position past its $200 cap. The guard refuses it with `PositionNotionalExceeded` before Perpl sees it.
-5. A sell of 0.002 BTC with its limit 10% under the mark. The position goes through flat into a 0.001 short, which Perpl records as side 1.
+5. A sell of 0.002 BTC with its limit 3% under the mark, the edge of the adapter's band. The position goes through flat into a 0.001 short, which Perpl records as side 1.
 6. A freeze by anyone once the 5-second holding limit has passed (`maxHoldingSeconds`).
 7. Unwind steps until the vault is `Closed`. The position at Perpl is zero and the Perpl account is empty.
 8. The allocator withdraws everything except the vault's `MIN_SHARES` dust.
@@ -54,6 +55,8 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 
 - An open moves only its margin to Perpl, and equity counts both sides.
 - A fill above the agent's limit is killed whole, and no money moves.
+- A limit past the adapter's 3% band on the costly side is refused, with no money moved, even when the mandate sets no deviation term. 3% is accepted on both sides.
+- The adapter cannot be deployed with a band of 0 or above 100%.
 - A vault under Perpl's 100-unit account minimum is refused before any transfer.
 - Unwind closes one market while Perpl refuses the other, and finishes once it reopens.
 - Closes that fill in part keep unwinding until the position is gone.
@@ -65,7 +68,7 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 ## Findings while building it
 
 - **Contract accounts work.** A contract can create a Perpl account, trade as a taker and rest a post-only order. Verified on the fork, 2026-10-06. Perpl's ABI has a whitelist event, but it was not enforced on testnet that day.
-- **Taker orders need `maxNegPnlCollatBPS` above 0.** With 0, every immediate-or-cancel taker order reverted `TakerOrderSettlementFailed` with result code 14, from contracts and from plain accounts alike. The adapter sets it to 10000, so Perpl's own check never binds. The price bound is the agent's limit price, plus the guard's `maxPriceDeviationBps` when the mandate sets it.
+- **Taker orders need `maxNegPnlCollatBPS` above 0.** With 0, every immediate-or-cancel taker order reverted `TakerOrderSettlementFailed` with result code 14, from contracts and from plain accounts alike. The adapter sets it to 10000, so Perpl's own check never binds. The price bound is the agent's limit price, held within the adapter's `maxAdverseLimitBps` of the mark, plus the guard's `maxPriceDeviationBps` when the mandate sets it.
 - **Cost.** A 0.001 BTC round trip, open and close as a taker, cost about 0.07 aUSD on the fork.
 - **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds. A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
 

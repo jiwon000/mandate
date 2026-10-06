@@ -41,6 +41,8 @@ contract PerplAdapter is IVenueAdapter {
     error LotNotRepresentable(uint256 lotUnitE18);
     error NoMarkets();
     error BelowAccountMinimum(uint256 minimumCNS, uint256 cashCNS);
+    error BadLimitBand();
+    error LimitTooFarFromMark(uint256 deviationBps, uint256 maxBps);
 
     uint256 private constant ASSET_TO_E18 = 1e12;
     uint8 private constant OPEN_LONG = 0;
@@ -63,6 +65,15 @@ contract PerplAdapter is IVenueAdapter {
     ///      mandate measures leverage against the vault's whole equity; this decides
     ///      how much of that equity sits at Perpl as margin.
     uint256 public immutable venueLeverageHdths;
+    /// @notice How far an order's limit may sit past Perpl's mark on the side that
+    ///         costs the vault, in basis points (a buy above it, a sell below it).
+    /// @dev On an order book the limit is the price the vault may be filled at. With
+    ///      no bound an agent could rest a far-off order from an account of its own
+    ///      and have the vault take it, moving the vault's money to itself in one
+    ///      fill. The guard's maxPriceDeviationBps covers this only when a mandate
+    ///      sets it, and it can be 0. This bound is set once, by whoever deploys the
+    ///      adapter, and binds every vault on it; no agent or mandate can widen it.
+    uint256 public immutable maxAdverseLimitBps;
 
     uint256[] private perpIds;
     mapping(address => PerplSubaccount) public subaccountOf;
@@ -75,12 +86,15 @@ contract PerplAdapter is IVenueAdapter {
         IPerplExchange exchange_,
         IERC20 collateral_,
         uint256 venueLeverageHdths_,
+        uint256 maxAdverseLimitBps_,
         uint256[] memory perpIds_
     ) {
         if (perpIds_.length == 0) revert NoMarkets();
+        if (maxAdverseLimitBps_ == 0 || maxAdverseLimitBps_ > 10_000) revert BadLimitBand();
         exchange = exchange_;
         collateral = collateral_;
         venueLeverageHdths = venueLeverageHdths_;
+        maxAdverseLimitBps = maxAdverseLimitBps_;
         perpIds = perpIds_;
     }
 
@@ -245,6 +259,7 @@ contract PerplAdapter is IVenueAdapter {
         if (limitPriceE18 == 0) revert ZeroLimit();
         Market memory m = _market(marketId);
         if (_abs(sizeDeltaE18) % m.lotUnit != 0) revert LotNotRepresentable(m.lotUnit);
+        _checkLimit(sizeDeltaE18 > 0, limitPriceE18, m.markE18);
 
         (int256 size, uint256 entryE18,) = _position(vault, m);
         PerplSubaccount sub = _fund(vault, _marginFor(size, sizeDeltaE18, limitPriceE18, m.markE18));
@@ -349,6 +364,17 @@ contract PerplAdapter is IVenueAdapter {
         needCNS += (orderCNS * FEE_FLOAT_BPS) / 10_000 + 1;
     }
 
+    /// @dev Only the side that costs the vault is bounded: a buy limit under the mark
+    ///      or a sell limit over it can only fill at a better price, or not at all.
+    function _checkLimit(bool buy, uint256 limitPriceE18, uint256 markE18) private view {
+        uint256 adverseE18;
+        if (buy && limitPriceE18 > markE18) adverseE18 = limitPriceE18 - markE18;
+        else if (!buy && limitPriceE18 < markE18) adverseE18 = markE18 - limitPriceE18;
+        else return;
+        uint256 deviationBps = markE18 == 0 ? type(uint256).max : Math.mulDiv(adverseE18, 10_000, markE18);
+        if (deviationBps > maxAdverseLimitBps) revert LimitTooFarFromMark(deviationBps, maxAdverseLimitBps);
+    }
+
     function _place(address vault, PerplSubaccount sub, Market memory m, int256 sizeDeltaE18, uint256 limitPriceE18)
         private
     {
@@ -368,8 +394,9 @@ contract PerplAdapter is IVenueAdapter {
         d.fillOrKill = fillOrKill;
         d.immediateOrCancel = true;
         d.leverageHdths = venueLeverageHdths;
-        // The price bound is the agent's limit (and the guard's deviation term on it),
-        // not Perpl's loss-at-entry check.
+        // The price bound is the agent's limit, held within maxAdverseLimitBps of the
+        // mark (and the guard's deviation term when the mandate sets one), not Perpl's
+        // loss-at-entry check.
         d.maxNegPnlCollatBPS = 10_000;
     }
 

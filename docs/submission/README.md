@@ -2,7 +2,7 @@
 
 > Team working notes for the Monad Metropolis submission, in Korean. The English texts entered in the submission form are the three `.txt` files in this folder.
 
-Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 상태판입니다. 제출 폼에 넣은 글의 원본과 영상 대본 초안도 이 폴더에 있습니다. 기능이 어디까지 구현됐는지는 루트 [README](../../README.md)의 "다음 작업"과 Roadmap이 원본이고, 이 문서는 제출에 필요한 일만 다룹니다.
+Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 상태판입니다. 제출 폼에 넣은 글의 원본과 영상 대본 초안도 이 폴더에 있습니다. 기능이 어디까지 구현됐는지는 루트 [README](../../README.md)의 "현재 상태", "한계"와 Roadmap이 원본이고, 이 문서는 제출에 필요한 일만 다룹니다.
 
 - 마감: 2026-10-13 23:59 ET (한국 시각 2026-10-14 12:59)
 - 마지막 갱신: 2026-10-06
@@ -120,7 +120,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 1. ~~테스트넷 재배포를 누가 언제 할지~~ — 해결됨: `web/live-recover.mjs` 배포로 서버가 체인에서 스스로 최신 장부를 찾으므로 더 이상 수동 재배포가 필요 없습니다.
 2. ~~Render 재시작마다 재배포 비용이 나가는 문제~~ — 해결됨: `949d258` 배포로 재시작 재배포가 멈췄고, 부팅이 약 40초 늘어나는 것은 확인됐습니다(Render가 그 사이 포트를 기다려 줬습니다 — 배포가 정상 완료됨). `ORACLE_IDLE_SECONDS=3600`도 적용해서 대기 비용을 하루 약 0.13 MON으로 낮췄습니다. 문제가 생기면 `RECOVER_BOOK=0`으로 옛 방식(커밋된 파일 신뢰)으로 되돌릴 수 있습니다.
-3. ~~외부 감사 문구~~ — 해결됨: 진행 중인 외부 감사 없음 확인. README 세 군데(한국어 "다음 작업", 영문 구현 현황 문단, 영문 Roadmap 12번)는 "외부 감사는 아직 받지 않았습니다"로 이미 일치합니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰뿐입니다. 별도로 만든 발표 슬라이드(claude.ai 아티팩트)에 "외부 감사 진행 중"이라고 잘못 적혀 있던 걸 발견해 같은 문구로 고쳤습니다.
+3. ~~외부 감사 문구~~ — 해결됨: 진행 중인 외부 감사 없음 확인. README 세 군데(한국어 "한계", 영문 구현 현황 문단, 영문 Roadmap 12번)는 "외부 감사는 아직 받지 않았습니다"로 이미 일치합니다. 지금까지의 검토는 `docs/security-review-2026-10-04.md`의 내부 리뷰뿐입니다. 별도로 만든 발표 슬라이드(claude.ai 아티팩트)에 "외부 감사 진행 중"이라고 잘못 적혀 있던 걸 발견해 같은 문구로 고쳤습니다.
 4. ~~Batch 화면 제목~~ — 완료 확인: `web/index.html`에 "Anyone can ask for settlement; only the batcher sends it"로 이미 반영돼 있습니다.
 5. README "AI tool disclosure"는 `Co-Authored-By` 트레일러가 있는 커밋을 기준으로 적혀 있습니다. 2026-10-06에 다시 확인한 결과, 트레일러가 없는 병합 외 커밋은 여전히 아래 8개입니다. 트레일러에 나온 모델(Claude Fable 5.1, Opus 5, Opus 5.5, Sonnet 5)은 README에 모두 반영했습니다.
    - `fed3608` docs: add Korean MIT license translation (@jiwon000)

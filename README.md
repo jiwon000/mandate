@@ -76,14 +76,6 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 - guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다. 실현 손실은 슬리피지와 가격 갭만큼 drawdown 조건을 넘을 수 있습니다.
 - 외부 감사를 받지 않았습니다. 지금까지의 검토는 [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)의 내부 리뷰입니다.
 
-## 다음 작업
-
-1. `PerplAdapter`를 테스트넷에 배포해 실제 Perpl 가격과 체결로 조건을 검사
-2. 독립된 외부 보안 감사
-3. 감사 뒤 실제 USDC로 상한을 둔 메인넷 배포
-
-전체 로드맵과 지난 작업의 기록은 영문 [Roadmap](#roadmap)에 있습니다.
-
 ## 저장소 구조
 
 ```text
@@ -181,9 +173,9 @@ Mandate separates those concerns. Vault custody and execution constraints are en
 ## Architecture
 
 ```text
-Allocator → signed intent → Intent API (planned) → BatchAllocator → net allocation → MandateVault
-                              │                                            │
-                              └─ DP private-demand aggregates (planned)    └─ shares / withdrawal
+Allocator → signed intent → batcher (team server) → BatchAllocator → net allocation → MandateVault
+                              │                                             │
+                              └─ DP private-demand aggregates (not built)  └─ shares / withdrawal
 
 Operator → MandateFactory.createMandate() → MandateVault + locked terms on MandateRiskGuard → MandateRegistry
 
@@ -362,22 +354,22 @@ Done:
 10. Published-ε and Privacy Simulator wired into `web/` (2026-10-04): the Privacy screen pools public per-vault NAV returns every price tick, publishes a signed release on click, and re-reads `releaseOf()` from the contract itself to show `VERIFIED ONCHAIN` rather than trusting the server's own report of what it posted. The Simulator slider beside it is pure client-side arithmetic — no fetch, no contract call — using the same scale formula as the real release.
 11. Security review (2026-10-04, extended 2026-10-06): Slither static analysis across all of `contracts/src` (45 findings, triaged — 2 fixed, the rest documented as false positives inherent to this codebase's patterns), plus an independent LLM-driven review of the full PR diff. That second pass found a real vulnerability: `MandateRegistry.registerAgent()` took `guard` as a caller-supplied parameter and only checked it for internal self-consistency, so a fake guard contract that answered every check "yes" could permanently squat a real vault's one-time registry slot with fabricated terms. Fixed by reading `guard` from `vault.riskGuard()` directly (no longer a parameter at all) and restricting the call to that guard's owner, since the remaining `fees`/`modelHash` fields have no on-chain ground truth to check. A fourth round on 2026-10-06 applied the same adversarial standard to the marketplace surface merged that day (`MandateFactory`, `TradeTerms`/`FeeTerms` fee minting, `PerplAdapter`/`PerplSubaccount`) — no HIGH or MEDIUM finding cleared the confidence bar. Full writeup: [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md). This is an internal review, not a substitute for an external audit.
 
-Next:
+Not done:
 
-12. An external, independent security audit. None has been done yet; the review in item 11 is internal, and an external audit is a prerequisite before any real-money deployment. The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
+12. An external, independent security audit. None has been done; the review in item 11 is internal, and an external audit is a prerequisite before any real-money deployment. The live demo is publicly hosted (see [Live testnet demo](#live-testnet-demo)) and the testnet deployment is published under "Recorded run on Monad testnet". A baseline agent is explicitly out of scope (2026-10-04 decision): the protocol's security claims rest on RiskGuard/Vault, not on any particular agent implementation.
 
 From the 2026-09-23 progress review (the reviewers asked what the terms and their ranges are, what happens after a freeze, and how volatility enters). Item 4 above answers "what happens after a freeze", item 5 "can the terms I read change" and item 6 "where does volatility enter"; the rest:
 
-13. Term coverage. Done 2026-10-06, except a reference-price bound: `TradeTerms` adds a market allowlist, direction, limit-price deviation from the mark, trades per day, daily loss and holding time, and `FeeTerms` is now charged by the vault and bound into `termsHash`. Recommended ranges for the eight original terms, with the sources they come from, are due before the next review; the volatility clause's ranges are under "What each term bounds".
+13. Term coverage. Done 2026-10-06, except a reference-price bound: `TradeTerms` adds a market allowlist, direction, limit-price deviation from the mark, trades per day, daily loss and holding time, and `FeeTerms` is now charged by the vault and bound into `termsHash`. Recommended ranges for the eight original terms are not written; the volatility clause's ranges are under "What each term bounds".
 
-From demo to real use (2026-10-05). Today the live demo signs for its visitors with six demo keys, the asset is a mock USDC, the venue is the deterministic MockVenue and the four agents are the ones the deploy script creates. In order:
+Beyond the demo (listed 2026-10-05, when the live demo signed for its visitors with six demo keys and the only agents were the four the deploy script creates):
 
 14. Done and live 2026-10-06. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
 15. Done and live 2026-10-06. Agent onboarding. An outside operator deploys a vault, sets and locks its terms and registers it from a page. Decided: permissionless, through `MandateFactory` on one canonical guard; the owner only lists adapters. The registry accepts only vaults on the canonical guard, which closes the self-deployed fake-guard gap.
 16. Built and verified on a fork 2026-10-06, not yet deployed to testnet ([`docs/perpl-adapter.md`](docs/perpl-adapter.md)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
-17. Mainnet with real USDC, only after item 12's external audit.
+17. Mainnet with real USDC. Not deployed; it would need item 12's external audit first.
 
-The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is planned).
+The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is design only).
 
 ## Stack
 

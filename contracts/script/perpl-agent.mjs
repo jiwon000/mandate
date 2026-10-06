@@ -235,14 +235,16 @@ if ((await vault.balanceOf(wallet.address)) === 0n && ALLOCATE) {
 let ema = null;
 let lean = 1n; // long until the mark first closes below its EMA
 for (let n = 1; n <= ticks && !stopping; n++) {
-  const monLeft = await provider.getBalance(wallet.address);
-  const spentMon = formatEther(startMon - monLeft);
-  if (monLeft < minMon) {
-    log({ kind: "stop", reason: `MON ${formatEther(monLeft)} below MIN_MON ${MIN_MON}`, spentMon });
-    break;
-  }
-  const event = { kind: "tick", tick: n, spentMon };
+  const event = { kind: "tick", tick: n };
   try {
+    // A failed read here (the RPC or DNS dropping for a moment) skips the tick like any
+    // other error, instead of ending the run with a position still open.
+    const monLeft = await provider.getBalance(wallet.address);
+    event.spentMon = formatEther(startMon - monLeft);
+    if (monLeft < minMon) {
+      log({ kind: "stop", reason: `MON ${formatEther(monLeft)} below MIN_MON ${MIN_MON}`, spentMon: event.spentMon });
+      break;
+    }
     const { mark, age } = await read();
     const m = num(mark);
     event.mark = m;
@@ -290,8 +292,10 @@ for (let n = 1; n <= ticks && !stopping; n++) {
   if (n < ticks && !stopping) await sleep(tickMs);
 }
 
-if (CLOSE_ON_EXIT === "1") {
-  const event = { kind: "exit", action: "close" };
+// The close is retried a few times, so a short network drop at the end does not leave
+// the position open.
+for (let attempt = 1; CLOSE_ON_EXIT === "1" && attempt <= 5; attempt++) {
+  const event = { kind: "exit", action: "close", attempt };
   try {
     const { size } = await signedSize();
     event.positionBefore = num(size);
@@ -313,9 +317,15 @@ if (CLOSE_ON_EXIT === "1") {
     event.error = decode(error);
   }
   log(event);
+  if (event.action !== "close failed") break;
+  await new Promise((resolve) => setTimeout(resolve, 15_000));
 }
-const [equity] = await adapter.markEquity(d.vault);
-log({
-  kind: "end", vaultEquityAUSD: formatUnits(equity, 6),
-  spentMon: formatEther(startMon - (await provider.getBalance(wallet.address)))
-});
+try {
+  const [equity] = await adapter.markEquity(d.vault);
+  log({
+    kind: "end", vaultEquityAUSD: formatUnits(equity, 6),
+    spentMon: formatEther(startMon - (await provider.getBalance(wallet.address)))
+  });
+} catch (error) {
+  log({ kind: "end", error: decode(error) });
+}

@@ -228,7 +228,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   s.addShape(pres.shapes.RECTANGLE, { x:5.4, y:5.12, w:0.18, h:0.14, fill:{ color:C.red, transparency:55 }, line:{ type:"none" } });
   txt(s, "가격이 낡아 취소", { x:5.65, y:5.05, w:1.8, h:0.3, fontSize:10.5, color:C.muted });
   card(s, X0, 5.6, W-1.4, 1.15, C.panel2, C.panel2);
-  txt(s, "조건은 체인이 가격을 새로 쓸 수 있는 만큼만 요구할 수 있습니다. 짧은 가격 유효시간을 실제로 강제할 수 있는 체인이어서 Monad 위에 만듭니다. 실제 거래소 Perpl의 마크도 Monad 위에서 1~31초 간격으로 갱신되는 것을 측정했습니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
+  txt(s, "조건은 체인이 가격을 새로 쓸 수 있는 만큼만 요구할 수 있습니다. 짧은 가격 유효시간을 실제로 강제할 수 있는 체인이어서 Monad 위에 만듭니다. 실제 거래소 Perpl의 마크도 Monad 위에서 측정해 보니 1~50초 전 값이었고, Perpl 자신도 60초 넘은 가격은 거부합니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
 }
 
 // 10 Perpl
@@ -285,7 +285,7 @@ const chip = (s, t, x, y, color = C.acc) => {
     "자동 테스트 164개가 코드를 바꿀 때마다 돈다 (컨트랙트 100, 데모 서버 64)",
     "함수를 무작위 순서로 수없이 불러도 \"돈은 새지 않는다\" 같은 규칙이 깨지지 않는지 검사",
     "실제 Perpl 거래소를 복사한 환경에서 입금부터 출금까지 10번 연속 성공",
-    "Monad 테스트넷의 실제 Perpl에서 에이전트 스크립트가 1.5시간 거래, 한도 넘는 주문 5번은 체인에서 거부",
+    "Monad 테스트넷의 실제 Perpl에서 에이전트 스크립트가 짧게 3회(약 1시간) 거래, 한도 넘는 주문 5번은 체인에서 거부",
   ];
   txt(s, B.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < B.length-1 } })), { x:X0, y:5.2, w:W-1.4, h:1.6, fontSize:15, color:C.text, paraSpaceAfter:8 });
 }
@@ -296,7 +296,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   const demo = [
     "거래소와 USDC는 가짜(mock)다",
     "가격은 우리 서버가 넣는다",
-    "실제 거래소(Perpl) 연결은 복사본에서만 확인했다",
+    "실제 거래소(Perpl) 연결은 테스트넷에서 소액(0.001 BTC, 짧은 실행 3회)으로만 확인했다",
   ];
   const not = [
     "전략이 돈을 번다는 것. 조건은 행동을 제한할 뿐이다",

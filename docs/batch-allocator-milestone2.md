@@ -1,6 +1,6 @@
 # BatchAllocator — milestone 2
 
-This milestone adds deposit-only batch allocation to the existing mock core. Registry, Reporter, fee accounting and a published Monad deployment remain pending. Update 2026-09-22: marked-NAV share pricing and the `poke()` drawdown freeze landed after this note was written; statements below that changed carry an update.
+This milestone adds deposit-only batch allocation to the existing mock core. Registry, Reporter, fee accounting and a published Monad deployment remain pending. Update 2026-10-06: Registry, Reporter, fee terms and a Monad testnet deployment have all landed since; addresses are in the README, and statements below about them are historical. Update 2026-09-22: marked-NAV share pricing and the `poke()` drawdown freeze landed after this note was written; statements below that changed carry an update.
 
 ## Authorization and escrow
 

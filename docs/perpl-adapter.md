@@ -1,6 +1,6 @@
 # Perpl venue adapter
 
-Status 2026-10-06: `contracts/src/perpl/PerplAdapter.sol` is written. It has been tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). No Perpl-backed vault has been deployed to Monad testnet yet: that costs testnet MON and is a team decision. The hosted demo still runs on the deterministic MockVenue with mock USDC.
+Status 2026-10-07: `contracts/src/perpl/PerplAdapter.sol` is written and tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). It was deployed to Monad testnet on 2026-10-06 (addresses below), run once end to end, and then traded by a rule-based agent script in three short runs. The reference-price bound added on 2026-10-07 is not in that deployment. The hosted demo still runs on the deterministic MockVenue with mock USDC.
 
 ## Why Perpl
 
@@ -71,7 +71,7 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 - **Contract accounts work.** A contract can create a Perpl account, trade as a taker and rest a post-only order. Verified on the fork, 2026-10-06. Perpl's ABI has a whitelist event, but it was not enforced on testnet that day.
 - **Taker orders need `maxNegPnlCollatBPS` above 0.** With 0, every immediate-or-cancel taker order reverted `TakerOrderSettlementFailed` with result code 14, from contracts and from plain accounts alike. The adapter sets it to 10000, so Perpl's own check never binds. The price bound is the agent's limit price, held within the adapter's `maxAdverseLimitBps` of the mark, plus the guard's `maxPriceDeviationBps` when the mandate sets it.
 - **Cost.** A 0.001 BTC round trip, open and close as a taker, cost about 0.07 aUSD on the fork.
-- **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds. A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
+- **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds when sampled on 2026-10-06, and the agent script's 20 ticks that day saw ages from 2 to 50 seconds (`markAge` in `contracts/deployments/perpl-agent-10143.jsonl`). A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
 
 ## Testnet deployment
 
@@ -112,7 +112,7 @@ Deployed on Monad testnet (chain 10143) on 2026-10-06:
 
 - In all, 10 orders filled and 5 were refused. Each refusal is a mined transaction with status 0 and the guard's `PositionNotionalExceeded()`, sent with a 500k gas limit, for example `0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff`.
 - A fill used about 2.1M gas and cost about 0.22 MON at ~102 gwei.
-- This is about 1.5 hours of small trades, not sustained trading.
+- The three runs span 12:48 to 15:28 UTC, with the script ticking for about an hour of it. Small trades, not sustained trading.
 
 ## Limits
 

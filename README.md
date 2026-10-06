@@ -15,12 +15,12 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 | --- | --- |
 | Vault, RiskGuard, Adapter, 조건 잠금, 동결과 `unwind()` | Monad 테스트넷 배포, 공개 데모에서 동작 |
 | `MandateFactory` 무허가 볼트 개설 | 공개 데모 Launch 화면 (브라우저 지갑 필요) |
-| 조건 19개: 리스크 한도 11, 거래 조건 6, 수수료 2 | 온체인 강제, 모두 `termsHash` 하나로 잠김 |
+| 조건 19개: 리스크 한도 11, 거래 조건 6, 수수료 2 (선택 사항인 참조가격 조건 2개를 쓰면 21개) | 온체인 강제, 모두 `termsHash` 하나로 잠김 |
 | `BatchAllocator`, `MandateRegistry`, DP 리포터 | 공개 데모 Batch·Privacy 화면 |
 | `PerplAdapter` (Monad의 perp 거래소 Perpl) | Monad 테스트넷에 배포. Perpl 테스트넷 거래소에서 입금, 거래, 출금 왕복 1회, 이어서 규칙 기반 에이전트 스크립트로 3회 실행해 주문 10건 체결, 한도 초과 주문 5건 온체인 거부 |
 | 거래소와 USDC | mock. 테스트넷 가격은 팀의 키퍼가 넣음 |
 | 보안 검토 | 내부 리뷰 4라운드. 외부 감사 없음 |
-| 테스트 | 계약 93개, 서버 61개, Foundry invariant 13개와 reentrancy 3개. CI에서 실행 |
+| 테스트 | 계약 100개, 서버 64개, Foundry 23개(invariant 20개, reentrancy 3개). CI에서 실행 |
 
 ## 조건
 
@@ -80,7 +80,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 - 수익을 약속하지 않습니다. guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다.
 - 위험이 사라진다고 주장하지 않습니다. 언제 주문이 거절되고 언제 Vault가 동결되는지가 정해질 뿐, 조건 안의 손실과 가격 갭으로 조건을 넘는 손실은 여전히 생깁니다.
-- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷에서 소액 거래만 해봤으며(약 1.5시간, 체결 10건) Perpl 팀과의 제휴는 없습니다.
+- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷에서 소액 거래만 해봤으며(2026-10-06 하루, 스크립트 실행 약 1시간, 체결 10건) Perpl 팀과의 제휴는 없습니다.
 - 사용자, 배분자, 예치 규모, 파트너가 있다고 주장하지 않습니다. 데모에 미리 올라간 배분자와 에이전트는 팀 서버의 테스트넷 키입니다.
 - 차등 프라이버시가 비공개 데이터를 보호한다고 주장하지 않습니다. 이미 체인에 공개된 수익률에만 적용합니다.
 - 감사를 받았다고 주장하지 않습니다. 검토는 모두 내부 리뷰입니다.
@@ -88,7 +88,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 ## 한계
 
-- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 약 1.5시간).
+- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 스크립트 실행 약 1시간).
 - 차등 프라이버시는 공개 데이터에만 적용됩니다. 리포터는 이미 체인에 있는 수익률을 집계하므로 메커니즘과 온체인 ε 장부를 보여줄 뿐, 비공개 데이터를 보호하지 않습니다. 명시한 ε은 평균에 대해서만 정확합니다. 배치 intent와 서명은 정산 calldata에 공개됩니다.
 - 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다.
 - guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다. 실현 손실은 슬리피지와 가격 갭만큼 drawdown 조건을 넘을 수 있습니다.
@@ -167,7 +167,7 @@ What the contracts and the demo do today:
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (100 cases; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (64 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (100 cases; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (64 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 
@@ -335,7 +335,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 
 - No promise of returns. The guard limits behavior; it does not make a strategy good.
 - No claim that risk goes away. The terms decide when an order is refused and when a vault freezes. Losses inside the mandate, and losses past it on a gap, still happen.
-- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl has seen only small trades on testnet (0.001 BTC, about 1.5 hours in all), and there is no partnership with the Perpl team.
+- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl has seen only small trades on testnet (0.001 BTC, the agent script running for about an hour in all), and there is no partnership with the Perpl team.
 - No users, allocators, deposits or partners. The demo's preset allocator and agents are testnet keys on the team's server.
 - No claim that differential privacy protects private data. It is applied only to returns that are already public on-chain.
 - No audit. Every review so far is internal.
@@ -351,7 +351,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
 - A withdrawal needs a mark inside the vault's `maxMarkAgeSeconds`. Redeeming against a price nobody can vouch for would hand the difference to whoever stays, so the vault refuses rather than guesses. No agent, operator or freeze can hold a withdrawal - only a stale mark can, and only until it refreshes. If the feed stays dead, anyone can freeze the vault after three mark ages (`freezeUnobservable()`), and then `withdrawUnpriced()` pays an allocator their share of the vault's cash, capped at the share's worth at the last mark, while their part of the open position stays with those who remain.
 - A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
-- The Perpl adapter does not model Perpl's own liquidation, and cannot unwind while Perpl's mark is stale, because Perpl then refuses orders; the cash-only exit above is what an allocator has meanwhile. Funding is counted as Perpl reports it. On testnet it has run one round trip (allocate 150 aUSD, open and close 0.001 BTC, withdraw) and three short runs of a rule-based agent script, about 1.5 hours in all: 10 orders filled and 5 orders past the $200 position cap were refused on chain. That is not sustained trading. Details in [`docs/perpl-adapter.md`](docs/perpl-adapter.md).
+- The Perpl adapter does not model Perpl's own liquidation, and cannot unwind while Perpl's mark is stale, because Perpl then refuses orders; the cash-only exit above is what an allocator has meanwhile. Funding is counted as Perpl reports it. On testnet it has run one round trip (allocate 150 aUSD, open and close 0.001 BTC, withdraw) and three short runs of a rule-based agent script, about an hour of ticking spread over 2 hours 40 minutes: 10 orders filled and 5 orders past the $200 position cap were refused on chain. That is not sustained trading. Details in [`docs/perpl-adapter.md`](docs/perpl-adapter.md).
 - Nothing here has had an external audit. The reviews in this repository are internal.
 - Threats, what stops each one and what is left, and what each part's failure costs, are tabulated in [`docs/threat-model.md`](docs/threat-model.md).
 - One vault with a stale mark or in `Frozen` state reverts the whole epoch in `BatchAllocator.settleEpoch()`, since settlement allocates to every vault in a single transaction. The batcher has to leave such vaults out of the batch.
@@ -412,7 +412,7 @@ Beyond the demo (listed 2026-10-05, when the live demo signed for its visitors w
 
 14. Done and live 2026-10-06. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
 15. Done and live 2026-10-06. Agent onboarding. An outside operator deploys a vault, sets and locks its terms and registers it from a page. Decided: permissionless, through `MandateFactory` on one canonical guard; the owner only lists adapters. The registry accepts only vaults on the canonical guard, which closes the self-deployed fake-guard gap.
-16. Built and verified on a fork 2026-10-06, deployed to testnet the same day, run once through Perpl's exchange and then traded by a rule-based agent script for about 1.5 hours: 10 orders filled, 5 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
+16. Built and verified on a fork 2026-10-06, deployed to testnet the same day, run once through Perpl's exchange and then traded by a rule-based agent script in three short runs (about an hour of ticking): 10 orders filled, 5 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
 17. Mainnet with real USDC. Not deployed; it would need item 12's external audit first.
 
 The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is design only).
@@ -471,7 +471,7 @@ How the server keeps itself safe on a public URL:
 - Rate limits: `SEND_TX_PER_MINUTE` (40) signed transactions and `CONTROL_PER_MINUTE` (12) shocks per minute across all visitors. Read methods are forwarded to the upstream RPC from a short allowlist; anything else (`evm_mine`, `eth_sign`, ...) is `-32601`. Every visitor's reads share the server's upstream quota, and that quota is small: the public testnet RPC answers 15 `eth_call` a second per IP (measured 2026-10-04) while one page refresh is 32 to 34 reads, and inside a batch it refuses the surplus entry by entry under HTTP 200, where a client's ordinary 429 retry never sees it. So the proxy folds a batch's plain reads into one Multicall3 `aggregate3` call (`PACK_READS`, used when the chain has Multicall3 at its canonical address), resends whatever was refused for rate after a short pause, and answers identical reads from a `READ_CACHE_MS` (2000) cache that the server clears whenever it signs, marks or sees a receipt go by. None of the contracts' views depend on `msg.sender`, so a bundled read returns what a direct one would.
 - Typed data. `eth_signTypedData_v4` is answered for one request only: an `AllocationIntent` from the allocator, in the EIP-712 domain of this deployment's batch allocator, for a vault of this book. Any other signer, domain, primary type or field list is refused, so the proxy cannot be made to sign a permit or an order for another contract.
 - Batcher and reporter (`web/live-desks.mjs`). `settleEpoch()` reverts as a whole when one intent is stale and the deployer pays for what reaches the chain, so an intent is checked when it arrives (signature, epoch still settleable, nonce neither used nor queued, vault `Active`, escrow covering everything queued) and again right before settlement. A batch that would still revert is taken apart with one `eth_call` per intent and settled without the intents that sink it. Nothing is sent that did not pass a gas estimate. One settlement is capped at `SETTLE_MAX_GAS` (2M), an epoch takes `BATCH_MAX_PER_EPOCH` (8) intents and the queue `BATCH_MAX_PENDING` (32), settlements are limited to `SETTLE_PER_MINUTE` (3) and releases to one every `REPORT_MIN_SECONDS` (120), and the two together draw on `DESK_GAS_PER_HOUR` (10M) of signed gas, about 1 MON at 100 gwei. A release's noise is seeded from `DEMO_REPORTER_SECRET`, or from a random value drawn at boot; it is never derived from a signing key. The queue, the claim proofs and the reporter's samples live in memory and are dropped by a restart or a reset.
-- Server. Only the page's own five files are served; every other path is 404. HTML carries a CSP that allows scripts from the page's origin only. Each client IP gets `RPC_IP_PER_MINUTE` (1200) `/rpc` calls and `CONTROL_IP_PER_MINUTE` (30) control posts a minute, on top of the shared limits above. A malformed body is 400, one over 2 MB is 413, and an unexpected failure is answered as `internal error` and logged on the server. `LOG_REQUESTS=1` logs every request; 5xx answers are always logged.
+- Server. Only the page's own three files (`index.html`, `styles.css`, `app.js`) are served; every other path is 404. HTML carries a CSP that allows scripts from the page's origin only. Each client IP gets `RPC_IP_PER_MINUTE` (1200) `/rpc` calls and `CONTROL_IP_PER_MINUTE` (30) control posts a minute, on top of the shared limits above. A malformed body is 400, one over 2 MB is 413, and an unexpected failure is answered as `internal error` and logged on the server. `LOG_REQUESTS=1` logs every request; 5xx answers are always logged.
 - Faucet. `POST /api/faucet` mints 10,000 test USDC to a connected wallet, once per address per day and `FAUCET_PER_IP` (3) times per client IP per day. With `FAUCET_NATIVE_WEI` set, it also sends that much MON for gas, from the deployer. On a book deployed before 2026-10-06 the faucet answers 404, because those contracts have no factory to go with it.
 - Presence-aware oracle. A visitor makes the server mark every `ORACLE_ACTIVE_SECONDS` (5) and `observe()` every `ORACLE_OBSERVE_SECONDS` (60); `PRESENCE_SECONDS` (60) after the last request it drops to `ORACLE_IDLE_SECONDS` (300; the hosted demo sets 3600). A shock lands on the next beat, so the price moves within seconds either way.
 - Gas for the demo accounts. Each of the six starts with `DEMO_GAS_PER_ACCOUNT_MON` (0.4). When one drops under `DEMO_GAS_FLOOR_MON` (0.2) the deployer fills it back up, within `DEMO_TOPUP_PER_HOUR_MON` (6) an hour so a visitor hammering the buttons cannot drain it, and never below its own `OWNER_RESERVE_MON` (1) so the oracle keeps marking. `/api/control` reports what has been refilled and says so when an account is low and cannot be.
@@ -543,7 +543,7 @@ See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy 
 
 ## AI tool disclosure
 
-AI coding tools were used to build this repository, and the rules of Monad Metropolis ask for that to be stated. Commits that carry a `Co-Authored-By: Claude …` trailer were written with Claude Code (Anthropic's CLI, models Claude Fable 5.1, Claude Opus 5, Claude Opus 5.5 and Claude Sonnet 5) under the committer's direction. They touch the contracts, the tests, the deploy scripts, the demo server and page, and this README; `git log` shows which commits those are. The eight earlier commits without a trailer (2026-09-20 to 09-22) were also written with AI coding tools, mostly Claude. The team set the design and the requirements and decided what was merged.
+AI coding tools were used to build this repository, and the rules of Monad Metropolis ask for that to be stated. Commits that carry a `Co-Authored-By: Claude …` trailer were written with Claude Code (Anthropic's CLI, models Claude Fable 5.1, Claude Opus 5, Claude Opus 5.5 and Claude Sonnet 5) under the committer's direction. They touch the contracts, the tests, the deploy scripts, the demo server and page, and this README; `git log` shows which commits those are. The eight earlier non-merge commits without a trailer (2026-09-20 to 09-22) were also written with AI coding tools, mostly Claude. The team set the design and the requirements and decided what was merged.
 
 ## Third-party code
 

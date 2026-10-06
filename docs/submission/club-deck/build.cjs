@@ -250,7 +250,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   txt(s, "Monad 테스트넷 포크 테스트", { x:x+0.35, y:y+0.3, w:w-0.7, h:0.4, bold:true, fontSize:16, color:C.acc });
   const st = ["누구나 등록 (createMandate)", "500 aUSD 입금", "0.001 BTC 롱, Perpl에 기록", "한도 넘는 주문은 Perpl 전에 거부", "롱에서 숏으로 전환", "보유 시간 초과로 동결", "청산 끝까지, Perpl 계정 비움", "배분자 전액 출금"];
   txt(s, st.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < st.length-1 } })), { x:x+0.35, y:y+0.85, w:w-0.6, h:2.9, fontSize:13, color:C.text, paraSpaceAfter:4 });
-  txt(s, "10회 연속 통과 (2026-10-06)\n같은 날 테스트넷 배포, 실제 Perpl에서 왕복 1회", { x:x+0.35, y:y+3.9, w:w-0.7, h:0.8, fontSize:12.5, color:C.amber, lineSpacingMultiple:1.2 });
+  txt(s, "10회 연속 통과 (2026-10-06)\n같은 날 테스트넷 배포, Perpl에서 체결 10건,\n한도 초과 주문 5건 온체인 거부", { x:x+0.35, y:y+3.9, w:w-0.7, h:0.8, fontSize:12.5, color:C.amber, lineSpacingMultiple:1.2 });
 }
 
 // 11 Demo

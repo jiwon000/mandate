@@ -1,0 +1,22 @@
+{
+  "chainId": "10143",
+  "deployer": "0x16775703Ae7BAfe84BF291177c501494C01E6Abe",
+  "perpl": {
+    "exchange": "0x1964C32f0bE608E7D29302AFF5E61268E72080cc",
+    "collateral": "0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC",
+    "perpIds": [
+      16,
+      32,
+      48,
+      64
+    ]
+  },
+  "MandateRiskGuard": "0x4832A1B3A77b0EbAC08c7492265c091B412f9817",
+  "MandateRegistry": "0x29A1D886F566fF7a176b2A00234c48e90d4B24A8",
+  "PerplAdapter": "0x27F86a3Da13695cD6864EaC136CA0033D362ef82",
+  "MandateFactory": "0x807F1A57F95f4d21B9A55E5aA8009C201b5F31f3",
+  "vault": "0xD2FdA5382049FD399a84e660e2B06297b476e716",
+  "termsHash": "0xfb9d1070e982992243b93234b1af63b2f4cc2e999cd93f93714b0d77d529877d",
+  "venueLeverageHdths": 200,
+  "maxAdverseLimitBps": 300
+}

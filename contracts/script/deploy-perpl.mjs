@@ -148,7 +148,11 @@ if (step === "smoke") {
     const [mark] = await adapter.marketPrice(0);
     const limit = buy ? (mark * 101n) / 100n : (mark * 99n) / 100n;
     console.log(`${label} at mark ${formatUnits(mark, 18)}, limit ${formatUnits(limit, 18)}`);
-    await send(label, vault.execute(d.PerplAdapter, coder.encode(["int256", "uint256"], [sizeE18, limit])));
+    // The node's estimate can fall short: on testnet the first close ran out of gas
+    // inside Perpl's exchange. Half again as much gas is enough.
+    const args = [d.PerplAdapter, coder.encode(["int256", "uint256"], [sizeE18, limit])];
+    const gasLimit = ((await vault.execute.estimateGas(...args)) * 3n) / 2n;
+    await send(label, vault.execute(...args, { gasLimit }));
   };
   await order("open 0.001 BTC long", e18("0.001"), true);
   const [notional] = await adapter.positionState(d.vault);

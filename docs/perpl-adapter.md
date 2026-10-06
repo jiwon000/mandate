@@ -86,6 +86,19 @@ PERPL_WALLET_FILE=<wallet json> npm run deploy:perpl -- smoke   # allocate 150 a
 - Addresses go to `contracts/deployments/perpl-10143.json`. The script refuses to run if that file exists.
 - Both steps were rehearsed on a local fork of Monad testnet on 2026-10-06. The smoke step allocated 150 aUSD and withdrew 149.86.
 
+Deployed on Monad testnet (chain 10143) on 2026-10-06:
+
+| Contract | Address |
+|---|---|
+| MandateRiskGuard | `0x4832A1B3A77b0EbAC08c7492265c091B412f9817` |
+| MandateRegistry | `0x29A1D886F566fF7a176b2A00234c48e90d4B24A8` |
+| PerplAdapter | `0x27F86a3Da13695cD6864EaC136CA0033D362ef82` |
+| MandateFactory | `0x807F1A57F95f4d21B9A55E5aA8009C201b5F31f3` |
+| Mandate vault | `0xD2FdA5382049FD399a84e660e2B06297b476e716` |
+
+- The smoke run allocated 150 aUSD and opened 0.001 BTC at Perpl. Its first close ran out of gas inside Perpl's exchange (`0xff05e8bb…ba099`), because the node's gas estimate was too low. The script now adds half again as much gas.
+- The close was resent by hand and filled (`0x7a8fce78cc8349ef85f1a58f782c7b2608b1a5b05dbdaa2a2c248177ce958fd4`), and the withdrawal returned 149.914834 aUSD (`0x97420fb0294c2a66386718d3a5e77c7e7234b3d5f3f237774b718f533f65bab8`).
+
 ## Limits
 
 - **Funding is as fresh as Perpl's position record.** `markEquity()` reads `premiumPnlCNS` as Perpl reports it. Whether Perpl's view accrues funding up to the current block or only to its last settlement was not checked on the fork, where every position was seconds old.

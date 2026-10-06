@@ -1548,6 +1548,47 @@ window.addEventListener("hashchange", () => {
 });
 route(knownRoute(location.hash.slice(1)) ? location.hash.slice(1) : "market");
 
+// --- real venue: Perpl testnet ------------------------------------------
+// A separate vault on Monad testnet, read by the server from the public RPC.
+// Fetched once when the Market view first shows and on the refresh button; a
+// failure leaves the rest of the page untouched.
+const aUsd = (value6) => `$${Number(ethers.formatUnits(value6, 6)).toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+const ageText = (seconds) => (seconds < 120 ? `${seconds}s` : seconds < 7200 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds / 3600)} h`);
+
+function renderPerpl(p) {
+  const link = (path, text) => `<a href="${p.explorer}/${path}" target="_blank" rel="noopener">${text}</a>`;
+  const age = Math.max(0, Math.floor(Date.now() / 1000) - p.mark.markedAt);
+  const t = p.terms;
+  const row = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
+  $("#perplBody").innerHTML = `
+    <div class="perpl-grid">
+      ${row("Vault", link(`address/${p.addresses.vault}`, shortAddress(p.addresses.vault)))}
+      ${row("Adapter", link(`address/${p.addresses.adapter}`, shortAddress(p.addresses.adapter)))}
+      ${row("Status", p.vault.status)}
+      ${row("Position", p.position.totalNotional === "0" ? "flat" : usdE18(p.position.totalNotional))}
+      ${row("Equity", aUsd(p.equity.value))}
+      ${row("BTC mark", `${usdE18(p.mark.priceE18)} · ${ageText(age)} old`)}
+    </div>
+    <p class="perpl-terms">Locked terms: BTC only, ${usdE18(t.maxPositionNotional)} position cap, ${pct(t.maxDrawdownBps)} drawdown, ${t.maxMarkAgeSeconds} s mark age.</p>
+    <div class="perpl-txs">${p.txs.map((tx) => `<a href="${p.explorer}/tx/${tx.hash}" target="_blank" rel="noopener">${tx.label}<span>${tx.hash.slice(0, 10)}…</span></a>`).join("")}</div>`;
+}
+
+async function refreshPerpl() {
+  const button = $("#perplRefresh");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/perpl");
+    if (!response.ok) throw new Error(String(response.status));
+    renderPerpl(await response.json());
+  } catch {
+    $("#perplBody").innerHTML = '<p class="muted">Perpl testnet data is unavailable right now. Try Refresh.</p>';
+  } finally {
+    button.disabled = false;
+  }
+}
+$("#perplRefresh").addEventListener("click", refreshPerpl);
+refreshPerpl();
+
 // --- transactions -------------------------------------------------------
 async function withButton(button, label, action) {
   const original = button.textContent;

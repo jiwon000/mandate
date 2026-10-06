@@ -38,7 +38,7 @@ async function setup(t, { deposit = usd(1_000), trade = {} } = {}) {
   await wait(exchange.listPerp(BTC, 1, 5, BTC_PNS));
   await wait(exchange.listPerp(ETH, 2, 4, ETH_PNS));
   const guard = await deploy("MandateRiskGuard", "MandateRiskGuard");
-  const adapter = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, [BTC, ETH]]);
+  const adapter = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, 300, [BTC, ETH]]);
   const vault = await deploy("MandateVault", "MandateVault", [usdc.target, guard.target, agent.address, adapter.target]);
   await wait(guard.setAdapter(vault.target, adapter.target, true));
   await wait(guard.configureTerms(vault.target, BASE_LIMITS,
@@ -105,6 +105,36 @@ test("a fill above the agent's limit is killed whole, with no money moved", asyn
   await assert.rejects(s.vault.connect(s.agent).execute(s.adapter.target, s.order(0, "0.005", "60600")));
   assert.equal(await s.usdc.balanceOf(s.vault.target), usd(1_000));
   assert.equal(await s.adapter.accountIdOf(s.vault.target), 0n);
+});
+
+test("a limit past the adapter's band on the costly side is refused even with no deviation term", async (t) => {
+  // DEFAULT_TRADE sets no maxPriceDeviationBps, so the guard alone would let any
+  // limit through; on an order book that limit is a price the vault can be filled at.
+  const s = await setup(t, { trade: { maxPriceDeviationBps: 0 } });
+  await s.fresh();
+  const tooFar = (error) => String(error?.message).includes(s.adapter.interface.getError("LimitTooFarFromMark").selector) ||
+    error?.revert?.name === "LimitTooFarFromMark";
+  await assert.rejects(s.vault.connect(s.agent).execute(s.adapter.target, s.order(0, "0.005", "62400")), tooFar);
+  await assert.rejects(s.vault.connect(s.agent).execute(s.adapter.target, s.order(0, "-0.005", "57600")), tooFar);
+  assert.equal(await s.usdc.balanceOf(s.vault.target), usd(1_000));
+  assert.equal(await s.adapter.accountIdOf(s.vault.target), 0n);
+  // 3% from the mark is the edge, on either side.
+  await s.trade(0, "0.005", "61800");
+  assert.equal(await s.lots(BTC), 500n);
+  await s.trade(0, "-0.005", "58200");
+  assert.equal(await s.lots(BTC), 0n);
+});
+
+test("the adapter refuses a band of zero or past 100%", async (t) => {
+  const chain = await hre.network.create();
+  t.after(() => chain.close());
+  const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
+  const owner = await provider.getSigner(0);
+  const { abi, bytecode } = artifact(compiled, "contracts/src/perpl/PerplAdapter.sol", "PerplAdapter");
+  const factory = new ContractFactory(abi, bytecode, owner);
+  for (const band of [0, 10_001]) {
+    await assert.rejects(factory.deploy(owner.address, owner.address, 500, band, [BTC]));
+  }
 });
 
 test("a vault under Perpl's account minimum is refused before any transfer", async (t) => {
@@ -231,8 +261,8 @@ test("the factory refuses a Perpl adapter that settles in another token", async 
   const registry = await deploy("MandateRegistry", "MandateRegistry");
   const factory = await deploy("MandateFactory", "MandateFactory", [usdc.target, guard.target, registry.target]);
   const exchange = await deploy("mocks/MockPerplExchange", "MockPerplExchange", [other.target]);
-  const wrong = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, other.target, 500, [BTC]]);
-  const right = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, [BTC]]);
+  const wrong = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, other.target, 500, 300, [BTC]]);
+  const right = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, 300, [BTC]]);
   await assert.rejects(factory.listAdapter(wrong.target, true),
     (error) => String(error?.message).includes(factory.interface.getError("AdapterAssetMismatch").selector) ||
       error?.revert?.name === "AdapterAssetMismatch");

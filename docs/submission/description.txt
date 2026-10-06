@@ -38,7 +38,7 @@ WHAT IS LIVE TODAY
 - Contracts on Monad testnet (chain 10143): MandateFactory, MandateRiskGuard, four seeded MandateVaults with different mandates, BatchAllocator, MandateRegistry, the venue adapter, a mock venue and a mock USDC. Addresses are in the README.
 - A web app with Market, Agent, Allocate, Batch, Privacy, Launch and Live Risk screens. Every number is a contract read and every button is a transaction. Each vault shows its term sheet: the locked value, where the vault stands and what a breach does. A visitor can use a demo allocator the server signs for, or a browser wallet with a test-USDC faucet.
 - A demo video recorded on the hosted testnet demo: a mandate launched from a wallet, a deposit, an over-limit order refused, a price shock, poke() freezing the vault, the agent refused, unwind steps and a withdrawal.
-- An adapter for Perpl, the perpetuals exchange on Monad, tested against Perpl's deployed exchange on a fork of Monad testnet: open, a guard refusal, a flip, a freeze on holding time, unwind to Closed and a full withdrawal.
+- An adapter for Perpl, the perpetuals exchange on Monad, tested against Perpl's deployed exchange on a fork of Monad testnet: open, a guard refusal, a flip, a freeze on holding time, unwind to Closed and a full withdrawal. Deployed to Monad testnet on 2026-10-06 and run once against Perpl's testnet exchange: allocate 150 aUSD, open and close 0.001 BTC, withdraw 149.91 aUSD.
 - 93 contract tests, 61 server tests and Foundry invariant and reentrancy suites, run in CI. Four rounds of internal security review; one found and fixed a bug in registry registration.
 
 WHAT IS NOT BUILT YET

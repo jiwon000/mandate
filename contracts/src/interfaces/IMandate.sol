@@ -32,11 +32,42 @@ struct RiskLimits {
     uint16 stressSigmasX10;
 }
 
-/// @notice Declared, not enforced: MandateVault has no fee-deduction mechanism in
-///         v1. This is metadata an allocator can read before funding a mandate
-///         (via MandateRegistry), not a charge the vault actually makes.
+/// @notice Trading terms beyond the size and loss limits in RiskLimits.
+/// @dev Kept in its own struct so RiskLimits, and every older configuration that
+///      only sets it, keeps its layout. MandateRiskGuard.configure(vault, limits)
+///      applies DEFAULT_TRADE_TERMS: market 0 only, both directions, everything
+///      else off. A zero value turns a term off, except `allowedMarkets`, which
+///      must name at least one market.
+///      Pre-trade terms (`allowedMarkets`, `direction`, `maxPriceDeviationBps`,
+///      `maxTradesPerDay`) make the guard revert the order. State terms
+///      (`maxDailyLossBps`, `maxHoldingSeconds`) can be crossed with the agent doing
+///      nothing, so crossing one lets anyone freeze the vault.
+struct TradeTerms {
+    /// @notice Bitmask of venue market ids the agent may trade; bit 0 is market 0.
+    uint32 allowedMarkets;
+    /// @notice 0 long and short, 1 long only, 2 short only. Checked on the position
+    ///         an order leaves, so an order that only shrinks a position always passes.
+    uint8 direction;
+    /// @notice Largest distance between an order's limit price and the venue mark, in bps.
+    uint16 maxPriceDeviationBps;
+    /// @notice Orders that add exposure per UTC day. Orders that only take risk off are not counted.
+    uint16 maxTradesPerDay;
+    /// @notice Loss of NAV per share since the day's opening NAV, in bps.
+    uint16 maxDailyLossBps;
+    /// @notice Longest time the vault may go without being flat, in seconds.
+    uint32 maxHoldingSeconds;
+}
+
+/// @notice Fees the vault charges, as part of the locked terms.
+/// @dev Charged by MandateVault by minting shares to the agent, never by moving
+///      cash. The management fee accrues per second on marked equity while the vault
+///      is Active and stops at a freeze. The performance fee is taken only on NAV per
+///      share above the vault's fee high-water mark, so a vault below its best NAV
+///      pays none.
 struct FeeTerms {
+    /// @notice Share of NAV gain above the fee high-water mark, in bps.
     uint16 performanceFeeBps;
+    /// @notice Yearly rate on marked equity, in bps.
     uint16 managementFeeBps;
 }
 
@@ -47,6 +78,14 @@ struct TradePreview {
     uint256 expectedLeverageX100;
     uint256 minAmountOut;
     bytes32 orderHash;
+    /// @notice Venue market the order trades.
+    uint256 marketId;
+    /// @notice Signed position in `marketId` the order would leave, 1e18 units.
+    int256 resultingSizeE18;
+    /// @notice The order's own limit price, 1e18-scaled.
+    uint256 limitPriceE18;
+    /// @notice The venue's mark for `marketId` when the order was previewed.
+    uint256 markPriceE18;
 }
 
 interface IMandateVaultView {
@@ -102,6 +141,11 @@ interface IVenueAdapter {
     /// @dev The guard's volatility estimate is built from this series. Equity would not
     ///      do: a flat vault's equity is constant whatever the market does.
     function markPrice(address vault) external view returns (uint256 priceE18, uint256 markedAt);
+
+    /// @notice The venue's mark for one market, 1e18-scaled, with its timestamp.
+    /// @dev A guard whose terms allow a single market builds its volatility estimate
+    ///      from that market's series.
+    function marketPrice(uint256 marketId) external view returns (uint256 priceE18, uint256 markedAt);
 }
 
 interface IRiskGuard {
@@ -116,18 +160,33 @@ interface IRiskGuard {
     /// @notice Revert unless a mark taken at `markedAt` is still fresh enough to price against.
     function requireFreshMark(address vault, uint256 markedAt) external view;
 
+    /// @notice The day's opening NAV per share and the last NAV per share the guard
+    ///         marked, both 1e18-scaled; zero before the first mark.
+    function dayOf(address vault) external view returns (uint64 day, uint128 openNav, uint128 lastNav);
+
     /// @notice True once the vault's limits and adapter allowlist can no longer change.
     function termsLocked(address vault) external view returns (bool);
 
-    /// @notice keccak256 of the vault's configured limits, in RiskLimits field order.
-    /// @dev What MandateRegistry.registerAgent() checks a caller's claimed limits
+    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured terms.
+    /// @dev What MandateRegistry.registerAgent() checks a caller's claimed terms
     ///      against, so a registry entry cannot disagree with the real terms.
     function termsHash(address vault) external view returns (bytes32);
+
+    /// @notice The vault's TradeTerms, as configured.
+    function tradeTermsOf(address vault) external view returns (TradeTerms memory);
+
+    /// @notice The fees the vault charges, as configured.
+    function feesOf(address vault) external view returns (FeeTerms memory);
+
+    /// @notice Tell the guard the vault minted fee shares, so the NAV marks it keeps
+    ///         are restated per share and a fee is never read as a trading loss.
+    function onFeeMint(uint256 supplyBefore, uint256 supplyAfter) external;
 
     /// @notice True if `adapter` may be used to trade `vault`.
     function adapterAllowed(address vault, address adapter) external view returns (bool);
 
     /// @notice Why and when this guard froze `vault`: reason 0 none, 1 drawdown past
-    ///         the cap, 2 no fresh mark for UNOBSERVABLE_MARK_AGES times the mark age.
+    ///         the cap, 2 no fresh mark for UNOBSERVABLE_MARK_AGES times the mark age,
+    ///         3 daily loss past the cap, 4 held a position past the holding limit.
     function freezeOf(address vault) external view returns (uint8 reason, uint64 frozenAt);
 }

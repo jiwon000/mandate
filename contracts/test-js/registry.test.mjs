@@ -1,35 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ZeroHash, keccak256, AbiCoder } from "ethers";
-import { fixture, BASE_LIMITS } from "./fixture.mjs";
-
-const coder = AbiCoder.defaultAbiCoder();
-
-const RISK_LIMITS_TYPE =
-  "tuple(uint16 maxLeverageX100,uint16 maxDrawdownBps,uint32 minBlocksBetweenTrades,uint32 maxMarkAgeSeconds,uint256 maxOrderNotional,uint256 maxPositionNotional,uint256 maxTotalNotional,uint256 maxBlockNotional,uint32 volWindowSeconds,uint32 stressHorizonSeconds,uint16 stressSigmasX10)";
-
-function termsHashOf(limits) {
-  return keccak256(
-    coder.encode(
-      [RISK_LIMITS_TYPE],
-      [
-        [
-          limits.maxLeverageX100,
-          limits.maxDrawdownBps,
-          limits.minBlocksBetweenTrades,
-          limits.maxMarkAgeSeconds,
-          limits.maxOrderNotional,
-          limits.maxPositionNotional,
-          limits.maxTotalNotional,
-          limits.maxBlockNotional,
-          limits.volWindowSeconds,
-          limits.stressHorizonSeconds,
-          limits.stressSigmasX10
-        ]
-      ]
-    )
-  );
-}
+import { ZeroHash, keccak256 } from "ethers";
+import { fixture, BASE_LIMITS, DEFAULT_TRADE, termsHashOf } from "./fixture.mjs";
 
 const RELEASE_TYPES = {
   LeaderboardRelease: [
@@ -52,7 +24,8 @@ async function releaseDomain(registry, provider) {
 }
 
 test("registerAgent catalogs a locked mandate and rejects a second registration", async (t) => {
-  const f = await fixture(t);
+  const fees = { performanceFeeBps: 1000, managementFeeBps: 200 };
+  const f = await fixture(t, {}, { fees });
   const registry = await deployRegistry(f);
 
   const tx = await registry.registerAgent(
@@ -67,7 +40,7 @@ test("registerAgent catalogs a locked mandate and rejects a second registration"
   const entry = await registry.agentOf(f.vaultAddress);
   assert.equal(entry.guard, await f.guard.getAddress());
   assert.equal(entry.adapter, f.adapterAddress);
-  assert.equal(entry.termsHash, termsHashOf(BASE_LIMITS));
+  assert.equal(entry.termsHash, termsHashOf(BASE_LIMITS, DEFAULT_TRADE, fees));
   assert.notEqual(entry.registeredAt, 0n);
 
   await assert.rejects(

@@ -1,6 +1,6 @@
 # Mandate lifecycle and terms: design
 
-Status: decisions confirmed 2026-10-05; items 2 to 4 of the order of work are implemented, see "Implemented" below. Where a line says "today" it describes the code as of commit `2359347`, before that work. Items 5 to 9 are not implemented.
+Status: decisions confirmed 2026-10-05; items 2 to 4 of the order of work are implemented, and on 2026-10-06 items 6 to 8 and the stale-feed exit from item 9 followed, see "Implemented" below. Where a line says "today" it describes the code as of commit `2359347`, before that work. Item 5 and the cash-only withdrawal in item 9 are not implemented.
 
 This note answers three questions together, because they share one answer: what makes a vault freeze, who sets the freeze threshold, and what happens after a freeze. It also sets the structure for adding more kinds of terms later.
 
@@ -77,13 +77,13 @@ Before the hackathon deadline, inside the current structure and kept afterwards:
 3. Done. Unobservable freeze: a permissionless call that freezes a vault whose mark is older than the set multiple of `maxMarkAgeSeconds`.
 4. Done. `recordOutcome(vault)` on the registry, plus an index of vaults by agent (agent-linked, see below).
 
-After the hackathon:
+Planned for after the hackathon; 6 to 8 were brought forward on 2026-10-06:
 
-5. Term catalogue and modules, with `RiskLimits` as core v1.
-6. Factory and permissionless registration (roadmap 15).
-7. Fee deduction with the freeze rules above.
-8. Perpl adapter (roadmap 16), then revisit the unwind schedule against real fills. Whether Perpl can liquidate a vault's position on its own, and how that interacts with `unwind()`, is not yet checked.
-9. The stale-mark withdrawal rule from the open tension above.
+5. Term catalogue and modules, with `RiskLimits` as core v1. Not started. `TradeTerms` and `FeeTerms` were added as fixed structs instead.
+6. Done 2026-10-06. Factory and permissionless registration (roadmap 15).
+7. Done 2026-10-06. Fee deduction with the freeze rules above.
+8. Built 2026-10-06, verified on a fork only. Perpl adapter (roadmap 16), see [`perpl-adapter.md`](perpl-adapter.md). Revisiting the unwind schedule against real fills still needs a deployed vault. Perpl liquidates an isolated position whose margin runs out. The adapter does not model that: the drawdown term is meant to freeze the vault first.
+9. Partly done. A vault whose feed stops can now be frozen by anyone, unwound in five steps and then withdrawn from without a mark, because `Closed` needs none. The cash-only withdrawal while unobservable is not built. On Perpl this route also stops while the feed is stale, because Perpl refuses orders against a stale mark.
 
 ## Implemented
 
@@ -94,7 +94,14 @@ Items 2 to 4, on the current contracts. They take effect on the next deployment;
 - `MandateRegistry.recordOutcome(vault)`: anyone may call it for a registered vault that is Frozen or Closed. It reads `state()` from the vault and `freezeOf()` from the vault's guard and stores state, reason, freeze time and record time in `outcomeOf(vault)`. It only moves forward (Frozen, then Closed), and the freeze reason is kept after the vault closes. It does not store the final mark; the freeze event already carries it.
 - Index by agent: `linkVault(vault)` lists a registered vault under its agent's address, read with `vaultsOf(agent)`. This differs from section 3, which had the registry index every vault by `vault.agent()` automatically. Only the vault's own agent may link. Registration is done by the guard owner, and an automatic index on `vault.agent()` would let anyone deploy a vault naming someone else's address and attach a bad outcome to it. The cost: an agent can choose not to link a vault. An allocator should treat an unlinked vault as one with no history, and the factory (item 6) can link at deployment once the agent signs it.
 
-Tests: `contracts/test-js/lifecycle.test.mjs`. The Foundry invariant handler also calls `freezeUnobservable`; it is type-checked locally and runs in CI.
+Added 2026-10-06 (items 6 to 8):
+
+- `MandateFactory.createMandate(params)`: anyone deploys a vault from the reviewed `MandateVault` code. In the same transaction the factory sets its terms on the canonical guard, locks them and registers the vault, recording the caller as operator. The owner only lists adapters. The factory bounds leverage (at most 20x) and cooldown, and the guard bounds everything else. `MandateRegistry` then accepts only vaults on its canonical guard, which closes the gap where a self-deployed guard could vouch for fake terms.
+- `TradeTerms` on the guard. A market allowlist, direction, limit-price deviation and trades per day each refuse the order. Daily loss and maximum holding time are state terms, so anyone may freeze the vault through `poke()`, with reasons 3 and 4. This follows the class rule in section 1.
+- `FeeTerms` charged by the vault. Fees are paid in shares minted to the agent. The management fee is capped at 500 bps a year. The performance fee is capped at 3000 bps and charged only above the fee high-water mark. Both accrue only on a fresh mark while `Active`, and stop at a freeze. The guard restates its high-water mark by the minted shares, so a fee is never counted as drawdown. `termsHash` binds limits, trade terms and fees.
+- `PerplAdapter`, see [`perpl-adapter.md`](perpl-adapter.md).
+
+Tests: `contracts/test-js/lifecycle.test.mjs`, `contracts/test-js/marketplace.test.mjs`, and the opt-in `contracts/test-js/perpl-fork.test.mjs`. The Foundry invariant handler also calls `freezeUnobservable`; it is type-checked locally and runs in CI.
 
 ## Decisions
 

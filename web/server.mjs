@@ -6,13 +6,14 @@
 //                       deployment from web/deployments/<chainId>.json
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startChain } from "./chain.mjs";
 import { JsonRpcProvider } from "ethers";
 import { deploymentFileFor, startLive } from "./live.mjs";
 import { adoptLatestBook } from "./live-recover.mjs";
 import { toRpcError } from "./rpc.mjs";
+import { HttpError, IpLimiter, clientIp } from "./faucet.mjs";
 
 const port = Number(process.env.PORT || 3000);
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -24,10 +25,44 @@ const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml"
+  ".json": "application/json; charset=utf-8"
 };
+
+// Exactly what the page loads; every other path is a 404, so nothing else in
+// this directory (server code, deployment records) is ever served.
+const staticFiles = {
+  "/": ["index.html", types[".html"]],
+  "/index.html": ["index.html", types[".html"]],
+  "/styles.css": ["styles.css", types[".css"]],
+  "/app.js": ["app.js", types[".js"]]
+};
+
+// The page's own origin, the Google font hosts, and the public RPC its wallet
+// prompt offers. Its style attributes need 'unsafe-inline'; scripts do not.
+const csp = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self' https://testnet-rpc.monad.xyz",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'"
+].join("; ");
+
+const number = (name, fallback) => Number(process.env[name] ?? fallback);
+const logRequests = process.env.LOG_REQUESTS === "1";
+// Per client, on top of the global buckets inside the chain: one visitor cannot
+// spend everyone's market moves or hammer the upstream node through /rpc.
+const controlLimit = new IpLimiter(number("CONTROL_IP_PER_MINUTE", 30));
+const rpcLimit = new IpLimiter(number("RPC_IP_PER_MINUTE", 1200));
+
+function limited(limiter, req) {
+  const wait = limiter.take(clientIp(req));
+  if (wait) throw Object.assign(new HttpError("too many requests; slow down", 429), { retryAfter: wait });
+}
 
 const liveMode = process.argv.includes("--live") || process.env.MANDATE_LIVE === "1";
 let chain;
@@ -65,19 +100,33 @@ function readBody(req) {
     let size = 0;
     req.on("data", (chunk) => {
       size += chunk.length;
-      if (size > 2_000_000) reject(new Error("payload too large"));
-      else chunks.push(chunk);
+      if (size > 2_000_000) {
+        chunks.length = 0;
+        reject(new HttpError("payload too large", 413)); // the socket is closed once the 413 is out
+      } else chunks.push(chunk);
     });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
 
-function sendJson(res, status, payload) {
+async function readJson(req) {
+  const text = await readBody(req);
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new HttpError("request body is not valid JSON", 400);
+  }
+  if (typeof value !== "object" || value === null) throw new HttpError("request body must be a JSON object", 400);
+  return value;
+}
+
+function sendJson(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload, (_key, value) =>
     typeof value === "bigint" ? value.toString() : value
   );
-  res.writeHead(status, { "content-type": types[".json"], "cache-control": "no-store" });
+  res.writeHead(status, { "content-type": types[".json"], "cache-control": "no-store", ...headers });
   res.end(body);
 }
 
@@ -103,13 +152,28 @@ async function handleRpcCall(call) {
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url || "/", "http://localhost");
-  const pathname = decodeURIComponent(url.pathname);
+  const started = Date.now();
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("referrer-policy", "no-referrer");
+  res.setHeader("x-frame-options", "DENY");
+  let pathname = "/";
+  res.on("finish", () => {
+    if (!logRequests && res.statusCode < 500) return;
+    console.log(`${req.method} ${pathname} ${res.statusCode} ${Date.now() - started}ms ${clientIp(req)}`);
+  });
 
   try {
+    const url = new URL(req.url || "/", "http://localhost");
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      throw new HttpError("bad path", 400);
+    }
+
     if (pathname === "/rpc") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
-      const payload = JSON.parse(await readBody(req));
+      limited(rpcLimit, req);
+      const payload = await readJson(req);
       chain.touch();
       // Live mode answers eth_accounts / eth_sendTransaction itself and relays
       // the rest in one upstream batch; the local chain takes calls one by one.
@@ -132,7 +196,7 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/api/batch/intent") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
-      const body = JSON.parse(await readBody(req));
+      const body = await readJson(req);
       chain.touch();
       return sendJson(res, 200, await feature("batch", "batch allocator").submitIntent(body));
     }
@@ -157,43 +221,58 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, await feature("reporter", "registry").publish());
     }
 
+    // Test USDC for a visitor's own wallet, rate limited per address and per IP.
+    if (pathname === "/api/faucet") {
+      if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      chain.touch();
+      const { address } = await readJson(req);
+      return sendJson(res, 200, await feature("faucet", "faucet").drip({ address, ip: clientIp(req) }));
+    }
+
     if (pathname === "/api/control") {
       chain.touch();
       if (req.method === "GET") return sendJson(res, 200, await chain.control.status());
       if (req.method !== "POST") return sendJson(res, 405, { error: "GET or POST" });
-      const { op, value, token } = JSON.parse(await readBody(req));
+      limited(controlLimit, req);
+      const { op, value, token } = await readJson(req);
       let result;
       if (op === "blockTime") result = chain.control.setBlockTime(value);
       else if (op === "shock") result = chain.control.shock(value);
       else if (op === "restorePrice") result = chain.control.restorePrice();
       else if (op === "redeploy") result = await chain.control.redeploy(token);
-      else return sendJson(res, 400, { error: `unknown op: ${op}` });
+      else return sendJson(res, 400, { error: "unknown op" });
       return sendJson(res, 200, { ...result, ...(await chain.control.status()) });
     }
 
-    if (pathname === "/vendor/ethers.js") {
+    if (pathname === "/vendor/ethers.js" && req.method === "GET") {
       const body = await readFile(ethersBundle);
       res.writeHead(200, { "content-type": types[".js"], "cache-control": "no-store" });
       return res.end(body);
     }
 
-    const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
-    const file = join(root, safe === "/" ? "index.html" : safe);
-    const body = await readFile(file);
-    res.writeHead(200, {
-      "content-type": types[extname(file)] || "application/octet-stream",
-      "cache-control": "no-store"
-    });
-    res.end(body);
+    const entry = req.method === "GET" || req.method === "HEAD" ? staticFiles[pathname] : undefined;
+    if (!entry) throw new HttpError("not found", 404);
+    const [name, type] = entry;
+    const headers = { "content-type": type, "cache-control": "no-store" };
+    if (type === types[".html"]) headers["content-security-policy"] = csp;
+    res.writeHead(200, headers);
+    res.end(req.method === "HEAD" ? undefined : await readFile(join(root, name)));
   } catch (error) {
-    if (req.method === "GET" && !pathname.startsWith("/api")) {
-      const body = await readFile(join(root, "index.html"));
-      res.writeHead(200, { "content-type": types[".html"], "cache-control": "no-store" });
-      return res.end(body);
+    if (!error?.httpStatus) console.error(`${req.method} ${pathname}:`, error);
+    if (res.headersSent) return res.end();
+    const status = error?.httpStatus ?? 500;
+    const headers = error?.retryAfter ? { "retry-after": String(error.retryAfter) } : {};
+    if (status === 413) {
+      headers.connection = "close";
+      res.once("finish", () => req.destroy());
     }
-    sendJson(res, error?.httpStatus ?? 500, { error: error?.message ?? String(error) });
+    sendJson(res, status, { error: error?.httpStatus ? error.message : "internal error" }, headers);
   }
 });
+
+// A visitor that trickles its request in holds a socket; cut it off.
+server.requestTimeout = 15_000;
+server.headersTimeout = 10_000;
 
 server.listen(port, () => console.log(`\nMandate demo (${liveMode ? "live RPC" : "local chain"}) at http://localhost:${port}`));
 

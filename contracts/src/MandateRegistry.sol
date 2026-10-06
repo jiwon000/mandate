@@ -30,6 +30,17 @@ import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms} from "./interfaces/
 ///        against, so the call is restricted to the guard's own owner -- the
 ///        same operator already trusted to configure and lock the vault's
 ///        terms -- rather than left permissionless.
+///      - Once the owner names a canonical guard (setCanonicalGuard), only vaults
+///        whose `riskGuard()` is that guard can be registered at all. A vault that
+///        points at the canonical guard can only have locked terms there if the
+///        guard's owner or the protocol's MandateFactory configured it, and the
+///        factory only configures vaults it deployed itself from the reviewed
+///        MandateVault code. That closes the gap the round-2 note above left open:
+///        a self-deployed fake vault-plus-guard pair is refused outright instead of
+///        being cataloged under its own address.
+///      - registerFromFactory() is the permissionless path: anyone calls
+///        MandateFactory.createMandate(), which deploys, configures, locks and
+///        registers in one transaction, recording the caller as the operator.
 ///      - postLeaderboard() is the one privileged call. A DP statistic and the
 ///        epsilon spent computing it are not independently checkable on-chain, so
 ///        they are only accepted with a signature from a single configured
@@ -88,10 +99,22 @@ contract MandateRegistry is Ownable, EIP712 {
     error NothingToRecord();
     error OnlyVaultAgent();
     error AlreadyLinked();
+    error NotCanonicalGuard();
+    error OnlyFactory();
+    error AlreadySet();
 
     address public reporter;
     /// @notice Hard ceiling on cumulative epsilon ever released. 0 means no cap.
     uint256 public epsilonCap;
+
+    /// @notice The only guard whose vaults may be registered, once set. 0 means unset.
+    address public canonicalGuard;
+    /// @notice The MandateFactory allowed to register the vaults it creates.
+    address public factory;
+    /// @notice Who registered a vault: the guard owner, or whoever called the factory.
+    mapping(address => address) public operatorOf;
+    /// @notice Every registered vault, in registration order.
+    address[] private registered;
 
     mapping(address => Agent) public agentOf;
     mapping(address => Outcome) public outcomeOf;
@@ -116,6 +139,8 @@ contract MandateRegistry is Ownable, EIP712 {
     event OutcomeRecorded(address indexed vault, uint8 state, uint8 reason, uint64 frozenAt);
     event VaultLinked(address indexed agent, address indexed vault);
     event ReporterUpdated(address indexed reporter);
+    event CanonicalGuardSet(address indexed guard);
+    event FactorySet(address indexed factory);
     event EpsilonCapUpdated(uint256 cap);
     event LeaderboardPosted(
         uint256 indexed epoch,
@@ -132,6 +157,20 @@ contract MandateRegistry is Ownable, EIP712 {
         if (reporter_ == address(0)) revert ZeroReporter();
         reporter = reporter_;
         emit ReporterUpdated(reporter_);
+    }
+
+    /// @notice Restrict registration to vaults guarded by `guard`. Once.
+    function setCanonicalGuard(address guard) external onlyOwner {
+        if (canonicalGuard != address(0)) revert AlreadySet();
+        canonicalGuard = guard;
+        emit CanonicalGuardSet(guard);
+    }
+
+    /// @notice Name the factory whose vaults register through registerFromFactory(). Once.
+    function setFactory(address factory_) external onlyOwner {
+        if (factory != address(0)) revert AlreadySet();
+        factory = factory_;
+        emit FactorySet(factory_);
     }
 
     function setEpsilonCap(uint256 cap) external onlyOwner {
@@ -167,24 +206,70 @@ contract MandateRegistry is Ownable, EIP712 {
         FeeTerms calldata fees,
         bytes32 modelHash
     ) external {
-        if (agentOf[vault].registeredAt != 0) revert AlreadyRegistered();
-        IRiskGuard riskGuard = IMandateVaultView(vault).riskGuard();
-        address guard = address(riskGuard);
-        if (msg.sender != Ownable(guard).owner()) revert OnlyGuardOwner();
-        if (!riskGuard.termsLocked(vault)) revert TermsNotLocked();
-        bytes32 hash = keccak256(abi.encode(limits));
+        IRiskGuard riskGuard = _guardOf(vault);
+        if (msg.sender != Ownable(address(riskGuard)).owner()) revert OnlyGuardOwner();
+        // The trade terms are read from the guard, so the caller only restates the
+        // limits and fees; a mismatch in either changes the hash.
+        bytes32 hash = keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees));
         if (hash != riskGuard.termsHash(vault)) revert TermsMismatch();
-        if (!riskGuard.adapterAllowed(vault, adapter)) revert AdapterNotAllowed();
+        _register(vault, riskGuard, adapter, fees, modelHash, hash, msg.sender);
+    }
 
+    /// @notice Catalog a vault MandateFactory just created. Factory only.
+    /// @dev The factory deployed `vault` from the reviewed code, configured it on the
+    ///      canonical guard and locked it in the same transaction. Fees and the hash
+    ///      are read from the guard, so nothing here is taken on the factory's word
+    ///      except `modelHash` and who the operator is. When the operator is the
+    ///      vault's own agent the vault is linked under it at once.
+    function registerFromFactory(address vault, address adapter, bytes32 modelHash, address operator) external {
+        if (factory == address(0) || msg.sender != factory) revert OnlyFactory();
+        if (canonicalGuard == address(0)) revert NotCanonicalGuard();
+        IRiskGuard riskGuard = _guardOf(vault);
+        _register(vault, riskGuard, adapter, riskGuard.feesOf(vault), modelHash, riskGuard.termsHash(vault), operator);
+        if (operator == IMandateVaultView(vault).agent()) _link(vault, operator);
+    }
+
+    function registeredCount() external view returns (uint256) {
+        return registered.length;
+    }
+
+    /// @notice Registered vaults from `start`, at most `count` of them.
+    function registeredVaults(uint256 start, uint256 count) external view returns (address[] memory page) {
+        uint256 total = registered.length;
+        if (start >= total) return page;
+        uint256 end = start + count > total ? total : start + count;
+        page = new address[](end - start);
+        for (uint256 i = start; i < end; ++i) page[i - start] = registered[i];
+    }
+
+    function _guardOf(address vault) private view returns (IRiskGuard riskGuard) {
+        if (agentOf[vault].registeredAt != 0) revert AlreadyRegistered();
+        riskGuard = IMandateVaultView(vault).riskGuard();
+        if (canonicalGuard != address(0) && address(riskGuard) != canonicalGuard) revert NotCanonicalGuard();
+        if (!riskGuard.termsLocked(vault)) revert TermsNotLocked();
+    }
+
+    function _register(
+        address vault,
+        IRiskGuard riskGuard,
+        address adapter,
+        FeeTerms memory fees,
+        bytes32 modelHash,
+        bytes32 hash,
+        address operator
+    ) private {
+        if (!riskGuard.adapterAllowed(vault, adapter)) revert AdapterNotAllowed();
         agentOf[vault] = Agent({
-            guard: guard,
+            guard: address(riskGuard),
             adapter: adapter,
             fees: fees,
             modelHash: modelHash,
             termsHash: hash,
             registeredAt: block.timestamp
         });
-        emit AgentRegistered(vault, guard, adapter, hash, modelHash);
+        operatorOf[vault] = operator;
+        registered.push(vault);
+        emit AgentRegistered(vault, address(riskGuard), adapter, hash, modelHash);
     }
 
     /// @notice Anchor a signed DP release. The statistics themselves are computed
@@ -260,10 +345,14 @@ contract MandateRegistry is Ownable, EIP712 {
     function linkVault(address vault) external {
         if (agentOf[vault].registeredAt == 0) revert NotRegistered();
         if (IMandateVaultView(vault).agent() != msg.sender) revert OnlyVaultAgent();
+        _link(vault, msg.sender);
+    }
+
+    function _link(address vault, address agent) private {
         if (linked[vault]) revert AlreadyLinked();
         linked[vault] = true;
-        vaultsByAgent[msg.sender].push(vault);
-        emit VaultLinked(msg.sender, vault);
+        vaultsByAgent[agent].push(vault);
+        emit VaultLinked(agent, vault);
     }
 
     function vaultsOf(address agent) external view returns (address[] memory) {

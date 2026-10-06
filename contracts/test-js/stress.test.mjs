@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseUnits, keccak256, AbiCoder } from "ethers";
-import { fixture, BASE_LIMITS, coder } from "./fixture.mjs";
+import { fixture, BASE_LIMITS, coder, termsHashOf } from "./fixture.mjs";
 
 // Roadmap item 10: a realised-volatility estimate built from the marks the guard
 // observes, and a pre-trade stress test on orders that add exposure.
@@ -197,13 +197,7 @@ test("a window without a horizon or a sigma multiple is refused at configure(); 
   );
   await (await f.guard.configure(f.vaultAddress, { ...BASE_LIMITS, ...STRESS })).wait();
 
-  const tuple = "tuple(uint16,uint16,uint32,uint32,uint256,uint256,uint256,uint256,uint32,uint32,uint16)";
-  const hashOf = (l) =>
-    keccak256(AbiCoder.defaultAbiCoder().encode([tuple], [[
-      l.maxLeverageX100, l.maxDrawdownBps, l.minBlocksBetweenTrades, l.maxMarkAgeSeconds,
-      l.maxOrderNotional, l.maxPositionNotional, l.maxTotalNotional, l.maxBlockNotional,
-      l.volWindowSeconds, l.stressHorizonSeconds, l.stressSigmasX10
-    ]]));
+  const hashOf = (l) => termsHashOf(l);
   assert.equal(await f.guard.termsHash(f.vaultAddress), hashOf({ ...BASE_LIMITS, ...STRESS }));
   assert.notEqual(hashOf({ ...BASE_LIMITS, ...STRESS }), hashOf({ ...BASE_LIMITS, ...STRESS, stressSigmasX10: 20 }));
 });

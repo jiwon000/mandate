@@ -1,0 +1,19 @@
+# HYBLOCK 학회 발표 덱
+
+`mandate-club-deck.pdf`는 HYBLOCK 학회 발표용 한국어 덱입니다. 14장, 약 10분. 순서는 학회 요청대로 팀원별 담당 파트, 문제와 동기, 아키텍처, 데모 영상, 결과와 한계입니다. 해커톤 제출물은 아닙니다.
+
+- 내용은 `feat/marketplace-complete` 브랜치 기준입니다. 팩토리와 Launch, 거래 조건 6종, 수수료, Perpl 어댑터, 현금 출구가 들어 있습니다. 공개 데모(`docs/roadmap-feedback-0923` 빌드)에는 아직 없는 기능이고, 덱 13쪽에 그렇게 적었습니다.
+- 수치는 2026-10-06 기준입니다. 컨트랙트 테스트 93, 웹 테스트 61, Foundry 23(불변식 13), Perpl 포크 테스트 10회 연속 통과.
+- 색과 레이아웃은 팀 데모데이 덱에 맞췄습니다.
+- AI 도구(Claude Code)로 만든 초안입니다. 팀이 읽고 고칩니다.
+
+## 다시 만들기
+
+`build.cjs`가 덱 원본입니다. 11쪽에 데모 영상을 넣으므로 영상 파일과 표지 이미지가 필요합니다.
+
+```bash
+npm i pptxgenjs
+VIDEO=mandate-demo-ko.mp4 COVER=cover.png node build.cjs   # mandate-club-talk.pptx 생성
+```
+
+PDF는 PowerPoint에서 PDF로 내보낸 것입니다. 글꼴은 Pretendard입니다.

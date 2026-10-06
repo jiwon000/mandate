@@ -2,8 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      perpl_fork:
+        description: Also run the Perpl fork test against Monad testnet
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   contracts:
@@ -15,9 +24,24 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npm run compile
       - run: npm run test:contracts
       - run: npm run test:web
       - uses: foundry-rs/foundry-toolchain@v1
       - run: forge install
       - run: npm run test:invariant
+
+  # Reads Monad testnet over its public RPC and broadcasts nothing; opt-in because it
+  # depends on the network and on Perpl's testnet mark being fresh.
+  perpl-fork:
+    if: github.event_name == 'workflow_dispatch' && inputs.perpl_fork
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:perpl

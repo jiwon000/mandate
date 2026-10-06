@@ -21,6 +21,12 @@ const state = {
   blockNumber: 0,
   blockTimeSeconds: 1,
   wallet: null,
+  // "injected" when a browser wallet signs, "demo" when the server's demo
+  // allocator does (local chain, or the hosted demo's keys).
+  walletKind: null,
+  injected: null,
+  factoryCount: 0,
+  marketPrices: [],
   navSeries: new Map(),
   feed: [],
   lastScannedBlock: 0,
@@ -60,9 +66,59 @@ const lev = (x100) => (Number.isFinite(x100) ? `${(x100 / 100).toFixed(2)}×` : 
 const pct = (bps) => `${(bps / 100).toFixed(2)}%`;
 const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
+// --- terms --------------------------------------------------------------
+// A book deployed before MandateFactory carries no trade terms, fees or second
+// market. Everything below falls back to that older shape when the factory is
+// absent, so the hosted book keeps working until it is redeployed.
+const MARKET_FALLBACK = [{ id: 0, symbol: "ETH" }];
+const DIRECTION_NAMES = ["long or short", "long only", "short only"];
+// MandateRiskGuard.UNOBSERVABLE_MARK_AGES: a mark this many limits old lets
+// anyone freeze the vault with freezeUnobservable().
+const UNOBSERVABLE_MARK_AGES = 3;
+const FREEZE_REASONS = ["", "drawdown", "unobservable mark", "daily loss", "holding time"];
+const PUBLIC_RPC = { 10143: "https://testnet-rpc.monad.xyz" };
+const hasTerms = () => Boolean(state.deployment?.addresses?.factory);
+const marketsOf = () => state.deployment?.markets ?? MARKET_FALLBACK;
+const marketSymbol = (id) => marketsOf().find((m) => m.id === Number(id))?.symbol ?? `market ${id}`;
+const allowedMask = (vault) => Number(vault.trade?.allowedMarkets ?? 1);
+const marketNames = (mask) =>
+  marketsOf()
+    .filter((m) => (Number(mask) >> m.id) & 1)
+    .map((m) => m.symbol)
+    .join(" + ") || "none";
+const usdE18 = (value) => usd(BigInt(value) / ASSET_TO_E18);
+function duration(seconds) {
+  const s = Number(seconds);
+  if (s >= 86400 && s % 3600 === 0) return `${(s / 86400).toFixed(s % 86400 ? 1 : 0)}d`;
+  if (s >= 3600) return `${(s / 3600).toFixed(s % 3600 ? 1 : 0)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60 ? `${s % 60}s` : ""}`.trim();
+  return `${s}s`;
+}
+function homeMarket(vault) {
+  const mask = allowedMask(vault);
+  for (const m of marketsOf()) if ((mask >> m.id) & 1) return m.id;
+  return 0;
+}
+const priceOfMarket = (id) => state.marketPrices[id] ?? (id === 0 ? state.price : 0n);
+function sizeOf(vault, marketId) {
+  if (vault.terms) return vault.terms.sizes[marketId] ?? 0n;
+  return marketId === 0 && state.price > 0n ? (vault.positionNotional * ONE) / state.price : 0n;
+}
+// +1 or -1: which way an order adds exposure in this vault. Long-only and
+// short-only mandates have one answer; otherwise follow the open position.
+function riskSign(vault, marketId) {
+  const direction = Number(vault.trade?.direction ?? 0);
+  if (direction === 1) return 1n;
+  if (direction === 2) return -1n;
+  return sizeOf(vault, marketId) < 0n ? -1n : 1n;
+}
+
 const toast = $("#toast");
 let toastTimer = null;
 function showToast(message) {
+  const isError = /^(failed|reverted|could not|error)|\b(failed|error)\b/i.test(String(message));
+  toast.setAttribute("role", isError ? "alert" : "status");
+  toast.setAttribute("aria-live", isError ? "assertive" : "polite");
   toast.textContent = message;
   toast.classList.add("show");
   clearTimeout(toastTimer);
@@ -122,12 +178,20 @@ function optionalContracts(deployment, provider) {
   const { abis, batch, registry } = deployment;
   return {
     batch: batch ? new ethers.Contract(batch.address, abis.batch, provider) : null,
-    registry: registry ? new ethers.Contract(registry.address, abis.registry, provider) : null
+    registry: registry ? new ethers.Contract(registry.address, abis.registry, provider) : null,
+    factory:
+      deployment.addresses.factory && abis.factory
+        ? new ethers.Contract(deployment.addresses.factory, abis.factory, provider)
+        : null
   };
 }
 
 function applyFeatures(deployment) {
-  const present = { batch: Boolean(deployment.batch), privacy: Boolean(deployment.registry) };
+  const present = {
+    batch: Boolean(deployment.batch),
+    privacy: Boolean(deployment.registry),
+    launch: Boolean(deployment.addresses.factory)
+  };
   for (const [name, has] of Object.entries(present)) {
     const button = document.querySelector(`.nav [data-route="${name}"]`);
     if (button) button.hidden = !has;
@@ -159,11 +223,7 @@ async function boot() {
     vaults: deployment.vaults.map((v) => new ethers.Contract(v.address, abis.vault, provider))
   };
   applyFeatures(deployment);
-  state.eventInterfaces = [
-    new ethers.Interface(abis.vault),
-    new ethers.Interface(abis.guard),
-    new ethers.Interface(abis.venue)
-  ];
+  state.eventInterfaces = eventInterfacesFor(abis);
 
   state.live = Boolean(deployment.live);
   state.network = deployment.network ?? null;
@@ -186,6 +246,7 @@ async function boot() {
 
   buildLeaderboardSkeleton();
   updateSimulator();
+  initLaunch();
   await refresh();
   // A public RPC meters eth_call per request and a refresh is ~40 of them, so
   // the live page polls at a third of the local pace.
@@ -209,6 +270,10 @@ async function boot() {
   }
 }
 
+function eventInterfacesFor(abis) {
+  return [abis.vault, abis.guard, abis.venue, abis.factory].filter(Boolean).map((abi) => new ethers.Interface(abi));
+}
+
 function reportError(error) {
   const { name, detail } = describeRevert(error);
   console.error(error);
@@ -225,6 +290,10 @@ async function refresh() {
     state.chainTime = Number(block.timestamp);
     state.blockNumber = block.number;
     state.price = await contracts.venue.priceE18();
+    if (hasTerms()) {
+      state.marketPrices = await Promise.all(marketsOf().map((m) => contracts.venue.priceOf(m.id)));
+      await discoverLaunchedVaults();
+    }
 
     state.snapshot = await Promise.all(
       deployment.vaults.map(async (meta, index) => {
@@ -249,17 +318,19 @@ async function refresh() {
               : Promise.resolve([0n, 0n, 0n])
           ]);
 
+        const terms = hasTerms() ? await readTermState(meta) : null;
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
         const equity6 = mark[0];
         const equityE18 = equity6 * ASSET_TO_E18;
         // No position means no leverage, whatever the equity is. Only a vault
         // that still holds notional against zero equity is truly unbounded.
+        // The guard measures leverage on total notional across every market.
         const levX100 =
-          position[0] === 0n
+          position[1] === 0n
             ? 0
             : equityE18 === 0n
               ? Infinity
-              : Number((position[0] * 100n) / equityE18);
+              : Number((position[1] * 100n) / equityE18);
 
         return {
           ...meta,
@@ -273,6 +344,8 @@ async function refresh() {
           agentState: Number(agentState),
           unwindStepsDone: Number(unwindStepsDone),
           positionNotional: position[0],
+          totalNotional: position[1],
+          terms,
           equity6,
           levX100,
           hasVol,
@@ -302,6 +375,107 @@ async function refresh() {
   }
 }
 
+// The state the trade terms are judged on, read from the guard and the venue.
+async function readTermState(meta) {
+  const { guard, venue } = state.contracts;
+  const adapter = state.deployment.addresses.adapter;
+  const [daily, trades, openedAt, freeze, sizes] = await Promise.all([
+    guard.dailyLossQuote(meta.address, adapter),
+    guard.tradesOf(meta.address),
+    guard.positionOpenedAt(meta.address),
+    guard.freezeOf(meta.address),
+    Promise.all(marketsOf().map((m) => venue.positionOf(meta.address, m.id)))
+  ]);
+  const today = Math.floor(state.chainTime / 86400);
+  return {
+    dailyLossBps: Number(daily[0]),
+    tradesToday: Number(trades[0]) === today ? Number(trades[1]) : 0,
+    openedAt: Number(openedAt),
+    freezeReason: Number(freeze[0]),
+    sizes
+  };
+}
+
+const limitsFrom = (l) => ({
+  maxLeverageX100: Number(l.maxLeverageX100),
+  maxDrawdownBps: Number(l.maxDrawdownBps),
+  minBlocksBetweenTrades: Number(l.minBlocksBetweenTrades),
+  maxMarkAgeSeconds: Number(l.maxMarkAgeSeconds),
+  maxOrderNotional: l.maxOrderNotional.toString(),
+  maxPositionNotional: l.maxPositionNotional.toString(),
+  maxTotalNotional: l.maxTotalNotional.toString(),
+  maxBlockNotional: l.maxBlockNotional.toString(),
+  volWindowSeconds: Number(l.volWindowSeconds),
+  stressHorizonSeconds: Number(l.stressHorizonSeconds),
+  stressSigmasX10: Number(l.stressSigmasX10)
+});
+const tradeFrom = (t) => ({
+  allowedMarkets: Number(t.allowedMarkets),
+  direction: Number(t.direction),
+  maxPriceDeviationBps: Number(t.maxPriceDeviationBps),
+  maxTradesPerDay: Number(t.maxTradesPerDay),
+  maxDailyLossBps: Number(t.maxDailyLossBps),
+  maxHoldingSeconds: Number(t.maxHoldingSeconds)
+});
+const feesFrom = (f) => ({
+  performanceFeeBps: Number(f.performanceFeeBps),
+  managementFeeBps: Number(f.managementFeeBps)
+});
+
+// Vaults anyone opened through MandateFactory. Their terms are read back from
+// the guard, never taken from whoever launched them, so the page shows what
+// the contract will enforce.
+async function discoverLaunchedVaults() {
+  const { factory, guard } = state.contracts;
+  if (!factory) return false;
+  const count = Number(await factory.vaultCount());
+  if (count <= state.factoryCount) return false;
+  const start = state.factoryCount;
+  const page = await factory.vaultsFrom(start, count - start);
+  const found = await Promise.all(
+    page.map(async (address, offset) => {
+      const number = start + offset + 1;
+      const contract = new ethers.Contract(address, state.deployment.abis.vault, state.provider);
+      const [limits, trade, fees, termsHash, agent, operator] = await Promise.all([
+        guard.limitsOf(address),
+        guard.tradeTermsOf(address),
+        guard.feesOf(address),
+        guard.termsHash(address),
+        contract.agent(),
+        factory.operatorOf(address)
+      ]);
+      const t = tradeFrom(trade);
+      const l = limitsFrom(limits);
+      return {
+        contract,
+        meta: {
+          key: `launched-${address.toLowerCase()}`,
+          name: `Mandate #${number}`,
+          initials: `#${number}`,
+          thesis: `${lev(l.maxLeverageX100)} cap, ${marketNames(t.allowedMarkets)}, ${DIRECTION_NAMES[t.direction] ?? "?"}, launched by ${shortAddress(operator)}`,
+          launched: true,
+          operator,
+          address,
+          agent,
+          termsHash,
+          limits: l,
+          trade: t,
+          fees: feesFrom(fees)
+        }
+      };
+    })
+  );
+  // A redeploy while the reads were in flight replaced the book; drop them.
+  if (state.contracts.factory !== factory) return false;
+  for (const { meta, contract } of found) {
+    state.deployment.vaults.push(meta);
+    state.contracts.vaults.push(contract);
+  }
+  state.factoryCount = count;
+  buildLeaderboardSkeleton();
+  return true;
+}
+
 async function scanLogs() {
   let from = state.lastScannedBlock + 1;
   if (from > state.blockNumber) return;
@@ -312,6 +486,7 @@ async function scanLogs() {
   if (maxRange && state.blockNumber - from > maxRange) from = state.blockNumber - maxRange;
   const addresses = [
     state.deployment.addresses.guard,
+    ...(state.deployment.addresses.factory ? [state.deployment.addresses.factory] : []),
     ...state.deployment.vaults.map((v) => v.address)
   ];
   const logs = await state.provider.getLogs({
@@ -400,6 +575,41 @@ function describeLog(log) {
           tag: "CLOSED",
           kind: "pass"
         };
+      case "DailyLossBreach":
+        return {
+          at,
+          text: `${vaultLabel(parsed.args.vault)} · daily loss ${parsed.args.lossBps}bps proved by ${shortAddress(parsed.args.caller)}`,
+          tag: "BREACH",
+          kind: "breach"
+        };
+      case "HoldingTimeBreach":
+        return {
+          at,
+          text: `${vaultLabel(parsed.args.vault)} · position held past its limit, proved by ${shortAddress(parsed.args.caller)}`,
+          tag: "BREACH",
+          kind: "breach"
+        };
+      case "Unobservable":
+        return {
+          at,
+          text: `${vaultLabel(parsed.args.vault)} · no fresh mark since ${new Date(Number(parsed.args.markedAt) * 1000).toLocaleTimeString()}, frozen by ${shortAddress(parsed.args.caller)}`,
+          tag: "BLIND",
+          kind: "breach"
+        };
+      case "FeesAccrued":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · fees minted to the agent: ${usdc(parsed.args.managementAssets)} management, ${usdc(parsed.args.performanceAssets)} performance`,
+          tag: "FEE",
+          kind: "mark"
+        };
+      case "MandateCreated":
+        return {
+          at,
+          text: `new mandate ${shortAddress(parsed.args.vault)} launched by ${shortAddress(parsed.args.operator)}, terms ${parsed.args.termsHash.slice(0, 10)}…`,
+          tag: "LISTED",
+          kind: "pass"
+        };
       case "Allocated":
         return {
           at,
@@ -429,10 +639,10 @@ function buildLeaderboardSkeleton() {
   $("#leaderboard").innerHTML = ordered
     .map((vault, position) => {
       const index = state.deployment.vaults.indexOf(vault);
-      return `<div class="agent-row" data-index="${index}">
+      return `<div class="agent-row" data-index="${index}" role="button" tabindex="0" aria-label="Open ${vault.name}">
         <span class="rank">${String(position + 1).padStart(2, "0")}</span>
         <div class="agent-name">
-          <div class="agent-glyph${vault.key === "tight" ? " fly" : ""}">${vault.initials}</div>
+          <div class="agent-glyph${vault.key === "tight" ? " fly" : ""}${vault.launched ? " launched" : ""}">${vault.initials}</div>
           <div><b>${vault.name}</b><small>${vault.thesis}</small></div>
         </div>
         <div class="agent-cell"><b data-cell="nav">—</b><small data-cell="aum">AUM —</small></div>
@@ -443,15 +653,25 @@ function buildLeaderboardSkeleton() {
       </div>`;
     })
     .join("");
-
-  $("#leaderboard").addEventListener("click", (event) => {
-    const row = event.target.closest(".agent-row");
-    if (!row) return;
-    state.selected = Number(row.dataset.index);
-    render();
-    route("agent");
-  });
+  // Rows carry live cells that render() fills; a rebuilt skeleton has none yet.
+  if (state.snapshot.length) renderMarket();
 }
+
+// One listener for the table, however many times its rows are rebuilt.
+function openAgentRow(event) {
+  const row = event.target.closest(".agent-row");
+  if (!row) return;
+  state.selected = Number(row.dataset.index);
+  render();
+  route("agent");
+}
+$("#leaderboard").addEventListener("click", openAgentRow);
+$("#leaderboard").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  if (!event.target.classList.contains("agent-row")) return;
+  event.preventDefault();
+  openAgentRow(event);
+});
 
 function render() {
   if (!state.snapshot.length) return;
@@ -476,6 +696,8 @@ function renderMarket() {
 
   for (const row of $$("#leaderboard .agent-row")) {
     const vault = state.snapshot[Number(row.dataset.index)];
+    // A vault discovered this tick has a row before it has a snapshot.
+    if (!vault) continue;
     const cell = (name) => row.querySelector(`[data-cell="${name}"]`);
     cell("nav").textContent = nav4(vault.nav);
     cell("aum").textContent = `AUM ${usd(vault.totalAssets)}`;
@@ -505,7 +727,7 @@ function renderAgent() {
   $("#agentGlyph").textContent = vault.initials;
   $("#agentEyebrow").textContent = `MANDATE · ${stateName(vault.agentState)}`;
   $("#agentName").textContent = vault.name;
-  $("#agentThesis").textContent = `${vault.thesis} · ETH/USDC on DeterministicMockVenue`;
+  $("#agentThesis").textContent = `${vault.thesis} · ${marketNames(allowedMask(vault))} against USDC on DeterministicMockVenue (a mock venue)`;
   $("#agentNav").textContent = nav4(vault.nav);
   $("#agentNavSub").textContent = `high-water ${nav4(vault.highWater)}`;
   $("#agentDd").textContent = pct(vault.drawdownBps);
@@ -551,6 +773,267 @@ function renderAgent() {
     .join("");
 
   renderNavChart(vault);
+  renderTermSheet(vault);
+}
+
+// --- term sheet ---------------------------------------------------------
+// Every term the guard enforces for this vault, what it reads now, what
+// happens when it is crossed, and a button that crosses it. Pre-trade terms
+// make execute() revert; state terms let anyone freeze the vault for a bounty.
+function termRows(vault) {
+  const l = vault.limits;
+  const t = vault.trade;
+  const f = vault.fees;
+  const terms = vault.terms;
+  const active = vault.agentState === 0;
+  const funded = vault.totalSupply > 0n;
+  const reverts = (error) => `execute() reverts: <code>${error}</code>`;
+  const freezes = "anyone may freeze it with <code>poke()</code> and take the bounty";
+  const rows = [];
+  const pre = (row) => rows.push({ group: "pre", ...row });
+  const post = (row) => rows.push({ group: "post", ...row });
+  const need = active ? null : "the vault is not active";
+
+  // Whichever of the leverage and position caps a growing position meets first
+  // is the one an order can cross; the other row says so instead of offering a
+  // button that would only ever trip the first.
+  const equityE18 = vault.equity6 * ASSET_TO_E18;
+  const levCapE18 = (equityE18 * BigInt(l.maxLeverageX100)) / 100n;
+  const posCapE18 = BigInt(l.maxPositionNotional) < BigInt(l.maxTotalNotional) ? BigInt(l.maxPositionNotional) : BigInt(l.maxTotalNotional);
+  // The guard checks position size before leverage, so a near tie goes to the
+  // position cap.
+  const leverageBinds = funded && (levCapE18 * 1001n) / 1000n < posCapE18;
+  const notFunded = funded ? null : "allocate first: an empty vault has no equity to lever";
+  pre({
+    id: "leverage",
+    term: "Leverage",
+    locked: `${lev(l.maxLeverageX100)} of marked equity`,
+    now: lev(vault.levX100),
+    over: Number.isFinite(vault.levX100) && vault.levX100 > l.maxLeverageX100,
+    breach: reverts("LeverageExceeded"),
+    action: {
+      label: `Climb past ${lev(l.maxLeverageX100)}`,
+      blocked: need ?? notFunded ?? (leverageBinds ? null : `the ${usdE18(posCapE18)} position cap comes first at this equity`)
+    }
+  });
+  pre({
+    id: "order",
+    term: "Order size",
+    locked: `${usdE18(l.maxOrderNotional)} per order`,
+    now: "per order",
+    breach: reverts("OrderNotionalExceeded"),
+    action: { label: "Order at 1.2x the cap", blocked: need }
+  });
+  pre({
+    id: "position",
+    term: "Position size",
+    locked: `${usdE18(l.maxPositionNotional)} per market, ${usdE18(l.maxTotalNotional)} total`,
+    now: `${usdE18(vault.positionNotional)} / ${usdE18(vault.totalNotional ?? vault.positionNotional)}`,
+    over:
+      vault.positionNotional > BigInt(l.maxPositionNotional) ||
+      (vault.totalNotional ?? 0n) > BigInt(l.maxTotalNotional),
+    breach: reverts("PositionNotionalExceeded"),
+    action: {
+      label: "Climb past the cap",
+      blocked: need ?? notFunded ?? (leverageBinds ? `the ${lev(l.maxLeverageX100)} leverage cap comes first at this equity` : null)
+    }
+  });
+  pre({
+    id: "block",
+    term: "Per-block volume",
+    locked: `${usdE18(l.maxBlockNotional)} per block`,
+    now: "one order per click",
+    breach: reverts("BlockNotionalExceeded"),
+    action: null
+  });
+  pre({
+    id: "cooldown",
+    term: "Cooldown",
+    locked: l.minBlocksBetweenTrades ? `${l.minBlocksBetweenTrades} blocks between orders` : "off",
+    now: "",
+    breach: l.minBlocksBetweenTrades ? reverts("CooldownActive") : "nothing to cross",
+    action: l.minBlocksBetweenTrades ? { label: "Two orders back to back", blocked: need } : null
+  });
+  pre({
+    id: "markAge",
+    term: "Mark age",
+    locked: `${l.maxMarkAgeSeconds}s`,
+    now: `${vault.markAge}s`,
+    over: vault.markAge > l.maxMarkAgeSeconds,
+    breach: `${reverts("MarkTooOld")}; allocate() and withdraw() wait too`,
+    action: null
+  });
+  if (t) {
+    const blocked = marketsOf().find((m) => !((t.allowedMarkets >> m.id) & 1));
+    pre({
+      id: "market",
+      term: "Markets",
+      locked: marketNames(t.allowedMarkets),
+      now: terms
+        ? marketsOf()
+            .map((m) => `${m.symbol} ${Number(ethers.formatUnits(terms.sizes[m.id] ?? 0n, 18)).toFixed(3)}`)
+            .join(", ")
+        : "",
+      breach: reverts("MarketNotAllowed"),
+      action: blocked
+        ? { label: `Order on ${blocked.symbol}`, blocked: need, market: blocked.id }
+        : { label: "Every listed market", blocked: "this mandate allows every market the venue lists" }
+    });
+    const home = homeMarket(vault);
+    const size = terms ? terms.sizes[home] ?? 0n : 0n;
+    pre({
+      id: "direction",
+      term: "Direction",
+      locked: DIRECTION_NAMES[t.direction] ?? "?",
+      now: size === 0n ? "flat" : size > 0n ? "long" : "short",
+      breach: reverts("DirectionNotAllowed"),
+      action:
+        t.direction === 0
+          ? { label: "Both allowed", blocked: "this mandate may go long or short" }
+          : { label: t.direction === 1 ? "Open a short" : "Open a long", blocked: need }
+    });
+    pre({
+      id: "deviation",
+      term: "Limit price band",
+      locked: t.maxPriceDeviationBps ? `${t.maxPriceDeviationBps} bps from the mark` : "off",
+      now: t.maxPriceDeviationBps ? `this page quotes ${Math.floor(t.maxPriceDeviationBps / 2)} bps` : "",
+      breach: t.maxPriceDeviationBps ? reverts("PriceDeviationExceeded") : "nothing to cross",
+      action: t.maxPriceDeviationBps ? { label: "Limit at 2x the band", blocked: need } : null
+    });
+    const used = terms?.tradesToday ?? 0;
+    pre({
+      id: "trades",
+      term: "Orders per day",
+      locked: t.maxTradesPerDay ? `${t.maxTradesPerDay} that add risk, per UTC day` : "off",
+      now: t.maxTradesPerDay ? `${used} used today` : "",
+      over: t.maxTradesPerDay > 0 && used >= t.maxTradesPerDay,
+      breach: t.maxTradesPerDay ? reverts("DailyTradesExceeded") : "nothing to cross",
+      action: t.maxTradesPerDay
+        ? {
+            label: used >= t.maxTradesPerDay ? "Send one more" : `Use one (${used + 1}/${t.maxTradesPerDay})`,
+            blocked: need
+          }
+        : null
+    });
+  }
+  pre({
+    id: "stress",
+    term: "Stress test",
+    locked: vault.hasVol ? `survive a ${stressLabel(vault)} move inside the drawdown cap` : "off",
+    now: vault.hasVol ? `${pct(vault.stressedDrawdownBps)} at ${lev(vault.stressLevX100)}` : "",
+    over: vault.hasVol && vault.stressedDrawdownBps > l.maxDrawdownBps,
+    breach: vault.hasVol ? `${reverts("StressBreach")} for orders that add risk` : "nothing to cross",
+    action: null
+  });
+
+  post({
+    id: "drawdown",
+    term: "Drawdown",
+    locked: `${pct(l.maxDrawdownBps)} from the high-water NAV`,
+    now: pct(vault.drawdownBps),
+    over: vault.drawdownBps > l.maxDrawdownBps,
+    breach: freezes,
+    action: { label: "poke()", blocked: need }
+  });
+  if (t) {
+    post({
+      id: "dailyLoss",
+      term: "Daily loss",
+      locked: t.maxDailyLossBps ? `${pct(t.maxDailyLossBps)} from the day's opening NAV` : "off",
+      now: t.maxDailyLossBps ? pct(terms?.dailyLossBps ?? 0) : "",
+      over: t.maxDailyLossBps > 0 && (terms?.dailyLossBps ?? 0) > t.maxDailyLossBps,
+      breach: t.maxDailyLossBps ? freezes : "nothing to cross",
+      action: t.maxDailyLossBps ? { label: "poke()", blocked: need } : null
+    });
+    const held = terms?.openedAt ? Math.max(0, state.chainTime - terms.openedAt) : null;
+    post({
+      id: "holding",
+      term: "Holding time",
+      locked: t.maxHoldingSeconds ? `${duration(t.maxHoldingSeconds)} without going flat` : "off",
+      now: t.maxHoldingSeconds ? (held === null ? "flat" : `open ${duration(held)}`) : "",
+      over: t.maxHoldingSeconds > 0 && held !== null && held > t.maxHoldingSeconds,
+      breach: t.maxHoldingSeconds ? freezes : "nothing to cross",
+      action: t.maxHoldingSeconds ? { label: "poke()", blocked: need } : null
+    });
+  }
+  const blindAfter = l.maxMarkAgeSeconds * UNOBSERVABLE_MARK_AGES;
+  post({
+    id: "blind",
+    term: "Unobservable",
+    locked: `no mark for ${blindAfter}s`,
+    now: `${vault.markAge}s since the last mark`,
+    over: vault.markAge > blindAfter,
+    breach: "anyone may freeze it with <code>freezeUnobservable()</code> and take the bounty",
+    action: {
+      label: "freezeUnobservable()",
+      blocked: need ?? (!funded ? "nothing to protect in an empty vault" : vault.markAge > blindAfter ? null : `the mark is fresher than ${blindAfter}s`)
+    }
+  });
+  if (f) {
+    rows.push({
+      group: "fee",
+      id: "fees",
+      term: "Fees",
+      locked: `${pct(f.performanceFeeBps)} of gains over the high-water mark, ${pct(f.managementFeeBps)} a year`,
+      now: "",
+      breach: "paid to the agent in new shares, never in cash",
+      action: { label: "accrueFees()", blocked: need }
+    });
+  }
+  return rows;
+}
+
+const TERM_GROUPS = {
+  pre: "Checked before every order. The order never fills.",
+  post: "Checked on the mark. Crossing one needs no order, so anyone may prove it.",
+  fee: "Charged by the vault itself."
+};
+
+function renderTermSheet(vault) {
+  const sheet = $("#termSheet");
+  if (!sheet) return;
+  const rows = termRows(vault);
+  const shape = `${vault.key}:${rows.map((r) => r.id).join(",")}`;
+  if (sheet.dataset.shape !== shape) {
+    let group = null;
+    sheet.innerHTML =
+      `<div class="term-head"><span>Term</span><span>Locked value</span><span>Now</span><span>If crossed</span><span></span></div>` +
+      rows
+        .map((row) => {
+          const heading = row.group !== group ? `<div class="term-group">${TERM_GROUPS[row.group]}</div>` : "";
+          group = row.group;
+          return `${heading}<div class="term-row" data-term="${row.id}">
+            <span class="term-name">${row.term}</span>
+            <span class="term-locked" data-cell="locked"></span>
+            <span class="term-now" data-cell="now"></span>
+            <span class="term-breach">${row.breach}</span>
+            <span class="term-action">${row.action ? `<button class="button button-secondary button-small" data-test="${row.id}"></button>` : ""}</span>
+          </div>`;
+        })
+        .join("");
+    sheet.dataset.shape = shape;
+  }
+  for (const row of rows) {
+    const el = sheet.querySelector(`[data-term="${row.id}"]`);
+    el.querySelector('[data-cell="locked"]').textContent = row.locked;
+    const now = el.querySelector('[data-cell="now"]');
+    now.textContent = row.now || "—";
+    now.classList.toggle("breached", Boolean(row.over));
+    const button = el.querySelector("[data-test]");
+    if (button && !button.dataset.busy) {
+      button.textContent = row.action.label;
+      button.disabled = Boolean(row.action.blocked);
+      button.title = row.action.blocked ?? "";
+      if (row.action.market !== undefined) button.dataset.market = row.action.market;
+    }
+  }
+  const reason = vault.terms?.freezeReason;
+  $("#termSheetBadge").textContent =
+    vault.agentState === 1 && reason ? `FROZEN: ${FREEZE_REASONS[reason]?.toUpperCase()}` : "LOCKED ONCHAIN";
+  $("#termSheetBadge").classList.toggle("alarm", vault.agentState === 1);
+  $("#termSheetNote").textContent = hasTerms()
+    ? `Every value above is read from MandateRiskGuard for ${shortAddress(vault.address)} and hashes to ${vault.termsHash.slice(0, 10)}…, the hash locked before the first deposit. The buttons sign as ${vault.launched ? "this mandate's agent key (your wallet, if you launched it)" : "the demo agent key"}; the order buttons send real orders the guard judges.`
+    : "This book predates trade terms and fees: only size, leverage, drawdown, mark age and stress are enforced here. A redeploy brings the full term sheet.";
 }
 
 function renderNavChart(vault) {
@@ -628,12 +1111,16 @@ function renderAllocate() {
         : "Review allocation";
   const withdrawButton = $("#withdrawButton");
   if (!withdrawButton.dataset.busy) {
-    // A Closed vault holds no position, so withdraw() skips the mark-age check.
-    withdrawButton.disabled = stale && !closed;
+    // A Closed vault holds no position, so withdraw() skips the mark-age check. A
+    // Frozen vault whose mark has stopped offers withdrawUnpriced(): the stake's
+    // share of the cash, capped at the last mark, without the part at the venue.
+    withdrawButton.disabled = stale && !closed && !frozen;
     withdrawButton.textContent = closed
       ? "Withdraw all shares (cash only, no mark needed)"
-      : stale
-        ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
+      : stale && frozen
+        ? "Take the cash-only exit (leaves the venue part to those who stay)"
+        : stale
+          ? `Waiting on a mark under ${vault.limits.maxMarkAgeSeconds}s`
         : frozen
           ? "Withdraw all shares (still open)"
           : "Withdraw all shares";
@@ -830,7 +1317,7 @@ $("#depositEscrowButton").addEventListener("click", (event) =>
     if (!state.wallet) throw new Error("connect the allocator account first");
     const amount = ethers.parseUnits(String(Number($("#escrowAmount").value) || 0), 6);
     if (amount === 0n) throw new Error("amount must be greater than zero");
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     await (await state.contracts.usdc.connect(signer).approve(state.deployment.batch.address, amount)).wait();
     button.textContent = "depositEscrow()…";
     await (await state.contracts.batch.connect(signer).depositEscrow(amount)).wait();
@@ -843,7 +1330,7 @@ $("#withdrawEscrowButton").addEventListener("click", (event) =>
     if (!state.wallet) throw new Error("connect the allocator account first");
     const escrow = await state.contracts.batch.escrowOf(state.wallet);
     if (escrow === 0n) throw new Error("no escrow to withdraw");
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     await (await state.contracts.batch.connect(signer).withdrawEscrow(escrow)).wait();
     showToast(`Withdrew ${usdc(escrow)} mUSDC from batch escrow`);
   })
@@ -853,6 +1340,7 @@ $("#signIntentButton").addEventListener("click", (event) =>
   withButton(event.currentTarget, "signing…", async () => {
     if (!state.wallet) throw new Error("connect the allocator account first");
     const vault = state.snapshot[state.selected];
+    if (vault.launched) throw new Error("the batch allocator only nets into the four demo vaults; allocate to a launched mandate directly");
     const amount = ethers.parseUnits(String(Number($("#intentAmount").value) || 0), 6);
     if (amount === 0n) throw new Error("amount must be greater than zero");
 
@@ -882,7 +1370,7 @@ $("#signIntentButton").addEventListener("click", (event) =>
       chainId: state.deployment.chainId,
       verifyingContract: b.address
     };
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     const signature = await signer.signTypedData(domain, INTENT_TYPES, intent);
 
     const response = await fetch("/api/batch/intent", {
@@ -918,7 +1406,7 @@ $("#claimList").addEventListener("click", (event) => {
   const entry = state.batch.claims[Number(button.dataset.claim)];
   withButton(button, "claimShares()…", async () => {
     if (!state.wallet) throw new Error("connect the allocator account first");
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     await (await state.contracts.batch.connect(signer).claimShares(entry.intent, entry.proof)).wait();
     showToast(`Claimed shares from ${usdc(BigInt(entry.intent.amount))} mUSDC paid into ${vaultLabel(entry.intent.vault)}`);
   });
@@ -1053,7 +1541,12 @@ document.addEventListener("click", (event) => {
   const target = event.target.closest("[data-route]");
   if (target) route(target.dataset.route);
 });
-route(location.hash.slice(1) || "market");
+const knownRoute = (name) => $$(".view").some((view) => view.dataset.view === name);
+window.addEventListener("hashchange", () => {
+  const name = location.hash.slice(1);
+  if (knownRoute(name)) route(name);
+});
+route(knownRoute(location.hash.slice(1)) ? location.hash.slice(1) : "market");
 
 // --- transactions -------------------------------------------------------
 async function withButton(button, label, action) {
@@ -1089,35 +1582,227 @@ async function withButton(button, label, action) {
   }
 }
 
-function orderFor(sizeDeltaE18) {
-  const limitPrice =
-    sizeDeltaE18 > 0n ? (state.price * 105n) / 100n : (state.price * 95n) / 100n;
-  return ethers.AbiCoder.defaultAbiCoder().encode(
-    ["int256", "uint256"],
-    [sizeDeltaE18, limitPrice]
-  );
+// The signer for an address: the browser wallet when it holds that address,
+// otherwise the server's demo key for it (the local chain's unlocked accounts,
+// or the hosted demo's keys behind its allowlist).
+async function signerFor(address) {
+  const injected = state.injected;
+  if (injected && address && injected.address.toLowerCase() === String(address).toLowerCase()) {
+    return injected.signer;
+  }
+  return state.provider.getSigner(address);
 }
 
-// Size an order to land at a target leverage against the vault's *mark* equity,
-// which is what the guard measures. Returns the signed delta in 1e18 ETH.
+// An order for the adapter. Market 0 keeps the original two-word encoding so a
+// book from before multi-market accepts it; any other market adds its id. The
+// limit price sits at half the mandate's deviation band, or `bandBps` when the
+// caller wants a specific distance from the mark.
+function orderFor(vault, sizeDeltaE18, marketId = 0, bandBps = null) {
+  const price = priceOfMarket(marketId);
+  const dev = Number(vault?.trade?.maxPriceDeviationBps ?? 0);
+  const bps = BigInt(bandBps ?? (dev ? Math.floor(dev / 2) : 500));
+  const limitPrice = sizeDeltaE18 > 0n ? (price * (10_000n + bps)) / 10_000n : (price * (10_000n - bps)) / 10_000n;
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+  return marketId === 0
+    ? coder.encode(["int256", "uint256"], [sizeDeltaE18, limitPrice])
+    : coder.encode(["uint256", "int256", "uint256"], [marketId, sizeDeltaE18, limitPrice]);
+}
+
+// Size an order on the vault's home market so total notional lands at a target
+// leverage of marked equity, which is what the guard measures. Signed, 1e18.
 function sizeForLeverage(vault, targetX100) {
+  const market = homeMarket(vault);
+  const price = priceOfMarket(market);
   const equityE18 = vault.equity6 * ASSET_TO_E18;
-  if (equityE18 === 0n || state.price === 0n) return 0n;
-  const targetNotional = (equityE18 * BigInt(Math.round(targetX100))) / 100n;
-  const targetSize = (targetNotional * ONE) / state.price;
-  const currentSize = (vault.positionNotional * ONE) / state.price;
-  return targetSize - currentSize;
+  if (equityE18 === 0n || price === 0n) return 0n;
+  const otherNotional = (vault.totalNotional ?? vault.positionNotional) - abs(sizeOf(vault, market) * price / ONE);
+  const targetNotional = (equityE18 * BigInt(Math.round(targetX100))) / 100n - otherNotional;
+  const sign = riskSign(vault, market);
+  const targetSize = sign * ((targetNotional > 0n ? targetNotional : 0n) * ONE) / price;
+  return targetSize - sizeOf(vault, market);
+}
+const abs = (x) => (x < 0n ? -x : x);
+// Grow the home-market position to `targetNotionalE18` in orders that each fit
+// the order and block caps, so the last one meets the cap being tested rather
+// than the per-order cap.
+async function climbTo(vault, index, targetNotionalE18) {
+  const market = homeMarket(vault);
+  const price = priceOfMarket(market);
+  const l = vault.limits;
+  const perOrder = BigInt(l.maxOrderNotional) < BigInt(l.maxBlockNotional) ? BigInt(l.maxOrderNotional) : BigInt(l.maxBlockNotional);
+  const step = (((perOrder * 9n) / 10n) * ONE) / price;
+  const sign = riskSign(vault, market);
+  const otherNotional = (vault.totalNotional ?? vault.positionNotional) - abs((sizeOf(vault, market) * price) / ONE);
+  const own = targetNotionalE18 - otherNotional;
+  let left = (sign * (own > 0n ? own : 0n) * ONE) / price - sizeOf(vault, market);
+  if (left === 0n || (left > 0n) !== (sign > 0n)) throw new Error("the position already sits past that point");
+  while (abs(left) > step) {
+    const part = left > 0n ? step : -step;
+    await sendOrder(vault, index, part, market);
+    left -= part;
+  }
+  await sendOrder(vault, index, left, market);
+}
+// A size worth `usdAmount` dollars on a market, in the direction that adds risk.
+function smallOrder(vault, marketId, usdAmount = 200) {
+  const price = priceOfMarket(marketId);
+  if (price === 0n) return 0n;
+  return (riskSign(vault, marketId) * BigInt(usdAmount) * ONE * ONE) / price;
 }
 
-$("#walletButton").addEventListener("click", async (event) => {
-  const address = state.deployment.accounts.allocator;
+async function sendOrder(vault, index, delta, marketId = 0, bandBps = null) {
+  if (delta === 0n) throw new Error("nothing to send: the order rounds to zero");
+  const signer = await signerFor(vault.agent);
+  const contract = state.contracts.vaults[index].connect(signer);
+  return (await contract.execute(state.deployment.addresses.adapter, orderFor(vault, delta, marketId, bandBps))).wait();
+}
+
+// --- wallet -------------------------------------------------------------
+function setWallet(address, kind) {
   state.wallet = address;
-  event.currentTarget.textContent = shortAddress(address);
-  await refresh();
-  const balance = await state.contracts.usdc.balanceOf(address);
+  state.walletKind = kind;
+  $("#walletButton").textContent = address ? `${shortAddress(address)}${kind === "injected" ? "" : " · demo"}` : "Connect";
+  $("#walletMenu").classList.remove("open");
+  document.body.classList.toggle("connected", Boolean(address));
+  updateLaunchAgent();
+}
+
+async function showBalance() {
+  if (!state.wallet) return;
+  const balance = await state.contracts.usdc.balanceOf(state.wallet);
   $("#walletBalance").textContent = `Balance ${usdc(balance)} mUSDC`;
-  showToast(`Allocator ${shortAddress(address)} connected to ${state.live ? state.network?.label ?? "the live chain" : "the local chain"}`);
+}
+
+// A wallet that has never seen this chain is offered it. Live books point the
+// wallet at the public RPC; the local chain only exists behind this server.
+async function connectInjected() {
+  const ethereum = window.ethereum;
+  if (!ethereum) throw new Error("no browser wallet found; install one, or use the demo allocator");
+  const chainId = state.deployment.chainId;
+  const hexId = `0x${chainId.toString(16)}`;
+  await ethereum.request({ method: "eth_requestAccounts" });
+  const current = await ethereum.request({ method: "eth_chainId" });
+  if (current !== hexId) {
+    try {
+      await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexId }] });
+    } catch (error) {
+      if (error?.code !== 4902 && error?.data?.originalError?.code !== 4902) throw error;
+      await ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: hexId,
+            chainName: state.network?.label ?? `Chain ${chainId}`,
+            nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+            rpcUrls: [PUBLIC_RPC[chainId] ?? new URL("/rpc", window.location.href).toString()],
+            ...(state.network?.explorer ? { blockExplorerUrls: [state.network.explorer] } : {})
+          }
+        ]
+      });
+    }
+  }
+  const browser = new ethers.BrowserProvider(ethereum, chainId);
+  const signer = await browser.getSigner();
+  state.injected = { address: await signer.getAddress(), signer };
+  if (!state.injectedListening) {
+    state.injectedListening = true;
+    ethereum.on?.("accountsChanged", (accounts) => {
+      if (state.walletKind !== "injected") return;
+      if (!accounts.length) {
+        state.injected = null;
+        return setWallet(null, null);
+      }
+      connectInjected()
+        .then(() => setWallet(state.injected.address, "injected"))
+        .then(showBalance)
+        .catch(reportError);
+    });
+    ethereum.on?.("chainChanged", () => {
+      if (state.walletKind === "injected") showToast("Your wallet switched networks; reconnect to sign here");
+      state.injected = null;
+    });
+  }
+  return state.injected.address;
+}
+
+$("#walletButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  $("#walletMenu").classList.toggle("open");
+  $("#walletInjected").hidden = !window.ethereum;
+  $("#walletNoInjected").hidden = Boolean(window.ethereum);
+  $("#walletFaucet").disabled = !state.wallet || !hasTerms();
+  $("#walletFaucet").title = !hasTerms() ? "this book predates the faucet" : !state.wallet ? "connect first" : "";
 });
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#walletMenu, #walletButton")) $("#walletMenu").classList.remove("open");
+});
+
+// Wallet menu a11y: aria-expanded mirrors the open class, Escape closes and
+// returns focus, arrows move between visible menu items.
+{
+  const walletMenu = $("#walletMenu");
+  const walletButton = $("#walletButton");
+  const items = () => $$("#walletMenu [role=menuitem]").filter((el) => !el.hidden && !el.disabled);
+  new MutationObserver(() => {
+    const open = walletMenu.classList.contains("open");
+    walletButton.setAttribute("aria-expanded", String(open));
+    if (open) items()[0]?.focus();
+  }).observe(walletMenu, { attributes: true, attributeFilter: ["class"] });
+  walletButton.setAttribute("aria-expanded", "false");
+  walletMenu.addEventListener("keydown", (event) => {
+    const list = items();
+    const at = list.indexOf(document.activeElement);
+    let next = null;
+    if (event.key === "ArrowDown") next = list[(at + 1) % list.length];
+    else if (event.key === "ArrowUp") next = list[(at - 1 + list.length) % list.length];
+    else if (event.key === "Home") next = list[0];
+    else if (event.key === "End") next = list[list.length - 1];
+    if (next) { event.preventDefault(); next.focus(); }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !walletMenu.classList.contains("open")) return;
+    walletMenu.classList.remove("open");
+    walletButton.focus();
+  });
+}
+
+$("#walletInjected").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "waiting for wallet…", async () => {
+    const address = await connectInjected();
+    setWallet(address, "injected");
+    await refresh();
+    await showBalance();
+    showToast(`${shortAddress(address)} connected from your wallet on ${state.network?.label ?? "this chain"}`);
+  })
+);
+
+$("#walletDemo").addEventListener("click", async () => {
+  setWallet(state.deployment.accounts.allocator, "demo");
+  await refresh();
+  await showBalance();
+  showToast(
+    `Demo allocator ${shortAddress(state.wallet)} connected to ${state.live ? state.network?.label ?? "the live chain" : "the local chain"}. The server signs for it.`
+  );
+});
+
+$("#walletFaucet").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "minting…", async () => {
+    if (!state.wallet) throw new Error("connect first");
+    const response = await fetch("/api/faucet", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ address: state.wallet })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `faucet answered ${response.status}`);
+    const native = BigInt(body.native ?? 0);
+    showToast(
+      `${usdc(BigInt(body.usdc))} test mUSDC sent to ${shortAddress(body.address)}` +
+        (native > 0n ? ` with ${ethers.formatEther(native)} MON for gas` : "")
+    );
+    await showBalance();
+  })
+);
 
 // --- allocation ---------------------------------------------------------
 const amountInput = $("#allocationAmount");
@@ -1161,10 +1846,37 @@ $$("[data-close-modal]").forEach((element) =>
   })
 );
 
+// Modal a11y: focus moves in on open, returns on close; Escape closes; Tab stays inside.
+{
+  let opener = null;
+  new MutationObserver(() => {
+    if (modal.classList.contains("open")) {
+      opener = document.activeElement;
+      modal.querySelector(".modal-close")?.focus();
+    } else if (opener) {
+      opener.focus?.();
+      opener = null;
+    }
+  }).observe(modal, { attributes: true, attributeFilter: ["class"] });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    } else if (event.key === "Tab") {
+      const f = $$("#modal button, #modal input, #modal select, #modal textarea, #modal a[href]")
+        .filter((el) => !el.disabled && !el.hidden && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  });
+}
+
 $("#signIntent").addEventListener("click", (event) =>
   withButton(event.currentTarget, "approve()…", async (button) => {
     const vault = state.snapshot[state.selected];
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     const assets = ethers.parseUnits(String(Number(amountInput.value) || 0), 6);
     if (assets === 0n) throw new Error("amount must be greater than zero");
     const usdcContract = state.contracts.usdc.connect(signer);
@@ -1184,8 +1896,20 @@ $("#withdrawButton").addEventListener("click", (event) =>
     if (!state.wallet) throw new Error("connect the allocator account first");
     const vault = state.snapshot[state.selected];
     if (vault.userShares === 0n) throw new Error("no shares in this vault");
-    const signer = await state.provider.getSigner(state.wallet);
+    const signer = await signerFor(state.wallet);
     const vaultContract = state.contracts.vaults[state.selected].connect(signer);
+    const stale = vault.markAge > vault.limits.maxMarkAgeSeconds;
+    if (vault.agentState === 1 && stale) {
+      if (!vaultContract.interface.getFunction("withdrawUnpriced")) {
+        throw new Error("this deployment predates the cash-only exit; wait for the mark or the unwind");
+      }
+      // Ask the chain what it pays now and refuse anything less when it lands.
+      const assets = await vaultContract.withdrawUnpriced.staticCall(vault.userShares, state.wallet, 0n);
+      await (await vaultContract.withdrawUnpriced(vault.userShares, state.wallet, assets)).wait();
+      showToast(`Cash-only exit: ${usdc(assets)} mUSDC paid; the venue part stays with the vault`);
+      $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
+      return;
+    }
     await (await vaultContract.withdraw(vault.userShares, state.wallet)).wait();
     // The vault pays at the marked price out of the cash it holds, so a stake
     // backed by an open position can come out in parts. Report what is left
@@ -1210,9 +1934,7 @@ $("#compliantOrder").addEventListener("click", (event) =>
     const vault = state.snapshot[state.selected];
     const delta = sizeForLeverage(vault, vault.limits.maxLeverageX100 * 0.7);
     if (delta === 0n) throw new Error("already at the target");
-    const signer = await state.provider.getSigner(vault.agent);
-    const contract = state.contracts.vaults[state.selected].connect(signer);
-    await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
+    await sendOrder(vault, state.selected, delta, homeMarket(vault));
     showToast(`${vault.name} rebalanced to ~${lev(vault.limits.maxLeverageX100 * 0.7)}`);
   })
 );
@@ -1221,9 +1943,7 @@ $("#runViolation").addEventListener("click", (event) =>
   withButton(event.currentTarget, "execute()…", async () => {
     const vault = state.snapshot[state.selected];
     const delta = sizeForLeverage(vault, vault.limits.maxLeverageX100 + 80);
-    const signer = await state.provider.getSigner(vault.agent);
-    const contract = state.contracts.vaults[state.selected].connect(signer);
-    await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
+    await sendOrder(vault, state.selected, delta, homeMarket(vault));
     showToast("Order went through — it was inside the mandate after all");
   })
 );
@@ -1231,13 +1951,12 @@ $("#runViolation").addEventListener("click", (event) =>
 $("#reduceOrder").addEventListener("click", (event) =>
   withButton(event.currentTarget, "execute()…", async () => {
     const vault = state.snapshot[state.selected];
-    if (vault.positionNotional === 0n || state.price === 0n) throw new Error("nothing on the book to reduce");
-    const currentSize = (vault.positionNotional * ONE) / state.price;
+    const market = homeMarket(vault);
+    const currentSize = sizeOf(vault, market);
+    if (currentSize === 0n) throw new Error("nothing on the book to reduce");
     const delta = -(currentSize / 5n);
     if (delta === 0n) throw new Error("position too small to split");
-    const signer = await state.provider.getSigner(vault.agent);
-    const contract = state.contracts.vaults[state.selected].connect(signer);
-    await (await contract.execute(state.deployment.addresses.adapter, orderFor(delta))).wait();
+    await sendOrder(vault, state.selected, delta, market);
     showToast(`${vault.name} cut a fifth of its position. Orders that reduce exposure are never stress-tested.`);
   })
 );
@@ -1247,7 +1966,7 @@ $("#pokeButton").addEventListener("click", (event) =>
     const vault = state.snapshot[state.selected];
     const caller = state.wallet ?? state.deployment.accounts.keeper;
     const before = await state.contracts.usdc.balanceOf(caller);
-    const signer = await state.provider.getSigner(caller);
+    const signer = await signerFor(caller);
     const guard = state.contracts.guard.connect(signer);
     await (await guard.poke(vault.address, state.deployment.addresses.adapter)).wait();
     const after = await state.contracts.usdc.balanceOf(caller);
@@ -1264,7 +1983,7 @@ $("#unwindButton").addEventListener("click", (event) =>
     const vault = state.snapshot[state.selected];
     const caller = state.wallet ?? state.deployment.accounts.keeper;
     const before = await state.contracts.usdc.balanceOf(caller);
-    const signer = await state.provider.getSigner(caller);
+    const signer = await signerFor(caller);
     const contract = state.contracts.vaults[state.selected].connect(signer);
     const receipt = await (await contract.unwind()).wait();
     const after = await state.contracts.usdc.balanceOf(caller);
@@ -1283,6 +2002,330 @@ $("#unwindButton").addEventListener("click", (event) =>
     );
   })
 );
+
+// --- term sheet tests ---------------------------------------------------
+// Each button sends the transaction that crosses its term and reports what the
+// chain answered. A test the guard lets through is reported as such, never
+// dressed up as a refusal.
+const TERM_TESTS = {
+  async leverage(vault, index) {
+    const l = vault.limits;
+    const levCap = (vault.equity6 * ASSET_TO_E18 * BigInt(l.maxLeverageX100)) / 100n;
+    const posCap = BigInt(l.maxPositionNotional);
+    // Land past the leverage cap but short of the position cap, which the
+    // guard checks first.
+    const over = (levCap * 102n) / 100n;
+    const between = (levCap + posCap) / 2n;
+    await climbTo(vault, index, over < between ? over : between);
+    return "Every order filled: the position stayed inside the leverage cap";
+  },
+  async position(vault, index) {
+    const l = vault.limits;
+    const cap = BigInt(l.maxPositionNotional) < BigInt(l.maxTotalNotional) ? BigInt(l.maxPositionNotional) : BigInt(l.maxTotalNotional);
+    await climbTo(vault, index, (cap * 105n) / 100n);
+    return "Every order filled: the position stayed inside the cap";
+  },
+  async order(vault, index) {
+    const market = homeMarket(vault);
+    const notional = (BigInt(vault.limits.maxOrderNotional) * 12n) / 10n;
+    const size = (riskSign(vault, market) * notional * ONE) / priceOfMarket(market);
+    await sendOrder(vault, index, size, market);
+    return "The order filled";
+  },
+  async cooldown(vault, index) {
+    const market = homeMarket(vault);
+    await sendOrder(vault, index, smallOrder(vault, market), market);
+    await sendOrder(vault, index, -smallOrder(vault, market), market);
+    return "Both orders filled: they landed further apart than the cooldown";
+  },
+  async market(vault, index, button) {
+    const market = Number(button.dataset.market);
+    await sendOrder(vault, index, smallOrder(vault, market), market);
+    return `The ${marketSymbol(market)} order filled`;
+  },
+  async direction(vault, index) {
+    const market = homeMarket(vault);
+    const size = sizeOf(vault, market);
+    const want = vault.trade.direction === 1 ? -1n : 1n;
+    const step = (want * 200n * ONE * ONE) / priceOfMarket(market);
+    // The flip is one order when it fits under the order cap; otherwise take
+    // the position down first with orders that only reduce it, which the
+    // direction term always lets through.
+    const cap = (BigInt(vault.limits.maxOrderNotional) * ONE) / priceOfMarket(market);
+    let left = size;
+    while (abs(left) > cap / 2n) {
+      const cut = -(left / 2n);
+      await sendOrder(vault, index, cut, market);
+      left += cut;
+    }
+    await sendOrder(vault, index, -left + step, market);
+    return "The flip filled";
+  },
+  async deviation(vault, index) {
+    const market = homeMarket(vault);
+    await sendOrder(vault, index, smallOrder(vault, market), market, vault.trade.maxPriceDeviationBps * 2);
+    return "The order filled inside the band";
+  },
+  async trades(vault, index) {
+    const market = homeMarket(vault);
+    await sendOrder(vault, index, smallOrder(vault, market), market);
+    return `Order ${(vault.terms?.tradesToday ?? 0) + 1} of ${vault.trade.maxTradesPerDay} today filled`;
+  },
+  drawdown: pokeTest,
+  dailyLoss: pokeTest,
+  holding: pokeTest,
+  async blind(vault) {
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const before = await state.contracts.usdc.balanceOf(caller);
+    const guard = state.contracts.guard.connect(await signerFor(caller));
+    await (await guard.freezeUnobservable(vault.address)).wait();
+    const paid = (await state.contracts.usdc.balanceOf(caller)) - before;
+    return `No fresh mark for ${vault.markAge}s: ${vault.name} is frozen and ${shortAddress(caller)} was paid ${usdc(paid)} mUSDC`;
+  },
+  async fees(vault, index) {
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const contract = state.contracts.vaults[index].connect(await signerFor(caller));
+    const receipt = await (await contract.accrueFees()).wait();
+    const event = receipt.logs
+      .map((log) => {
+        try {
+          return contract.interface.parseLog(log);
+        } catch (ignored) {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.name === "FeesAccrued");
+    return event
+      ? `Fees charged: ${usdc(event.args.managementAssets)} management and ${usdc(event.args.performanceAssets)} performance, paid as ${usdc(event.args.shares)} new shares to the agent`
+      : "Nothing was owed yet: no time has passed or NAV is under the fee high-water mark";
+  }
+};
+
+async function pokeTest(vault) {
+  const caller = state.wallet ?? state.deployment.accounts.keeper;
+  const before = await state.contracts.usdc.balanceOf(caller);
+  const guard = state.contracts.guard.connect(await signerFor(caller));
+  await (await guard.poke(vault.address, state.deployment.addresses.adapter)).wait();
+  const paid = (await state.contracts.usdc.balanceOf(caller)) - before;
+  if (paid === 0n) return `${vault.name} re-marked and is still inside every state term. No bounty.`;
+  const [reason] = await state.contracts.guard.freezeOf(vault.address);
+  return `Breach proved (${FREEZE_REASONS[Number(reason)] ?? "freeze"}). ${shortAddress(caller)} was paid ${usdc(paid)} mUSDC and ${vault.name} is frozen.`;
+}
+
+$("#termSheet").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-test]");
+  if (!button || button.disabled) return;
+  const index = state.selected;
+  const vault = state.snapshot[index];
+  const test = TERM_TESTS[button.dataset.test];
+  if (!test) return;
+  withButton(button, "sending…", async () => showToast(await test(vault, index, button)));
+});
+
+// --- launch -------------------------------------------------------------
+// The form mirrors the ranges MandateRiskGuard._configure() and
+// MandateFactory.createMandate() enforce, so a mistake is named here instead of
+// coming back as InvalidLimits. The chain still has the last word.
+const LAUNCH_PRESETS = {
+  careful: {
+    markets: [0], direction: 1, deviation: 50, trades: 12, leverage: 1.5, order: 5000, block: 5000, position: 10000,
+    total: 10000, cooldown: 0, drawdown: 5, dailyLoss: 2, holding: 0, markAge: 30, volWindow: 300, horizon: 300,
+    sigmas: 3, perf: 10, mgmt: 1
+  },
+  balanced: {
+    markets: [0], direction: 0, deviation: 100, trades: 48, leverage: 3, order: 10000, block: 10000, position: 20000,
+    total: 20000, cooldown: 0, drawdown: 12, dailyLoss: 5, holding: 12, markAge: 30, volWindow: 120, horizon: 120,
+    sigmas: 3, perf: 15, mgmt: 1.5
+  },
+  aggressive: {
+    markets: [0, 1], direction: 0, deviation: 150, trades: 96, leverage: 6, order: 20000, block: 20000, position: 30000,
+    total: 40000, cooldown: 0, drawdown: 25, dailyLoss: 10, holding: 0, markAge: 30, volWindow: 0, horizon: 0,
+    sigmas: 0, perf: 20, mgmt: 2
+  }
+};
+const LAUNCH_FIELDS = {
+  direction: "#lfDirection", deviation: "#lfDeviation", trades: "#lfTrades", leverage: "#lfLeverage",
+  order: "#lfOrder", block: "#lfBlock", position: "#lfPosition", total: "#lfTotal", cooldown: "#lfCooldown",
+  drawdown: "#lfDrawdown", dailyLoss: "#lfDailyLoss", holding: "#lfHolding", markAge: "#lfMarkAge",
+  volWindow: "#lfVolWindow", horizon: "#lfHorizon", sigmas: "#lfSigmas", perf: "#lfPerf", mgmt: "#lfMgmt"
+};
+
+function applyPreset(name) {
+  const preset = LAUNCH_PRESETS[name];
+  for (const [key, selector] of Object.entries(LAUNCH_FIELDS)) $(selector).value = preset[key];
+  $$("#lfMarkets input").forEach((box) => (box.checked = preset.markets.includes(Number(box.value))));
+  $$("[data-preset]").forEach((chip) => chip.classList.toggle("active", chip.dataset.preset === name));
+  updateLaunch();
+}
+
+function renderLaunchMarkets() {
+  $("#lfMarkets").innerHTML = marketsOf()
+    .map((m) => `<label class="check"><input type="checkbox" value="${m.id}" />${m.symbol}/USD</label>`)
+    .join("");
+}
+
+function updateLaunchAgent() {
+  const input = $("#lfAgent");
+  if (!input) return;
+  if (!input.dataset.touched) input.value = state.wallet ?? "";
+  $("#lfSigner").textContent = !state.wallet
+    ? "Connect first. The account that sends this transaction is recorded as the operator."
+    : state.walletKind === "injected"
+      ? `Your wallet ${shortAddress(state.wallet)} signs and is recorded as the operator.`
+      : state.live
+        ? "The demo allocator is not allowed to launch on the hosted chain. Connect a browser wallet to launch."
+        : `The demo allocator ${shortAddress(state.wallet)} signs on this local chain and is recorded as the operator.`;
+  updateLaunch();
+}
+
+// Read the form into the three term structs, or a list of what is wrong.
+function readLaunch() {
+  const n = (selector) => Number($(selector).value);
+  const errors = [];
+  const check = (ok, message) => ok || errors.push(message);
+  const mask = $$("#lfMarkets input").reduce((m, box) => (box.checked ? m | (1 << Number(box.value)) : m), 0);
+  const agent = $("#lfAgent").value.trim();
+  check(ethers.isAddress(agent), "Agent key must be an address");
+  check(mask !== 0, "Pick at least one market");
+  const leverage = Math.round(n("#lfLeverage") * 100);
+  check(leverage > 0 && leverage <= 2000, "Leverage must be above 0 and at most 20x");
+  const drawdown = Math.round(n("#lfDrawdown") * 100);
+  check(drawdown > 0 && drawdown <= 5000, "Drawdown must be above 0 and at most 50%");
+  const markAge = Math.round(n("#lfMarkAge"));
+  check(markAge >= 1 && markAge <= 60, "Mark age must be 1 to 60 seconds");
+  const cooldown = Math.round(n("#lfCooldown"));
+  check(cooldown >= 0 && cooldown <= 100000, "Cooldown must be 0 to 100,000 blocks");
+  const dollars = {};
+  for (const [key, selector, label] of [
+    ["order", "#lfOrder", "Per order"],
+    ["block", "#lfBlock", "Per block"],
+    ["position", "#lfPosition", "Per market"],
+    ["total", "#lfTotal", "All markets"]
+  ]) {
+    dollars[key] = n(selector);
+    check(dollars[key] >= 1 && Number.isFinite(dollars[key]), `${label} must be at least $1`);
+  }
+  check(dollars.order <= dollars.block, "Per order cannot exceed per block");
+  check(dollars.position <= dollars.total, "Per market cannot exceed all markets");
+  const volWindow = Math.round(n("#lfVolWindow"));
+  const horizon = Math.round(n("#lfHorizon"));
+  const sigmas = Math.round(n("#lfSigmas") * 10);
+  check(volWindow >= 0 && horizon >= 0 && sigmas >= 0 && sigmas <= 65535, "Stress values cannot be negative");
+  if (volWindow > 0) {
+    check(horizon > 0 && sigmas > 0, "A stress test needs a horizon and a sigma size");
+    check((mask & (mask - 1)) === 0, "A stress test reads one price series: pick one market, or set the window to 0");
+  }
+  const deviation = Math.round(n("#lfDeviation"));
+  check(deviation >= 0 && deviation <= 10000, "Price band must be 0 to 10,000 bps");
+  const trades = Math.round(n("#lfTrades"));
+  check(trades >= 0 && trades <= 65535, "Orders per day must be 0 to 65,535");
+  const dailyLoss = Math.round(n("#lfDailyLoss") * 100);
+  check(dailyLoss >= 0 && dailyLoss <= 5000, "Daily loss must be 0 to 50%");
+  const holding = Math.round(n("#lfHolding") * 3600);
+  check(holding >= 0 && holding < 2 ** 32, "Holding time cannot be negative");
+  const perf = Math.round(n("#lfPerf") * 100);
+  check(perf >= 0 && perf <= 3000, "Performance fee must be 0 to 30%");
+  const mgmt = Math.round(n("#lfMgmt") * 100);
+  check(mgmt >= 0 && mgmt <= 500, "Management fee must be 0 to 5% a year");
+  if (errors.length) return { errors };
+  const e18 = (value) => ethers.parseUnits(String(Math.round(value)), 18);
+  return {
+    errors,
+    params: {
+      agent: ethers.getAddress(agent),
+      adapter: state.deployment.addresses.adapter,
+      limits: {
+        maxLeverageX100: leverage,
+        maxDrawdownBps: drawdown,
+        minBlocksBetweenTrades: cooldown,
+        maxMarkAgeSeconds: markAge,
+        maxOrderNotional: e18(dollars.order),
+        maxPositionNotional: e18(dollars.position),
+        maxTotalNotional: e18(dollars.total),
+        maxBlockNotional: e18(dollars.block),
+        volWindowSeconds: volWindow,
+        stressHorizonSeconds: volWindow ? horizon : 0,
+        stressSigmasX10: volWindow ? sigmas : 0
+      },
+      trade: {
+        allowedMarkets: mask,
+        direction: Number($("#lfDirection").value),
+        maxPriceDeviationBps: deviation,
+        maxTradesPerDay: trades,
+        maxDailyLossBps: dailyLoss,
+        maxHoldingSeconds: holding
+      },
+      fees: { performanceFeeBps: perf, managementFeeBps: mgmt },
+      modelHash: $("#lfModel").value.trim() ? ethers.id($("#lfModel").value.trim()) : ethers.ZeroHash
+    }
+  };
+}
+
+// A refresh that waits out the tick already in flight instead of skipping.
+async function refreshNow() {
+  while (state.busy) await new Promise((resolve) => setTimeout(resolve, 100));
+  await refresh();
+}
+
+// The same hash MandateRiskGuard.termsHash() returns once the vault exists.
+function previewTermsHash(params) {
+  const fn = state.contracts.factory.interface.getFunction("createMandate");
+  const [, , limits, trade, fees] = fn.inputs[0].components;
+  return ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode([limits, trade, fees], [params.limits, params.trade, params.fees])
+  );
+}
+
+function updateLaunch() {
+  if (!state.contracts?.factory) return;
+  const { errors, params } = readLaunch();
+  $("#lfErrors").innerHTML = errors.map((e) => `<li>${e}</li>`).join("");
+  $("#lfHash").textContent = params ? previewTermsHash(params) : "fix the fields above";
+  const button = $("#launchButton");
+  if (!button.dataset.busy) button.disabled = errors.length > 0 || !state.wallet;
+}
+
+function initLaunch() {
+  if (!state.contracts.factory || $("#lfMarkets").dataset.ready) return;
+  $("#lfMarkets").dataset.ready = "1";
+  renderLaunchMarkets();
+  applyPreset("balanced");
+  updateLaunchAgent();
+}
+
+$("#launchForm").addEventListener("input", (event) => {
+  if (event.target.id === "lfAgent") event.target.dataset.touched = "1";
+  updateLaunch();
+});
+$$("[data-preset]").forEach((chip) => chip.addEventListener("click", () => applyPreset(chip.dataset.preset)));
+
+$("#launchForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  withButton($("#launchButton"), "createMandate()…", async () => {
+    if (!state.wallet) throw new Error("connect first");
+    const { errors, params } = readLaunch();
+    if (errors.length) throw new Error(errors[0]);
+    const factory = state.contracts.factory.connect(await signerFor(state.wallet));
+    const receipt = await (await factory.createMandate(params)).wait();
+    const created = receipt.logs
+      .map((log) => {
+        try {
+          return factory.interface.parseLog(log);
+        } catch (ignored) {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.name === "MandateCreated");
+    if (!created) throw new Error("the transaction went through but no MandateCreated event came back");
+    const address = created.args.vault;
+    await refreshNow();
+    const index = state.deployment.vaults.findIndex((v) => v.address.toLowerCase() === address.toLowerCase());
+    if (index >= 0) state.selected = index;
+    render();
+    route("agent");
+    showToast(`Mandate ${shortAddress(address)} is live with terms ${created.args.termsHash.slice(0, 10)}…. Allocate to it from the Allocate screen.`);
+  });
+});
 
 function liveNote() {
   const oracle = state.oracle;
@@ -1364,8 +2407,16 @@ async function adoptDeployment() {
   // anything signed or settled against the old ones no longer applies.
   state.batch = { status: null, escrow: 0n, claims: [] };
   state.privacy = { status: null, onchainDigest: null };
+  state.factoryCount = 0;
+  state.marketPrices = [];
+  state.eventInterfaces = eventInterfacesFor(deployment.abis);
+  state.errorInterface = buildErrorInterface(deployment.abis);
+  $("#lfMarkets").dataset.ready = "";
+  if (state.selected >= deployment.vaults.length) state.selected = 0;
   buildLeaderboardSkeleton();
   updateSimulator();
+  initLaunch();
+  updateLaunch();
   return true;
 }
 

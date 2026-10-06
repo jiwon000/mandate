@@ -12,20 +12,22 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 ## 요약
 
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
-- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`을 이 장부로 갱신했습니다.
+- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). 같은 날 09:47 UTC에 최신 커밋 빌드 뒤 다시 `Reset demo`로 현재 컨트랙트 장부를 배포했고, 가드 런타임 코드가 로컬 새 컴파일과 일치함을 확인했습니다. README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 09:47 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
 - 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
-- 제출 폼 Description 문구를 저장소 `description.txt`와 다시 맞추는 일(남은 일 3-1)은 아직 남아 있습니다.
+- 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). 같은 날 Go-to-market과 접근 안내 칸도 저장소 문안으로 다시 저장해 일치를 확인했습니다.
 - 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
 
 ## 이 폴더의 파일
 
 | 파일 | 내용 |
 | --- | --- |
-| [`description.txt`](description.txt) | 폼 "Description"에 저장한 영문 본문. 7,921자 (한도 8,000자) |
+| [`description.txt`](description.txt) | 폼 "Description"에 저장한 영문 본문. 7,956자 (한도 8,000자) |
 | [`go-to-market.txt`](go-to-market.txt) | 폼 "Go-to-market and user acquisition strategy"에 저장한 영문 본문. 5,079자 (한도 8,000자) |
 | [`judge-access.txt`](judge-access.txt) | 폼 "Judge access instructions"에 저장한 영문 본문. 4,427자 (한도 8,000자) |
 | [`demo-video-script.md`](demo-video-script.md) | Technical demo video (3분 이하) 대본 초안 |
 | [`pitch-video-script.md`](pitch-video-script.md) | Pitch video (2분 이하) 대본 초안. 팀 소개 줄은 비어 있음 |
+| [`demo-video/`](demo-video/README.md) | 데모 영상 녹화 스크립트와 재녹화 체크리스트. 10-06 영상은 로컬 녹화라 제출 불가 |
+| [`club-deck/`](club-deck/README.md) | HYBLOCK 학회 발표 덱 (PDF와 원본). 제출물 아님 |
 | [`mandate-logo.png`](mandate-logo.png) | 폼에 올린 로고, 1024×1024 |
 | [`mandate-logo.source.html`](mandate-logo.source.html) | 로고 원본 (SVG). 데모 페이지의 브랜드 마크와 같은 그림 |
 
@@ -41,7 +43,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | --- | --- | --- |
 | 공개 GitHub 저장소: 전체 소스, 설치법 README, 오픈소스 라이선스, 외부 코드 출처, 빌드 기간의 커밋 이력 | 충족 | MIT `LICENSE`, README "Third-party code" |
 | README에 AI 코딩 도구 사용 고지 | 충족 | README "AI tool disclosure". 아래 "정해야 할 것" 5번 참고 |
-| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 미착수 | 슬라이드와 목업은 인정되지 않음 |
+| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 재녹화 필요 | 10-06 영상은 로컬 노드 녹화라 Monad 상호작용 장면이 없음. 테스트넷 재배포 뒤 [`demo-video/`](demo-video/README.md) 체크리스트대로 다시 찍음. 슬라이드와 목업은 인정되지 않음 |
 | Monad 메인넷 또는 테스트넷 배포, 컨트랙트 주소 또는 트랜잭션 해시 | 충족 | README "Recorded run on Monad testnet"에 주소 8개와 트랜잭션 9개 |
 | Monad를 쓰는 이유 설명 | 초안 있음 | `description.txt`. 가격 기준 시각(mark age) 논리 |
 | 문서: 프로젝트 설명, 아키텍처, 기술 스택, 설치와 배포 방법 | 충족 | 루트 README |
@@ -76,8 +78,8 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~3~~ | ~~README 주소 표에 BatchAllocator·MandateRegistry 행 추가, `10143.json` 갱신~~ | @jiwon000 | 완료 (2026-10-05 07:08:55 UTC 장부로 갱신) |
 | ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | ~~2-2~~ | ~~공개 데모를 새 컨트랙트로 전환 (Render 배포 → 관리자 `Reset demo` → 주소 표와 `10143.json` 갱신)~~ | @jiwon000, @yahamang | 완료 (2026-10-05 08:08 UTC 장부) |
-| 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 10-05 오후에 테스트 수(43 → 46)와 Batch·Privacy 문장을 고쳤고, 폼에는 그 전 문안이 저장돼 있음 | 팀 | 대기 |
-| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 미착수 |
+| 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 한도에 맞게 9,565자에서 7,956자로 줄여 저장, One-line description도 함께 저장 | 팀 | 완료 (2026-10-05) |
+| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 로컬 녹화본만 있음. 테스트넷 재배포 뒤 재녹화 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
 | 6 | 아래 "정해야 할 것" 정리 | 팀 | 진행 중 |
 | 7 | 제출 전 최종 점검: 공개 데모에서 `judge-access.txt`의 1~11단계를 그대로 따라 하기, README의 수치와 주소 대조, 폼 "REVIEW ENTRY" | 팀 | 3-1, 4, 5번 뒤 |
@@ -88,7 +90,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 - 호스트는 Render 웹 서비스이고, 브랜치 `docs/roadmap-feedback-0923`에서 빌드해 라이브 모드(chainId 10143)로 돕니다.
 - 현재 빌드는 `949d258`입니다 (2026-10-05 배포). `web/live-recover.mjs`가 부팅할 때 체인에서 가장 최근 완성 장부를 찾아 쓰므로, 더 이상 커밋된 `10143.json`이나 재배포 가능성에 의존하지 않습니다.
-- 공개 데모에 Batch·Privacy 화면이 보입니다. 지금 장부는 2026-10-05 08:08 UTC에 관리자 `Reset demo`로 배포한 동결 규칙 컨트랙트 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 그 전 장부(07:08:55 UTC, 옛 컨트랙트)는 체인에 남아 있습니다. 이 장부 뒤에 들어간 컨트랙트 수정 두 건(`poke()`·`observe()`가 볼트 자신의 어댑터만 받음, 청산할 것이 없는 `unwind()`는 보상 없음)은 다음 리셋 때 반영됩니다. 데모 흐름에는 영향이 없습니다.
+- 공개 데모에 Batch·Privacy 화면이 보입니다. 지금 장부는 2026-10-05 09:47 UTC에 관리자 `Reset demo`로 배포한 현재 컨트랙트 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 동결 규칙 뒤에 들어간 컨트랙트 수정 두 건(`poke()`·`observe()`가 볼트 자신의 어댑터만 받음, 청산할 것이 없는 `unwind()`는 보상 없음)도 이 장부에 들어 있습니다. 그 전 장부들(08:08·09:08 UTC 등)은 체인에 남아 있습니다.
 - Render의 파일시스템은 재시작과 재배포 때 초기화되지만, `949d258` 이후 빌드는 그때마다 배포 계정의 트랜잭션을 거꾸로 훑어 가장 최근 완성 장부로 부팅하므로(읽기만 하고 MON은 들지 않음, 테스트넷에서 약 40초) 더 이상 재시작마다 재배포가 일어나지 않습니다.
 - 대기 중인 의향, claim 증명, 리포터 표본은 메모리에만 있습니다. 재시작하면 사라집니다.
 - 공개 데모의 페이지나 `/api`를 열면 오라클이 60초 동안 5초 간격으로 가격을 갱신하고, 그만큼 배포 계정의 테스트넷 MON을 씁니다. 상태 확인은 필요한 만큼만 합니다.

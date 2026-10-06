@@ -8,7 +8,8 @@ import { fixture, BASE_LIMITS } from "./fixture.mjs";
 
 const DRAWDOWN = 1n;
 const UNOBSERVABLE = 2n;
-const FEES = { performanceFeeBps: 1000, managementFeeBps: 200 };
+// Fees are part of the terms hash, so registration restates the ones the guard holds.
+const FEES = { performanceFeeBps: 0, managementFeeBps: 0 };
 
 // The test provider does not decode custom errors, so match on the selector.
 function revertsWith(contract, name) {

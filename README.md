@@ -53,6 +53,14 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 
 로컬 빌드는 오라클을 12초에 한 번으로 묶는 스위치로 이 상황을 재현합니다. 공개 데모의 오라클은 5초마다 갱신하는 유료 트랜잭션이라 가장 엄격한 Vault가 10초 조건을 쓰고, 연속 `poke()` 8회가 모두 1~5초 된 mark로 통과한 기록이 영문 [Recorded run on Monad testnet](#recorded-run-on-monad-testnet)에 있습니다.
 
+## 참여자별로 얻는 것
+
+| 참여자 | 얻는 것 | 내는 것 |
+| --- | --- | --- |
+| 배분자 | 돈을 Vault에 둔 채 에이전트에 맡기고, 잠긴 조건을 `termsHash`로 확인하며, 언제든 marked NAV로 출금 | 운용보수와 성과보수, 동결 시 bounty |
+| 에이전트 운영자 | 수탁 없이 남의 자본으로 거래할 권한, 조건 안에서의 운용보수 연 최대 5%와 성과보수 최대 30% | 조건을 바꿀 수 없음, 위반 시 동결 |
+| 누구나 | 조건을 넘은 Vault를 `poke()`로 동결하면 0.05%, `unwind()` 한 번에 0.01% bounty | 가스 |
+
 ## 실행
 
 ```bash
@@ -67,6 +75,16 @@ Node 22.14 이상이 필요합니다. 포트가 사용 중이면 `PORT=3001 npm 
 화면은 Market, Agent, Allocate, Batch, Privacy, Launch, Live Risk입니다. 숫자는 모두 contract read이고 버튼은 모두 트랜잭션입니다. 로컬 빌드에만 있는 것은 Live Risk의 12초 mark 비교 스위치입니다.
 
 Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:live`), 서버가 대신 서명할 때의 안전장치, 오라클과 가스 정책은 영문 [Live testnet demo](#live-testnet-demo) 절에 있습니다. `.env`와 니모닉은 커밋하지 않습니다.
+
+## 주장하지 않는 것
+
+- 수익을 약속하지 않습니다. guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다.
+- 위험이 사라진다고 주장하지 않습니다. 언제 주문이 거절되고 언제 Vault가 동결되는지가 정해질 뿐, 조건 안의 손실과 가격 갭으로 조건을 넘는 손실은 여전히 생깁니다.
+- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷 포크에서만 검증했으며 Perpl 팀과의 제휴는 없습니다.
+- 사용자, 배분자, 예치 규모, 파트너가 있다고 주장하지 않습니다. 데모에 미리 올라간 배분자와 에이전트는 팀 서버의 테스트넷 키입니다.
+- 차등 프라이버시가 비공개 데이터를 보호한다고 주장하지 않습니다. 이미 체인에 공개된 수익률에만 적용합니다.
+- 감사를 받았다고 주장하지 않습니다. 검토는 모두 내부 리뷰입니다.
+- 다른 체인에서는 만들 수 없다고 주장하지 않습니다. 주장은 더 좁습니다. 블록 간격보다 짧은 가격 신선도 조건은 지킬 수 없으므로, 4초 조건에는 4초 안에 블록이 오는 체인이 필요합니다.
 
 ## 한계
 
@@ -159,6 +177,14 @@ Autonomous agents can generate trades, but an allocator still needs answers to t
 3. Can market demand and performance be compared without publishing every private expression of interest?
 
 Mandate separates those concerns. Vault custody and execution constraints are enforced on-chain. Public chain activity (settlement amounts, trade returns) is DP-released as a performance leaderboard, never presented as hidden. The spec also calls for private watchlists and pre-settlement allocation intents to be released only as DP aggregates; this demo has no watchlist feature and nothing private to aggregate there yet, so that half is explicitly out of v1 scope rather than implemented against invented data.
+
+## Who gets what
+
+| Participant | Gets | Pays |
+| --- | --- | --- |
+| Allocator | Capital that stays in the vault, terms it can check against one `termsHash`, withdrawal at marked NAV that no agent or operator can block | Management and performance fees, the freeze bounty |
+| Agent operator | Execution rights over other people's capital without custody; a management fee of at most 5% a year and a performance fee of at most 30% above the fee high-water mark | Terms it cannot change; a freeze when it breaches them |
+| Anyone | 0.05% for freezing a vault past its terms with `poke()`, 0.01% for each `unwind()` step | Gas |
 
 ## How it works
 
@@ -295,6 +321,16 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 
 10. On Batch, deposit to escrow, sign an `AllocationIntent` for the current epoch (off-chain, free), and once the epoch ends, settle it (the demo server plays the batcher role `deploy.mjs` gives the deployer key on Monad) and claim the resulting shares with the reconstructed Merkle proof.
 11. On Privacy, click `postLeaderboard()` once a few price ticks have landed: the server pools public per-vault NAV returns, clips and Laplace-noises the mean/Sharpe/max-drawdown, signs a release and anchors it on `MandateRegistry`. The page re-reads `releaseOf()` straight from the contract and shows `VERIFIED ONCHAIN` once the digest it computed matches what it just read back — not just what the server's JSON claimed. The Privacy Simulator slider next to it never calls the chain: moving ε only recomputes a confidence interval over a synthetic example, using the real reporter's own `scale = 2·clipBound/(N·ε)` formula.
+
+## What we do not claim
+
+- No promise of returns. The guard limits behavior; it does not make a strategy good.
+- No claim that risk goes away. The terms decide when an order is refused and when a vault freezes. Losses inside the mandate, and losses past it on a gap, still happen.
+- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl is verified on a testnet fork only, and there is no partnership with the Perpl team.
+- No users, allocators, deposits or partners. The demo's preset allocator and agents are testnet keys on the team's server.
+- No claim that differential privacy protects private data. It is applied only to returns that are already public on-chain.
+- No audit. Every review so far is internal.
+- No claim that this cannot be built on another chain. The claim is narrower: a mark-age term shorter than the block interval cannot be honored, so a 4-second term needs a chain whose blocks arrive within 4 seconds.
 
 ## Honest limitations
 

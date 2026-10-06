@@ -82,7 +82,7 @@ Planned for after the hackathon; 6 to 8 were brought forward on 2026-10-06:
 5. Term catalogue and modules, with `RiskLimits` as core v1. Not started. `TradeTerms` and `FeeTerms` were added as fixed structs instead.
 6. Done 2026-10-06. Factory and permissionless registration (roadmap 15).
 7. Done 2026-10-06. Fee deduction with the freeze rules above.
-8. Built 2026-10-06, verified on a fork only. Perpl adapter (roadmap 16), see [`perpl-adapter.md`](perpl-adapter.md). Revisiting the unwind schedule against real fills still needs a deployed vault. Perpl liquidates an isolated position whose margin runs out. The adapter does not model that: the drawdown term is meant to freeze the vault first.
+8. Built 2026-10-06, verified on a fork, then deployed to testnet and run once from allocation to withdrawal. Perpl adapter (roadmap 16), see [`perpl-adapter.md`](perpl-adapter.md). Revisiting the unwind schedule against real fills still needs sustained trading on the deployed vault. Perpl liquidates an isolated position whose margin runs out. The adapter does not model that: the drawdown term is meant to freeze the vault first.
 9. Partly done. A vault whose feed stops can now be frozen by anyone, unwound in five steps and then withdrawn from without a mark, because `Closed` needs none. The cash-only withdrawal while unobservable is not built. On Perpl this route also stops while the feed is stale, because Perpl refuses orders against a stale mark.
 
 ## Implemented

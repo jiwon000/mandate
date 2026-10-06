@@ -5,17 +5,17 @@
 Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 상태판입니다. 제출 폼에 넣은 글의 원본과 영상 대본 초안도 이 폴더에 있습니다. 기능이 어디까지 구현됐는지는 루트 [README](../../README.md)의 "다음 작업"과 Roadmap이 원본이고, 이 문서는 제출에 필요한 일만 다룹니다.
 
 - 마감: 2026-10-13 23:59 ET (한국 시각 2026-10-14 12:59)
-- 마지막 갱신: 2026-10-05
+- 마지막 갱신: 2026-10-06
 - 제출 폼: <https://hackathon.monad.xyz/project?tab=submission> (팀 계정 로그인 필요)
 - 담당은 GitHub 계정으로 적습니다 (@jiwon000, @yahamang)
 
 ## 요약
 
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
-- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-05 오후 동결 규칙 컨트랙트로 전환했습니다. Render가 PR #10 이후 커밋을 빌드했고, 관리자 `Reset demo`로 새 컨트랙트 장부를 배포했습니다(2026-10-05 08:08 UTC, 가드에 `MAX_MARK_AGE_CAP` 존재를 체인에서 확인). 같은 날 09:47 UTC에 최신 커밋 빌드 뒤 다시 `Reset demo`로 현재 컨트랙트 장부를 배포했고, 가드 런타임 코드가 로컬 새 컴파일과 일치함을 확인했습니다. README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 09:47 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
-- 영상 2개는 아직 녹화하지 않았습니다. 대본 초안이 이 폴더에 있습니다.
+- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-06 04:18 UTC에 마켓 기능(PR #12: `MandateFactory`, 거래 조건, 수수료, 다중 마켓)이 들어간 컨트랙트로 재배포됐습니다. 서빙되는 `app.js`가 main과 같음을 확인했습니다(2026-10-06). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
+- 데모 영상은 2026-10-06 공개 데모에서 녹화했습니다(한국어·영어, 2분 45초, 녹화 스크립트는 `demo-video/`). 피치 영상은 아직입니다.
 - 제출 폼 Description과 One-line description을 저장소 문안으로 다시 저장했습니다 (2026-10-05, 저장 후 다시 읽어 `description.txt`와 일치 확인). 같은 날 Go-to-market과 접근 안내 칸도 저장소 문안으로 다시 저장해 일치를 확인했습니다.
-- 10-05 오후 동결 규칙을 확정하고 컨트랙트에 구현했습니다(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md)). main 대상 새 PR로 올렸고, 공개 데모는 재배포 전까지 기존 컨트랙트로 돕니다(정해야 할 것 11).
+- 10-05 동결 규칙(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md))과 10-06 마켓 기능이 모두 main에 머지됐고 공개 데모에 반영됐습니다.
 
 ## 이 폴더의 파일
 
@@ -79,7 +79,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | ~~2-2~~ | ~~공개 데모를 새 컨트랙트로 전환 (Render 배포 → 관리자 `Reset demo` → 주소 표와 `10143.json` 갱신)~~ | @jiwon000, @yahamang | 완료 (2026-10-05 08:08 UTC 장부) |
 | 3-1 | 제출 폼 Description을 `description.txt`와 다시 맞추기. 한도에 맞게 9,565자에서 7,956자로 줄여 저장, One-line description도 함께 저장 | 팀 | 완료 (2026-10-05) |
-| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 로컬 녹화본만 있음. 테스트넷 재배포 뒤 재녹화 |
+| 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 공개 데모에서 녹화 완료 (2026-10-06). 업로드와 폼 링크 입력 남음 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 미착수 |
 | 6 | 아래 "정해야 할 것" 정리 | 팀 | 진행 중 |
 | 7 | 제출 전 최종 점검: 공개 데모에서 `judge-access.txt`의 1~11단계를 그대로 따라 하기, README의 수치와 주소 대조, 폼 "REVIEW ENTRY" | 팀 | 3-1, 4, 5번 뒤 |
@@ -88,10 +88,10 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 설정값과 안전장치의 원본은 루트 README의 "라이브 테스트넷 데모"(영문 "Live testnet demo") 절입니다. 여기에는 지금 호스팅 상태에서 알아 둘 것만 적습니다.
 
-- 호스트는 Render 웹 서비스이고, 브랜치 `docs/roadmap-feedback-0923`에서 빌드해 라이브 모드(chainId 10143)로 돕니다.
-- 현재 빌드는 `949d258`입니다 (2026-10-05 배포). `web/live-recover.mjs`가 부팅할 때 체인에서 가장 최근 완성 장부를 찾아 쓰므로, 더 이상 커밋된 `10143.json`이나 재배포 가능성에 의존하지 않습니다.
-- 공개 데모에 Batch·Privacy 화면이 보입니다. 지금 장부는 2026-10-05 09:47 UTC에 관리자 `Reset demo`로 배포한 현재 컨트랙트 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 동결 규칙 뒤에 들어간 컨트랙트 수정 두 건(`poke()`·`observe()`가 볼트 자신의 어댑터만 받음, 청산할 것이 없는 `unwind()`는 보상 없음)도 이 장부에 들어 있습니다. 그 전 장부들(08:08·09:08 UTC 등)은 체인에 남아 있습니다.
-- Render의 파일시스템은 재시작과 재배포 때 초기화되지만, `949d258` 이후 빌드는 그때마다 배포 계정의 트랜잭션을 거꾸로 훑어 가장 최근 완성 장부로 부팅하므로(읽기만 하고 MON은 들지 않음, 테스트넷에서 약 40초) 더 이상 재시작마다 재배포가 일어나지 않습니다.
+- 호스트는 Render 웹 서비스이고, 라이브 모드(chainId 10143)로 돕니다. 2026-10-06 재배포 뒤 서빙되는 `app.js`는 main과 같습니다.
+- `web/live-recover.mjs`가 부팅할 때 체인에서 가장 최근 완성 장부를 찾아 쓰므로, 커밋된 `10143.json`이나 재배포 가능성에 의존하지 않습니다.
+- 공개 데모에 Batch·Privacy·Launch 화면이 보입니다. 지금 장부는 2026-10-06 04:18 UTC에 배포한 마켓 기능 장부이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 공개 데모에서 Launch는 브라우저 지갑으로만 할 수 있습니다(가스는 방문자 지갑 부담). 그 전 장부들(10-05 08:08·09:47 UTC 등)은 체인에 남아 있습니다.
+- Render의 파일시스템은 재시작과 재배포 때 초기화되지만, 빌드는 그때마다 배포 계정의 트랜잭션을 거꾸로 훑어 가장 최근 완성 장부로 부팅하므로(읽기만 하고 MON은 들지 않음, 테스트넷에서 약 40초) 더 이상 재시작마다 재배포가 일어나지 않습니다.
 - 대기 중인 의향, claim 증명, 리포터 표본은 메모리에만 있습니다. 재시작하면 사라집니다.
 - 공개 데모의 페이지나 `/api`를 열면 오라클이 60초 동안 5초 간격으로 가격을 갱신하고, 그만큼 배포 계정의 테스트넷 MON을 씁니다. 상태 확인은 필요한 만큼만 합니다.
 - `ORACLE_IDLE_SECONDS=3600`을 적용해서, 서버가 깨어 있지만 접속자가 없을 때의 대기 비용이 하루 약 1.6 MON에서 약 0.13 MON으로 줄었습니다.

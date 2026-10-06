@@ -42,7 +42,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("팀 구성", "팀원별 담당 파트");
   const cols = [
-    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰, registerAgent 취약점 수정"]],
+    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰 4회: registerAgent 수정, 마켓 기능 점검"]],
     ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "Perpl 거래소 어댑터와 포크 테스트", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
   ];
   cols.forEach(([who, items], i) => {
@@ -257,10 +257,10 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("데모", "데모 영상");
   s.addMedia({ type:"video", path:process.env.VIDEO || "mandate-demo-ko.mp4", cover:"data:image/png;base64,"+require("fs").readFileSync(process.env.COVER || "cover.png").toString("base64"), x:X0, y:1.55, w:9.0, h:5.06 });
-  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "12초 마크 vs 1초 마크"];
+  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "탐색기에서 트랜잭션 확인"];
   txt(s, "영상 순서", { x:10.05, y:1.6, w:2.6, h:0.35, bold:true, fontSize:15, color:C.acc });
   txt(s, D.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < D.length-1 } })), { x:10.05, y:2.05, w:2.6, h:3.6, fontSize:12.5, color:C.text, paraSpaceAfter:6 });
-  txt(s, "2분 32초 · 로컬 체인에서 녹화\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
+  txt(s, "2분 45초 · 테스트넷 공개 데모\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
 }
 
 // 12 Results
@@ -279,7 +279,7 @@ const chip = (s, t, x, y, color = C.acc) => {
     "누구나 등록할 수 있는 시장: 팩토리와 Launch 화면, 등록 후 바로 목록에 노출",
     "조건 19개 필드를 컨트랙트가 강제 (위험 한도 11 · 거래 조건 6 · 수수료 2)",
     "웹 7화면: Market · Agent · Allocate · Batch · Privacy · Launch · Live Risk",
-    "모나드 테스트넷 공개 데모 운영 중 (현재는 10-05 버전)",
+    "모나드 테스트넷 공개 데모 운영 중 (팩토리·거래 조건·수수료 반영)",
   ];
   txt(s, B.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < B.length-1 } })), { x:X0, y:4.6, w:W-1.4, h:2.1, fontSize:15.5, color:C.text, paraSpaceAfter:9 });
 }
@@ -292,10 +292,8 @@ const chip = (s, t, x, y, color = C.acc) => {
     "외부 보안 감사 전. 내부 리뷰만 거침",
     "데모의 가격 갱신은 우리 서버가 함 (Perpl로 가면 거래소 가격)",
     "손실 한도는 즉시 정지가 아님. 위반 뒤 위험이 쌓이지 않는 것만 보장",
-    "이번에 만든 기능은 아직 공개 데모에 반영 전",
   ];
   const nxt = [
-    "공개 데모 재배포: 팩토리·거래 조건·수수료 반영",
     "Perpl 어댑터를 Monad 테스트넷에 배포",
     "외부 보안 감사",
     "성과를 공개하지 않고 보고하는 비공개 리포팅",

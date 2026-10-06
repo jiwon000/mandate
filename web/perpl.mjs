@@ -35,7 +35,9 @@ const GUARD_ABI = [
 export const SMOKE_TXS = [
   { label: "Open 0.001 BTC long", hash: "0x8bc37083404133d95c0920a5840934c2c014836d5735ca9b1cd9336a340e3ddd" },
   { label: "Close 0.001 BTC (resent, filled)", hash: "0x7a8fce78cc8349ef85f1a58f782c7b2608b1a5b05dbdaa2a2c248177ce958fd4" },
-  { label: "Withdraw 149.914834 aUSD", hash: "0x97420fb0294c2a66386718d3a5e77c7e7234b3d5f3f237774b718f533f65bab8" }
+  { label: "Withdraw 149.914834 aUSD", hash: "0x97420fb0294c2a66386718d3a5e77c7e7234b3d5f3f237774b718f533f65bab8" },
+  // From the agent runs: an order past the $200 cap, mined and reverted by the guard.
+  { label: "Agent order past the $200 cap, refused (PositionNotionalExceeded)", hash: "0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff" }
 ];
 
 export function loadPerplDeployment() {

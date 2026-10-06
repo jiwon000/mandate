@@ -25,6 +25,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 - **The limit stays near the mark.** On an order book the limit is the price the vault may be filled at. With no bound, an agent could rest a far-off order from an account of its own and have the vault take it, moving the vault's money to itself in one fill. The guard's `maxPriceDeviationBps` covers this only when a mandate sets it, and 0 disables it. So the adapter has its own bound, `maxAdverseLimitBps`, set once at deployment and the same for every vault on it: a buy limit more than that above Perpl's mark, or a sell limit more than that below it, reverts `LimitTooFarFromMark` before any money moves. Only the costly side is bounded. The tests deploy with 300 (3%). It caps what one fill can move to an agent's own order, it does not remove it: within the band, self-dealing is still possible, and the mandate's own deviation term should be set tighter.
 - **Fills are all or nothing.** Orders are sent immediate-or-cancel and fill-or-kill at the agent's limit price. The vault then checks that the position Perpl reports matches what `preview()` promised and reverts the whole transaction otherwise, as it does for the mock venue.
 - **Equity at Perpl's mark.** `markEquity()` is the vault's cash, plus the free and locked balance of its Perpl account, plus each open position's margin, its price PnL at Perpl's mark and the funding Perpl has booked against it (`premiumPnlCNS`, the term Perpl's SDK adds to delta PnL). `markedAt` is the oldest `markTimestamp` among the markets held, or market 0's when flat. That is Perpl's clock, never `block.timestamp`.
+- **A second price to check the mark against.** `referencePrice(marketId)` returns Perpl's oracle price for the market (`oraclePNS`, scaled to 18 decimals) and its `oracleTimestampSec`. A mandate that sets the guard's optional reference terms has every exposure-adding order refused while the mark sits more than `maxMarkDeviationBps` from that price, or the price is older than `maxReferenceAgeSeconds`. Read over the testnet RPC on 2026-10-07, the BTC oracle price was 3 to 12 seconds old and under 1 bps from the mark. The contracts deployed on 2026-10-06 predate this.
 - **Unwind.** `reduce()` sends Perpl's reduce-only close orders, at most 1% through the mark, for the requested fraction of every open position. So an unwind step can never flip or grow a position. Close orders may fill in part. If Perpl refuses a market's order (paused, stale mark, no liquidity within 1%, a slice under its minimum), the adapter tries once more for the whole position and otherwise skips that market for this step. One stuck market never holds up the rest. Free collateral goes back to the vault after each step.
 - **Sweep.** Anyone may call `sweep(vault)`. It moves free collateral from the vault's Perpl account to the vault and nowhere else.
 
@@ -32,8 +33,8 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 
 `contracts/test-js/perpl-fork.test.mjs` forks Monad testnet in process and runs the full stack against Perpl's deployed exchange. Nothing is broadcast. The steps:
 
-1. A permissionless `createMandate` through `MandateFactory`, with aUSD as the asset.
-2. An allocation of 500 aUSD.
+1. A permissionless `createMandateWithReference` through `MandateFactory`, with aUSD as the asset and a reference bound of 100 bps and 60 seconds.
+2. An allocation of 500 aUSD, then a read of `referenceQuote`: Perpl's mark and oracle price are inside the bound.
 3. A 0.001 BTC long. Perpl records 100 lots, side long. The margin sits at Perpl, and equity stays within fees of 500.
 4. An order that would take the position past its $200 cap. The guard refuses it with `PositionNotionalExceeded` before Perpl sees it.
 5. A sell of 0.002 BTC with its limit 3% under the mark, the edge of the adapter's band. The position goes through flat into a 0.001 short, which Perpl records as side 1.
@@ -41,7 +42,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 7. Unwind steps until the vault is `Closed`. The position at Perpl is zero and the Perpl account is empty.
 8. The allocator withdraws everything except the vault's `MIN_SHARES` dust.
 
-The test forks only at a block whose BTC mark is at most 10 seconds old, because the run spends about 25 of Perpl's 60 seconds. With that it passed ten runs in a row on 2026-10-06. Run it with:
+The test forks only at a block whose BTC mark and oracle price are both at most 10 seconds old, because the run spends about 25 of Perpl's 60 seconds. With that it passed ten runs in a row on 2026-10-06, and once more with the reference bound on 2026-10-07. Run it with:
 
 ```bash
 npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.monad.xyz

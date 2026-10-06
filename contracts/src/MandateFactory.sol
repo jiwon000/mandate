@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MandateVault} from "./MandateVault.sol";
 import {MandateRiskGuard} from "./MandateRiskGuard.sol";
 import {MandateRegistry} from "./MandateRegistry.sol";
-import {IRiskGuard, IVenueAdapter, RiskLimits, TradeTerms, FeeTerms} from "./interfaces/IMandate.sol";
+import {IRiskGuard, IVenueAdapter, RiskLimits, TradeTerms, FeeTerms, ReferenceTerms} from "./interfaces/IMandate.sol";
 
 /// @notice Permissionless mandate registration. One transaction deploys a vault from
 ///         the reviewed MandateVault code, sets its terms on the canonical guard,
@@ -86,6 +86,17 @@ contract MandateFactory is Ownable {
     ///         is recorded as the operator. When the caller is also `p.agent`, the
     ///         vault is listed under the agent's address at once.
     function createMandate(MandateParams calldata p) external returns (address vault) {
+        return _create(p, ReferenceTerms(0, 0));
+    }
+
+    /// @notice As createMandate, with a reference-price bound set before the lock.
+    function createMandateWithReference(MandateParams calldata p, ReferenceTerms calldata r)
+        external returns (address vault)
+    {
+        return _create(p, r);
+    }
+
+    function _create(MandateParams calldata p, ReferenceTerms memory r) private returns (address vault) {
         if (p.agent == address(0)) revert ZeroAgent();
         if (!adapterListed[p.adapter]) revert AdapterNotListed(p.adapter);
         RiskLimits calldata l = p.limits;
@@ -101,6 +112,7 @@ contract MandateFactory is Ownable {
         vault = address(new MandateVault(asset, IRiskGuard(address(guard)), p.agent, IVenueAdapter(p.adapter)));
         guard.setAdapter(vault, p.adapter, true);
         guard.configureTerms(vault, p.limits, p.trade, p.fees);
+        if (r.maxMarkDeviationBps != 0 || r.maxReferenceAgeSeconds != 0) guard.setReferenceTerms(vault, r);
         guard.lockTerms(vault);
         registry.registerFromFactory(vault, p.adapter, p.modelHash, msg.sender);
 

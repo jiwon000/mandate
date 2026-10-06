@@ -104,10 +104,13 @@ if (step === "deploy") {
     maxTradesPerDay: 0, maxDailyLossBps: 0, maxHoldingSeconds: 0
   };
   const fees = { performanceFeeBps: 0, managementFeeBps: 0 };
-  const receipt = await send("factory.createMandate", factory.createMandate({
+  // New exposure is also refused while Perpl's mark sits more than 1% from Perpl's
+  // oracle price, or that price is older than 60 seconds.
+  const reference = { maxMarkDeviationBps: 100, maxReferenceAgeSeconds: 60 };
+  const receipt = await send("factory.createMandateWithReference", factory.createMandateWithReference({
     agent: wallet.address, adapter: adapter.target, limits, trade, fees,
     modelHash: keccak256(toUtf8Bytes("mandate perpl testnet"))
-  }));
+  }, reference));
   const created = receipt.logs
     .map((log) => { try { return factory.interface.parseLog(log); } catch { return null; } })
     .find((parsed) => parsed?.name === "MandateCreated");

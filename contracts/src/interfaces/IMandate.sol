@@ -58,6 +58,29 @@ struct TradeTerms {
     uint32 maxHoldingSeconds;
 }
 
+/// @notice A bound on how far the venue mark may sit from a second, independent price.
+/// @dev Every other term trusts the venue mark: drawdown, leverage and the stress test
+///      are all measured against it. A mark pushed away from the market (a thin book,
+///      a stuck feed, a venue bug) would make those measures wrong in the same
+///      direction at once. This term compares the mark with the adapter's reference
+///      price (on Perpl, its oracle price) and refuses orders that add exposure while
+///      the two disagree, or while the reference is older than its age limit. Orders
+///      that only take risk off still pass, for the same reason as the stress test.
+///      Kept out of RiskLimits and TradeTerms so neither layout, nor the termsHash of
+///      a vault that does not set it, changes. All zero turns it off.
+struct ReferenceTerms {
+    /// @notice Largest distance between the venue mark and the reference price, in bps.
+    uint16 maxMarkDeviationBps;
+    /// @notice Oldest reference price the guard accepts, in seconds.
+    uint32 maxReferenceAgeSeconds;
+}
+
+/// @notice A venue adapter that can quote a reference price next to its mark.
+interface IReferencePriceSource {
+    /// @notice The reference price for `marketId`, 1e18-scaled, and when it was set.
+    function referencePrice(uint256 marketId) external view returns (uint256 priceE18, uint256 updatedAt);
+}
+
 /// @notice Fees the vault charges, as part of the locked terms.
 /// @dev Charged by MandateVault by minting shares to the agent, never by moving
 ///      cash. The management fee accrues per second on marked equity while the vault

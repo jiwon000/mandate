@@ -59,6 +59,8 @@ contract MockPerplExchange {
     uint256 public nextAccountId = 1;
 
     mapping(uint256 => Perp) public perps;
+    /// @dev Oracle price and timestamp per perp; zero until a test sets them.
+    mapping(uint256 => uint256[2]) internal oracles;
     mapping(address => uint256) public accountOf;
     mapping(uint256 => uint256) public balanceOf;
     mapping(uint256 => mapping(uint256 => Position)) internal positions;
@@ -77,6 +79,10 @@ contract MockPerplExchange {
     function setMark(uint256 perpId, uint256 markPNS, uint256 markTimestamp) external {
         perps[perpId].markPNS = markPNS;
         perps[perpId].markTimestamp = markTimestamp;
+    }
+
+    function setOracle(uint256 perpId, uint256 oraclePNS, uint256 oracleTimestamp) external {
+        oracles[perpId] = [oraclePNS, oracleTimestamp];
     }
 
     function setFill(uint256 perpId, uint256 fillPNS, uint256 maxLotsPerOrder) external {
@@ -249,6 +255,8 @@ contract MockPerplExchange {
         info.markPNS = p.markPNS;
         info.markTimestamp = p.markTimestamp;
         info.refPriceMaxAgeSec = MAX_AGE_SEC;
+        info.oraclePNS = oracles[perpId][0];
+        info.oracleTimestampSec = oracles[perpId][1];
         info.status = p.paused ? 1 : 0;
     }
 

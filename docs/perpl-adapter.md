@@ -72,6 +72,20 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 - **Cost.** A 0.001 BTC round trip, open and close as a taker, cost about 0.07 aUSD on the fork.
 - **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds. A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
 
+## Testnet deployment
+
+`contracts/script/deploy-perpl.mjs` deploys a Mandate stack on Perpl's testnet exchange. It has two steps:
+
+```
+PERPL_WALLET_FILE=<wallet json> npm run deploy:perpl            # guard, registry, PerplAdapter, factory, one mandate
+PERPL_WALLET_FILE=<wallet json> npm run deploy:perpl -- smoke   # allocate 150 aUSD, open and close 0.001 BTC, withdraw
+```
+
+- The deployer is the factory owner, the mandate's agent and the smoke step's allocator. It needs MON for gas and, for the smoke step, at least 150 aUSD.
+- The mandate trades BTC only, with a $200 position cap, 2% drawdown and a 60-second mark age. The adapter uses 2x venue leverage and a 3% limit band.
+- Addresses go to `contracts/deployments/perpl-10143.json`. The script refuses to run if that file exists.
+- Both steps were rehearsed on a local fork of Monad testnet on 2026-10-06. The smoke step allocated 150 aUSD and withdrew 149.86.
+
 ## Limits
 
 - **Funding is as fresh as Perpl's position record.** `markEquity()` reads `premiumPnlCNS` as Perpl reports it. Whether Perpl's view accrues funding up to the current block or only to its last settlement was not checked on the fork, where every position was seconds old.

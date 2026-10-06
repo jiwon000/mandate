@@ -14,6 +14,7 @@
     "test:perpl": "PERPL_FORK=1 node --test contracts/test-js/perpl-fork.test.mjs",
     "deploy:monad": "node --env-file-if-exists=.env contracts/script/deploy.mjs",
     "deploy:demo": "node --env-file-if-exists=.env contracts/script/deploy-demo.mjs",
+    "deploy:perpl": "node contracts/script/deploy-perpl.mjs",
     "keeper:monad": "node --env-file-if-exists=.env contracts/script/keeper.mjs",
     "clean": "hardhat clean"
   },

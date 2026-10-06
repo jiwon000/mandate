@@ -99,6 +99,20 @@ Deployed on Monad testnet (chain 10143) on 2026-10-06:
 - The smoke run allocated 150 aUSD and opened 0.001 BTC at Perpl. Its first close ran out of gas inside Perpl's exchange (`0xff05e8bb…ba099`), because the node's gas estimate was too low. The script now adds half again as much gas.
 - The close was resent by hand and filled (`0x7a8fce78cc8349ef85f1a58f782c7b2608b1a5b05dbdaa2a2c248177ce958fd4`), and the withdrawal returned 149.914834 aUSD (`0x97420fb0294c2a66386718d3a5e77c7e7234b3d5f3f237774b718f533f65bab8`).
 
+### Agent runs
+
+`contracts/script/perpl-agent.mjs` (`npm run agent:perpl`) then traded the same vault on 2026-10-06. It is a rule-based script, not an AI model: it holds 0.001 BTC long when Perpl's mark is above a short moving average and short when below, and every few ticks it sends an order that would take the position to about $316, past the vault's $200 cap. The full log is [`contracts/deployments/perpl-agent-10143.jsonl`](../contracts/deployments/perpl-agent-10143.jsonl).
+
+| Run | Ticks | Filled | Refused at the cap | Note |
+|---|---|---|---|---|
+| 1 | 6 at 60 s | 4 (open, two flips, close) | 2 | Allocated 150 aUSD first |
+| 2 | 2 of 12 at 300 s | 3 (open, flip, close) | 0 | Stopped by a DNS failure on the Mac; the short was closed by rerunning the script with `MAX_TICKS=0`. The script now skips a tick on a failed read and retries the close |
+| 3 | 12 at 300 s | 3 (open, flip, close) | 3 | Vault equity 150.19 aUSD at the end |
+
+- In all, 10 orders filled and 5 were refused. Each refusal is a mined transaction with status 0 and the guard's `PositionNotionalExceeded()`, sent with a 500k gas limit, for example `0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff`.
+- A fill used about 2.1M gas and cost about 0.22 MON at ~102 gwei.
+- This is about 1.5 hours of small trades, not sustained trading.
+
 ## Limits
 
 - **Funding is as fresh as Perpl's position record.** `markEquity()` reads `premiumPnlCNS` as Perpl reports it. Whether Perpl's view accrues funding up to the current block or only to its last settlement was not checked on the fork, where every position was seconds old.

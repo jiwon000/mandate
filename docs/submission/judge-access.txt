@@ -24,6 +24,7 @@ When you finish, "Restore $2000" puts the price back for the next visitor.
 
 Things you may notice:
 
+- The first load can take up to a minute. The host sleeps when nobody has visited for a while, and the first request wakes it. Later loads are fast.
 - If the first click after loading reports MarkTooOld, wait about five seconds and try again. The price oracle slows down while nobody is watching and speeds up when a page opens.
 - Once a vault has been frozen, the server deploys a fresh set of vaults when the next visitor arrives or leaves, so every judge starts from Active vaults. If the page opens during a reset, the vaults are back in a minute or two. Addresses on the live page can therefore be newer than the ones in the README; the README's addresses and transactions stay on chain.
 - The venue and the USDC are mocks, and the price is set by our own keeper. The contracts under test are MandateFactory, MandateVault, MandateRiskGuard, BatchAllocator and MandateRegistry. The Perpl adapter is deployed to Monad testnet separately and has run one small round trip against Perpl's testnet exchange; it is not part of the live book.

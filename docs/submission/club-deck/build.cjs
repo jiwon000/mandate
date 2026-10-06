@@ -144,7 +144,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   box(3.75, 2.0, 2.6, 3.5, "MandateVault", "돈을 보관하고 지분을 계산. 마크 가격으로 자산을 평가. 동결·청산·현금 출구.", C.line);
   box(7.0, 2.0, 2.6, 1.55, "MandateRiskGuard", "잠긴 조건으로 주문 전·후를 검사", C.acc, C.panel2);
   box(7.0, 3.95, 2.6, 1.55, "VenueAdapter", "Mock 거래소 / Perpl 어댑터", C.line);
-  box(10.25, 3.95, 2.38, 1.55, "거래소", "데모: mock\nPerpl: 포크 테스트", C.line);
+  box(10.25, 3.95, 2.38, 1.55, "거래소", "데모: mock\nPerpl: 테스트넷 배포", C.line);
   arrow(2.9, 2.5, 3.75, 2.5, "allocate");
   arrow(2.9, 4.95, 3.75, 4.95, "execute");
   arrow(6.35, 2.75, 7.0, 2.75, "검사");
@@ -250,7 +250,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   txt(s, "Monad 테스트넷 포크 테스트", { x:x+0.35, y:y+0.3, w:w-0.7, h:0.4, bold:true, fontSize:16, color:C.acc });
   const st = ["누구나 등록 (createMandate)", "500 aUSD 입금", "0.001 BTC 롱, Perpl에 기록", "한도 넘는 주문은 Perpl 전에 거부", "롱에서 숏으로 전환", "보유 시간 초과로 동결", "청산 끝까지, Perpl 계정 비움", "배분자 전액 출금"];
   txt(s, st.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < st.length-1 } })), { x:x+0.35, y:y+0.85, w:w-0.6, h:2.9, fontSize:13, color:C.text, paraSpaceAfter:4 });
-  txt(s, "10회 연속 통과 (2026-10-06)\n아직 테스트넷에 실제 배포하지는 않음", { x:x+0.35, y:y+3.9, w:w-0.7, h:0.8, fontSize:12.5, color:C.amber, lineSpacingMultiple:1.2 });
+  txt(s, "10회 연속 통과 (2026-10-06)\n같은 날 테스트넷 배포, 실제 Perpl에서 왕복 1회", { x:x+0.35, y:y+3.9, w:w-0.7, h:0.8, fontSize:12.5, color:C.amber, lineSpacingMultiple:1.2 });
 }
 
 // 11 Demo

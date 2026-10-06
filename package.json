@@ -15,6 +15,7 @@
     "deploy:monad": "node --env-file-if-exists=.env contracts/script/deploy.mjs",
     "deploy:demo": "node --env-file-if-exists=.env contracts/script/deploy-demo.mjs",
     "deploy:perpl": "node contracts/script/deploy-perpl.mjs",
+    "agent:perpl": "node contracts/script/perpl-agent.mjs",
     "keeper:monad": "node --env-file-if-exists=.env contracts/script/keeper.mjs",
     "clean": "hardhat clean"
   },

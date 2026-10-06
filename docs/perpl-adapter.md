@@ -74,7 +74,23 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 - **Funding is as fresh as Perpl's position record.** `markEquity()` reads `premiumPnlCNS` as Perpl reports it. Whether Perpl's view accrues funding up to the current block or only to its last settlement was not checked on the fork, where every position was seconds old.
 - **Perpl's own liquidation is not modelled.** Perpl liquidates an isolated position whose margin runs out. The mandate's drawdown term should freeze the vault long before that, at the venue leverage the adapter uses. But a gap past both would show up as a lost margin, not as an unwind.
 - **A stalled feed stalls the exit.** When Perpl's mark goes stale, Perpl refuses orders. An unwind step then closes nothing in that market, and the vault stays `Frozen` until the feed returns. Full-price withdrawal needs a fresh mark until the vault is `Closed`. Meanwhile an allocator can take `withdrawUnpriced()`: their share of the vault's cash, capped at the share's worth at the last mark, in exchange for their part of what is still at Perpl. If Perpl's exchange cannot be read at all, the vault counts that as no mark, so `freezeUnobservable()` and this exit still work.
-- **Withdrawal rate limit.** Perpl rate-limits withdrawals (`getWithdrawAllowanceData`). If the adapter's sweep is refused, the money stays in the Perpl account and is still counted in equity. Anyone can retry it with `sweep(vault)`.
+- **Withdrawal rate limit.** Perpl rate-limits withdrawals (`getWithdrawAllowanceData`): by default 10% of its TVL per hour with a $1M floor, about a quarter of it available at the start of each hour ([Withdrawal Limits](https://docs.perpl.xyz/exchange/security/withdrawal-limits)). At demo sizes the floor alone is far above anything a vault moves, but the limit is global, so a run on Perpl by others could still hold a vault's sweep back. If the adapter's sweep is refused, the money stays in the Perpl account and is still counted in equity. Anyone can retry it with `sweep(vault)`.
 - **One venue leverage per adapter.** The adapter opens every position at one venue leverage, set when it is deployed. That decides how much margin sits at Perpl. The mandate's own leverage term is measured separately, against the vault's whole equity.
 - **Refusals are tested against a mock.** The skip path for a paused, stale or illiquid market is exercised against `MockPerplExchange`, whose errors follow those seen on the fork. Perpl's real exchange has not been seen refusing a market mid-unwind.
+- **Open-interest cap.** When a market reaches Perpl's open-interest cap only reduce-only orders are accepted, and from 85% of the cap margin cannot be taken out of positions ([Limiting Open Interest](https://docs.perpl.xyz/exchange/security/limiting-open-interest)). The adapter's own opens would then be refused like any refusal; `unwind()` is reduce-only and unaffected.
 - **Not audited.** Like the rest of the contracts, the adapter has had internal review only.
+
+## Before a testnet deployment
+
+What has to be true before a Perpl-backed vault is deployed to Monad testnet, how to check it, and what to do if it is not. Perpl facts below are from <https://docs.perpl.xyz>, read 2026-10-06; Perpl can change them, so read them live.
+
+| Item | How to check | Status | If it is not met |
+|---|---|---|---|
+| Price band on the agent's limit | [PR #19](https://github.com/jiwon000/mandate/pull/19) merged, adapter deployed with a band (the tests use 300) | Open | Do not deploy; an unbanded adapter lets an agent fill the vault against its own order |
+| Testnet aUSD for the vault | Perpl's docs name the testnet token (`0xa901…22dC`) but no faucet | Not found | Ask the Perpl team, or keep Perpl on the fork test only |
+| Account minimum | `getMinAccountOpenCNS()`; docs say $100 on testnet, $10 on mainnet | Checked on the fork | Fund the vault above it before its first trade, or the trade reverts `BelowAccountMinimum` |
+| Margin mode | Docs: Perpl is restricted to isolated margin for now | Matches the adapter, which models isolated positions | Re-check equity and liquidation notes if Perpl enables cross margin |
+| Taker settlement | `maxNegPnlCollatBPS` above 0 | Set to 10000, checked on the fork | See Findings |
+| Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark is at most 10 s old | Use a longer mark-age term on Perpl than on the mock demo |
+| Deploy key | A team member deploys with their own key; nothing in this repository holds one | Pending | No deployment |
+| Team agreement | The team agrees to list the adapter on the factory | Pending | Perpl stays fork-tested only, as the README says |

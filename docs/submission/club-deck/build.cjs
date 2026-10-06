@@ -42,7 +42,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("팀 구성", "팀원별 담당 파트");
   const cols = [
-    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰, registerAgent 취약점 수정"]],
+    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰 4회: registerAgent 수정, 마켓 기능 점검"]],
     ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "Perpl 거래소 어댑터와 포크 테스트", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
   ];
   cols.forEach(([who, items], i) => {
@@ -257,56 +257,57 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("데모", "데모 영상");
   s.addMedia({ type:"video", path:process.env.VIDEO || "mandate-demo-ko.mp4", cover:"data:image/png;base64,"+require("fs").readFileSync(process.env.COVER || "cover.png").toString("base64"), x:X0, y:1.55, w:9.0, h:5.06 });
-  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "12초 마크 vs 1초 마크"];
+  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "탐색기에서 트랜잭션 확인"];
   txt(s, "영상 순서", { x:10.05, y:1.6, w:2.6, h:0.35, bold:true, fontSize:15, color:C.acc });
   txt(s, D.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < D.length-1 } })), { x:10.05, y:2.05, w:2.6, h:3.6, fontSize:12.5, color:C.text, paraSpaceAfter:6 });
-  txt(s, "2분 32초 · 로컬 체인에서 녹화\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
+  txt(s, "2분 45초 · 테스트넷 공개 데모\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
 }
 
 // 12 Results
 {
-  const s = base("결과", "결과");
-  const N = [["93", "컨트랙트 테스트", "팩토리·거래 조건·수수료·현금 출구·Perpl mock 포함"], ["61", "데모 서버 테스트", "서명 허용 목록·가스 한도·보안 헤더"], ["23", "Foundry 테스트", "불변식 13개 (128회 × 깊이 32) 포함"], ["10/10", "Perpl 포크 테스트", "실제 Perpl 거래소 상대, 연속 통과"]];
+  const s = base("결과", "만든 것과 확인한 것");
+  const N = [
+    ["돈", "에이전트는 돈을 못 꺼낸다", "주문만 낼 수 있고, 출금 권한은 맡긴 사람에게만 있다"],
+    ["한도", "넘는 주문은 미리 막힌다", "거래소에 닿기 전에 컨트랙트가 조건을 검사하고 거부한다"],
+    ["정지", "손실 넘으면 누구나 멈춘다", "아무나 버튼 한 번으로 동결하고, 포지션을 나눠 정리한다"],
+    ["공개", "지금 직접 해 볼 수 있다", "모나드 테스트넷 공개 데모. 모든 동작이 트랜잭션으로 남는다"],
+  ];
   const w = (W - 1.4 - 0.75) / 4;
   N.forEach(([v, l, d], i) => {
     const x = X0 + i * (w + 0.25), y = 1.85;
-    card(s, x, y, w, 2.4);
-    txt(s, v, { x:x+0.3, y:y+0.3, w:w-0.6, h:0.9, bold:true, fontSize:44, color:C.acc });
-    txt(s, l, { x:x+0.3, y:y+1.2, w:w-0.6, h:0.4, bold:true, fontSize:15 });
-    txt(s, d, { x:x+0.3, y:y+1.6, w:w-0.5, h:0.7, fontSize:11.5, color:C.muted, lineSpacingMultiple:1.15 });
+    card(s, x, y, w, 2.55);
+    txt(s, v, { x:x+0.3, y:y+0.3, w:w-0.6, h:0.8, bold:true, fontSize:36, color:C.acc });
+    txt(s, l, { x:x+0.3, y:y+1.1, w:w-0.5, h:0.45, bold:true, fontSize:15.5 });
+    txt(s, d, { x:x+0.3, y:y+1.6, w:w-0.5, h:0.85, fontSize:12, color:C.muted, lineSpacingMultiple:1.15 });
   });
+  txt(s, "어떻게 확인했나", { x:X0, y:4.7, w:6, h:0.4, bold:true, fontSize:17, color:C.acc });
   const B = [
-    "누구나 등록할 수 있는 시장: 팩토리와 Launch 화면, 등록 후 바로 목록에 노출",
-    "조건 19개 필드를 컨트랙트가 강제 (위험 한도 11 · 거래 조건 6 · 수수료 2)",
-    "웹 7화면: Market · Agent · Allocate · Batch · Privacy · Launch · Live Risk",
-    "모나드 테스트넷 공개 데모 운영 중 (현재는 10-05 버전)",
+    "자동 테스트 154개가 코드를 바꿀 때마다 돈다 (컨트랙트 93, 데모 서버 61)",
+    "함수를 무작위 순서로 수없이 불러도 \"돈은 새지 않는다\" 같은 규칙이 깨지지 않는지 검사",
+    "실제 Perpl 거래소를 복사한 환경에서 입금부터 출금까지 10번 연속 성공",
   ];
-  txt(s, B.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < B.length-1 } })), { x:X0, y:4.6, w:W-1.4, h:2.1, fontSize:15.5, color:C.text, paraSpaceAfter:9 });
+  txt(s, B.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < B.length-1 } })), { x:X0, y:5.2, w:W-1.4, h:1.6, fontSize:15, color:C.text, paraSpaceAfter:8 });
 }
 
 // 13 Limits
 {
-  const s = base("한계와 로드맵", "한계와 다음 단계");
-  const lim = [
-    "거래소와 USDC는 mock. Perpl 어댑터는 포크에서만 검증",
-    "외부 보안 감사 전. 내부 리뷰만 거침",
-    "데모의 가격 갱신은 우리 서버가 함 (Perpl로 가면 거래소 가격)",
-    "손실 한도는 즉시 정지가 아님. 위반 뒤 위험이 쌓이지 않는 것만 보장",
-    "이번에 만든 기능은 아직 공개 데모에 반영 전",
+  const s = base("한계", "아직 아닌 것");
+  const demo = [
+    "거래소와 USDC는 가짜(mock)다",
+    "가격은 우리 서버가 넣는다",
+    "실제 거래소(Perpl) 연결은 복사본에서만 확인했다",
   ];
-  const nxt = [
-    "공개 데모 재배포: 팩토리·거래 조건·수수료 반영",
-    "Perpl 어댑터를 Monad 테스트넷에 배포",
-    "외부 보안 감사",
-    "성과를 공개하지 않고 보고하는 비공개 리포팅",
+  const not = [
+    "전략이 돈을 번다는 것. 조건은 행동을 제한할 뿐이다",
+    "손실이 정확히 한도에서 멈춘다는 것. 급락하면 넘을 수 있다",
   ];
   const col = (x, h, color, items) => {
-    card(s, x, 1.85, 5.85, 4.85);
+    card(s, x, 1.85, 5.85, 3.0);
     txt(s, h, { x:x+0.4, y:2.15, w:5, h:0.45, bold:true, fontSize:21, color });
-    txt(s, items.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < items.length-1 } })), { x:x+0.4, y:2.8, w:5.1, h:3.7, fontSize:15, color:C.text, paraSpaceAfter:12, lineSpacingMultiple:1.1 });
+    txt(s, items.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < items.length-1 } })), { x:x+0.4, y:2.8, w:5.1, h:1.9, fontSize:16, color:C.text, paraSpaceAfter:14, lineSpacingMultiple:1.1 });
   };
-  col(X0, "한계", C.amber, lim);
-  col(X0 + 6.1, "다음", C.green, nxt);
+  col(X0, "데모라서 다른 점", C.amber, demo);
+  col(X0 + 6.1, "보장하지 않는 것", C.red, not);
 }
 
 // 14 Close

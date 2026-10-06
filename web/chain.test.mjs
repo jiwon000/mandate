@@ -68,9 +68,15 @@ test("a visitor funds a wallet, opens a mandate through the factory, and each te
     await fails(marketOrder(1, long, (btc * 103n) / 100n), "PriceDeviationExceeded");
     await fails(marketOrder(1, long * 2n, limitPriceFor(btc, long * 2n, 100)), "LeverageExceeded|OrderNotionalExceeded");
 
-    await (await vault.execute(d.addresses.adapter, marketOrder(1, long, limitPriceFor(btc, long, 100)))).wait();
+    // The demo oracle re-marks every block. A mark landing between ethers' gas estimate
+    // and the send can make the trade cost more than the estimate, so leave headroom.
+    const execute = async (order) => {
+      const estimate = await vault.execute.estimateGas(d.addresses.adapter, order);
+      return (await vault.execute(d.addresses.adapter, order, { gasLimit: (estimate * 3n) / 2n })).wait();
+    };
+    await execute(marketOrder(1, long, limitPriceFor(btc, long, 100)));
     const tiny = E18(1) / 1000n;
-    await (await vault.execute(d.addresses.adapter, marketOrder(1, tiny, limitPriceFor(await venue.priceOf(1), tiny, 100)))).wait();
+    await execute(marketOrder(1, tiny, limitPriceFor(await venue.priceOf(1), tiny, 100)));
     await fails(marketOrder(1, tiny, limitPriceFor(await venue.priceOf(1), tiny, 100)), "DailyTradesExceeded");
   } finally {
     await chain.close();

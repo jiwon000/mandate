@@ -43,7 +43,12 @@ test("latestBook finds the book a redeploy left behind a stale record", { timeou
     assert.equal(found.registry.address, fresh.registry.address);
     assert.deepEqual(found.vaults.map((v) => [v.address, v.agent, v.termsHash]), fresh.vaults.map((v) => [v.address, v.agent, v.termsHash]));
     assert.deepEqual(found.vaults.map((v) => v.limits), fresh.vaults.map((v) => v.limits));
-    assert.equal(found.startBlock, fresh.startBlock);
+    // The record takes startBlock from getBlockNumber() before the first deploy, so a
+    // block mined in between leaves it lower than what the chain shows. Recovery may
+    // name a later block, but never one past a transaction of the book.
+    assert.ok(found.startBlock >= fresh.startBlock);
+    const nonceAt = async (block) => Number(await request({ method: "eth_getTransactionCount", params: [fresh.accounts.owner, `0x${block.toString(16)}`] }));
+    assert.equal(await nonceAt(found.startBlock), await nonceAt(fresh.startBlock));
   } finally {
     await chain.close();
   }

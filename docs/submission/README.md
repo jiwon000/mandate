@@ -14,7 +14,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-06 04:18 UTC에 마켓 기능(PR #12: `MandateFactory`, 거래 조건, 수수료, 다중 마켓)이 들어간 컨트랙트로 재배포됐습니다. 서빙되는 `app.js`가 main과 같음을 확인했습니다(2026-10-06). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
 - 데모 영상은 2026-10-06 공개 데모에서 녹화했습니다(한국어·영어, 2분 45초, 녹화 스크립트는 `demo-video/`). 피치 영상은 아직입니다.
-- 세 `.txt` 문안을 10-06 상태(마켓 기능, 수수료, Perpl 포크 테스트, 공개 데모 재녹화)로 다시 썼습니다. 폼에는 아직 10-05 문안이 들어 있으므로 팀이 세 칸을 다시 붙여 넣어야 합니다 (아래 "남은 일" 3-2).
+- 세 `.txt` 문안을 10-06 상태(마켓 기능, 수수료, Perpl 포크 테스트, 공개 데모 재녹화)로 다시 썼습니다. 폼 세 칸에도 같은 날 다시 붙여 넣고 저장 뒤 일치를 확인했습니다.
 - 10-05 동결 규칙(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md))과 10-06 마켓 기능이 모두 main에 머지됐고 공개 데모에 반영됐습니다.
 
 ## 이 폴더의 파일
@@ -79,11 +79,11 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | ~~2-1~~ | ~~브랜치의 10-05 오후 커밋(Perpl 로드맵, 동결 규칙 설계와 구현)을 main에 올리는 새 PR 리뷰와 머지~~ | @yahamang | 완료 (PR #10 머지됨, CI 퍼즈 테스트 통과) |
 | ~~2-2~~ | ~~공개 데모를 새 컨트랙트로 전환 (Render 배포 → 관리자 `Reset demo` → 주소 표와 `10143.json` 갱신)~~ | @jiwon000, @yahamang | 완료 (2026-10-05 08:08 UTC 장부) |
 | ~~3-1~~ | ~~제출 폼 Description을 `description.txt`와 다시 맞추기. 한도에 맞게 9,565자에서 7,956자로 줄여 저장, One-line description도 함께 저장~~ | 팀 | 완료 (2026-10-05) |
-| 3-2 | 10-06에 고친 `description.txt`, `go-to-market.txt`, `judge-access.txt`를 폼 세 칸에 다시 붙여 넣고, 저장 뒤 다시 읽어 일치 확인 | 팀 | 남음 |
+| ~~3-2~~ | ~~10-06에 고친 `description.txt`, `go-to-market.txt`, `judge-access.txt`를 폼 세 칸에 다시 붙여 넣고, 저장 뒤 다시 읽어 일치 확인~~ | 팀 | 완료 (2026-10-06, 세 칸 모두 파일과 일치) |
 | 4 | 데모 영상 녹화와 업로드, 폼에 링크 입력 | 팀 | 공개 데모에서 녹화 완료 (2026-10-06). 업로드와 폼 링크 입력 남음 |
 | 5 | 피치 영상 녹화와 업로드, 폼에 링크 입력. 대본의 팀 소개 줄 채우기 | 팀 | 보류. 구성은 팀이 함께 정함 |
 | 6 | 아래 "정해야 할 것" 정리 | 팀 | 진행 중 |
-| 7 | 제출 전 최종 점검: 공개 데모에서 `judge-access.txt`의 1~9단계(선택 10~14단계)를 그대로 따라 하기, README의 주소 표를 그때의 장부와 대조, 폼 "REVIEW ENTRY" | 팀 | 3-2, 4, 5번 뒤 |
+| 7 | 제출 전 최종 점검: 공개 데모에서 `judge-access.txt`의 1~9단계(선택 10~14단계)를 그대로 따라 하기, README의 주소 표를 그때의 장부와 대조, 폼 "REVIEW ENTRY" | 팀 | 4, 5번 뒤 |
 
 ## 공개 데모 운영 메모
 

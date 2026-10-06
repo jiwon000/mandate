@@ -119,6 +119,7 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 - [`docs/perpl-adapter.md`](docs/perpl-adapter.md): Perpl 어댑터 구조, 포크 테스트, 발견 사항
 - [`docs/batch-allocator-milestone2.md`](docs/batch-allocator-milestone2.md): 배치 배분 설계와 ABI
 - [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md): 내부 보안 리뷰 4라운드
+- [`docs/threat-model.md`](docs/threat-model.md): 위협별 대응과 남는 위험, 구성 요소별 장애 시 잃는 것과 남는 것
 - [AI tool disclosure](#ai-tool-disclosure), [Third-party code](#third-party-code), [License](#license)
 
 ---
@@ -344,6 +345,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 - A vault is permanently bound to the adapter it was constructed with. There is no venue migration path.
 - The Perpl adapter does not model Perpl's own liquidation, and cannot unwind while Perpl's mark is stale, because Perpl then refuses orders; the cash-only exit above is what an allocator has meanwhile. Funding is counted as Perpl reports it. It has run against Perpl's real contracts only on a local fork, not as a deployed vault on testnet. Details in [`docs/perpl-adapter.md`](docs/perpl-adapter.md).
 - Nothing here has had an external audit. The reviews in this repository are internal.
+- Threats, what stops each one and what is left, and what each part's failure costs, are tabulated in [`docs/threat-model.md`](docs/threat-model.md).
 - One vault with a stale mark or in `Frozen` state reverts the whole epoch in `BatchAllocator.settleEpoch()`, since settlement allocates to every vault in a single transaction. The batcher has to leave such vaults out of the batch.
 - The first deposit into a vault permanently locks `MIN_SHARES` (1e3 share units) to a dead address so a first depositor cannot inflate the share price against later allocators. The first depositor pays that dust.
 - `poke()` pays its bounty out of the vault, so a breach costs allocators 0.05% on top of the drawdown, and each of the five `unwind()` steps costs another 0.01%. That is the price of not needing a trusted keeper.
@@ -503,7 +505,7 @@ One pass through the demo against that earlier book, every step sent through the
 | Agent sends an order on frozen Range Carry | refused with `AgentNotActive` | none, nothing was signed |
 | `unwind()` step 1 of 5 on Range Carry | mined, a fifth of the position closed | [`0x598d53b5…1f5e16`](https://testnet.monadscan.com/tx/0x598d53b5f45845f07a1178d83c6a63926e5af8dc246d9fc7d29dbc8fcb1f5e16) |
 
-Each transaction was confirmed 1.1 to 1.6 seconds after the request reached the server. In the same session eight consecutive `poke()` calls on Tight Mandate, 5 to 7 seconds apart by block timestamp on a quiet market, all passed its 10-second mark-age term; not one reverted with `MarkTooOld`. The table gives the age of the mark each call was checked against: the call's block timestamp minus the venue's `updatedAt` from the last `PriceSet` before it, read back from the chain (`eth_getLogs` and block headers on the public RPC). The ages run from 1 to 5 seconds, which is the 5-second oracle interval; the block interval adds under a second.
+Each transaction was confirmed 1.1 to 1.6 seconds after the request reached the server. In the same session eight consecutive `poke()` calls on Tight Mandate, 5 to 7 seconds apart by block timestamp on a quiet market, all passed its 10-second mark-age term; not one reverted with `MarkTooOld`. The table gives the age of the mark each call was checked against: the call's block timestamp minus the venue's `updatedAt` from the last `PriceSet` before it, read back from the chain (`eth_getLogs` and block headers on the public RPC). The ages run from 1 to 5 seconds, which is the 5-second oracle interval; the block interval adds under a second. Over the 8 calls: median 3 s, maximum 5 s, against the 10-second term. Eight calls on a quiet market are a sample, not a distribution; they show the term can be honored, not how often it fails under load.
 
 | Block | `poke()` | Mark age at execution |
 | --- | --- | --- |

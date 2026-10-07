@@ -139,6 +139,7 @@ interface IMandateVaultView {
 
 interface IMandateVaultFreeze {
     function freeze(address beneficiary) external returns (uint256 bounty);
+    function resume() external;
 }
 
 interface IVenueAdapter {
@@ -218,6 +219,11 @@ interface IRiskGuard {
 
     /// @notice Why and when this guard froze `vault`: reason 0 none, 1 drawdown past
     ///         the cap, 2 no fresh mark for UNOBSERVABLE_MARK_AGES times the mark age,
-    ///         3 daily loss past the cap, 4 held a position past the holding limit.
+    ///         4 held a position past the holding limit. Kept after a resume, so it
+    ///         reads as the last freeze, not the current state.
     function freezeOf(address vault) external view returns (uint8 reason, uint64 frozenAt);
+
+    /// @notice Earliest time anyone may start unwinding `vault` once frozen. Zero except
+    ///         after an unobservable freeze, which first leaves a window to resume().
+    function unwindAllowedAt(address vault) external view returns (uint256);
 }

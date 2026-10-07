@@ -53,6 +53,20 @@ test("summarize: an empty history is all zeros and nulls, not a crash", () => {
   assert.deepEqual(s.breaches, []);
 });
 
+test("summarize: a daily-loss pause and a resume are recorded beside the freezes", () => {
+  const events = [
+    mark(1, 1, 1, 0),
+    { name: "DailyLossPause", blockNumber: 2, logIndex: 0, txHash: "0xp", time: 1002, args: { lossBps: 600n } },
+    { name: "Unobservable", blockNumber: 3, logIndex: 0, txHash: "0xu", time: 1003, args: {} },
+    { name: "Resumed", blockNumber: 4, logIndex: 0, txHash: "0xr", time: 1004, args: {} }
+  ];
+  const s = summarize(events, { state: 0, freeze: { reason: 2, frozenAt: 1003 } });
+  assert.deepEqual(s.breaches.map((b) => [b.type, b.lossBps]), [["dailyLossPause", 600], ["unobservable", undefined]]);
+  assert.equal(s.resumes, 1);
+  assert.equal(s.state, "Active");
+  assert.equal(s.freezeReason, "unobservable", "the last freeze, kept after the resume");
+});
+
 test("downsample keeps first and last and never exceeds the cap", () => {
   const points = Array.from({ length: 1000 }, (_, i) => i);
   const out = downsample(points, 200);

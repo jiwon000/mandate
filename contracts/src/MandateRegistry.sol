@@ -322,15 +322,20 @@ contract MandateRegistry is Ownable, EIP712 {
     /// @notice Record that a registered vault has frozen or closed. Permissionless.
     /// @dev Reads the vault's state and the guard's freeze record directly, so no
     ///      reporter is trusted for a fact the chain already holds. A vault moves
-    ///      Active -> Frozen -> Closed only, so each call can only move the record
-    ///      forward; calling twice for the same state reverts.
+    ///      Active -> Frozen -> Closed, and back from Frozen to Active only through the
+    ///      guard's resume(); calling again with nothing new to record reverts.
     function recordOutcome(address vault) external {
         Agent storage entry = agentOf[vault];
         if (entry.registeredAt == 0) revert NotRegistered();
         uint8 state = IMandateVaultView(vault).state();
         Outcome storage outcome = outcomeOf[vault];
-        if (state == 0 || state <= outcome.state) revert NothingToRecord();
         (uint8 reason, uint64 frozenAt) = IRiskGuard(entry.guard).freezeOf(vault);
+        // Closed is final. A vault resumed after an unobservable freeze records as
+        // Active again, keeping the reason, and a later freeze records over it.
+        if (
+            outcome.state == 2 || (state == 0 && outcome.state != 1) ||
+            (state == outcome.state && frozenAt == outcome.frozenAt)
+        ) revert NothingToRecord();
         outcome.state = state;
         outcome.reason = reason;
         outcome.frozenAt = frozenAt;

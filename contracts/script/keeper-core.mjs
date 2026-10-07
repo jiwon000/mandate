@@ -1,14 +1,18 @@
 // One keeper tick, free of any venue or oracle: look at each vault and send a
 // transaction only when it earns something.
 //
-//   Active  -> poke() when a view says the drawdown, daily-loss or holding-time
-//              term is breached at the current mark; freezeUnobservable() when the
-//              mark is older than UNOBSERVABLE_MARK_AGES * maxMarkAgeSeconds.
-//   Frozen  -> unwind(), one step per call (the vault allows one per block).
+//   Active  -> poke() when a view says the drawdown or holding-time term is
+//              breached at the current mark; freezeUnobservable() when the mark is
+//              older than UNOBSERVABLE_MARK_AGES * maxMarkAgeSeconds. A daily loss
+//              only pauses new risk and pays nothing, so it is not poked for.
+//   Frozen  -> resume() if the guard would allow it (an unobservable freeze whose
+//              mark is back inside the recovery window); otherwise unwind(), one
+//              step per call, once the window has passed.
 //   Closed  -> nothing.
 //
-// Both bounties are paid to the caller, so the sends are the keeper's income; the
-// views and staticCalls are free. `mode` picks what an Active vault gets:
+// Both bounties are paid to the caller, so poke and unwind are the keeper's income;
+// resume pays nothing and is sent because it keeps a healthy vault from being
+// unwound. The views and staticCalls are free. `mode` picks what an Active vault gets:
 //   "check"   (default) poke only when it would freeze.
 //   "mark"    also poke a healthy vault every tick, which keeps the high-water mark
 //             and the daily-loss base current (the mock-venue keeper does this).
@@ -30,10 +34,6 @@ async function breachOf(guard, vault, adapter, now) {
   const [, , drawdownBps] = await guard.quote(vault, adapter);
   if (drawdownBps > limits.maxDrawdownBps) return `drawdown ${drawdownBps}bps > ${limits.maxDrawdownBps}`;
   const terms = await guard.tradeTermsOf(vault);
-  if (terms.maxDailyLossBps !== 0n) {
-    const [lossBps] = await guard.dailyLossQuote(vault, adapter);
-    if (lossBps > terms.maxDailyLossBps) return `daily loss ${lossBps}bps > ${terms.maxDailyLossBps}`;
-  }
   const openedAt = await guard.positionOpenedAt(vault);
   if (terms.maxHoldingSeconds !== 0n && openedAt !== 0n && now > openedAt + terms.maxHoldingSeconds) {
     return `held ${now - openedAt}s > ${terms.maxHoldingSeconds}`;
@@ -91,7 +91,7 @@ async function serveActive({ guard, vault, adapter, now, mode }) {
 /// @param signer  the keeper's signer: its provider gives the block time, and it
 ///                sends unwind().
 /// @returns       one action per vault: { vault, name, action, ... }, action being
-///                poke | freezeUnobservable | observe | unwind | none | skip.
+///                poke | freezeUnobservable | observe | resume | unwind | none | skip.
 /// @param unwind  false leaves Frozen vaults alone (the mock-venue keeper never did).
 export async function keeperTick({ guard, vaults, signer, mode = "check", unwind = true }) {
   const now = BigInt((await signer.provider.getBlock("latest")).timestamp);
@@ -104,6 +104,15 @@ export async function keeperTick({ guard, vaults, signer, mode = "check", unwind
         const adapter = await vault.contract.venueAdapter();
         actions.push(await serveActive({ guard, vault, adapter, now, mode }));
       } else if (state === FROZEN && unwind) {
+        let resumable = false;
+        try {
+          await guard.resume.staticCall(vault.address);
+          resumable = true;
+        } catch { /* not an unobservable freeze, or a limit still breached */ }
+        if (resumable) {
+          actions.push(await send(guard.resume(vault.address), { ...base, action: "resume" }));
+          continue;
+        }
         const writer = vault.contract.connect(signer);
         try {
           await writer.unwind.staticCall();

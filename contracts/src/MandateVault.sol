@@ -35,6 +35,8 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     error NothingToDeleverage();
     error SharesUnderRequest();
     error RedemptionDeleveraging(uint256 until);
+    error UnwindNotYet(uint256 allowedAt);
+    error UnwindStarted();
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -116,6 +118,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     event Frozen(address indexed beneficiary, uint256 bounty);
     event Unwound(address indexed caller, uint8 step, uint256 closedNotional, int256 realizedPnl, uint256 bounty);
     event Closed();
+    event Resumed();
     event RedeemRequested(address indexed allocator, uint256 shares, uint256 dueAt);
     event RedeemCancelled(address indexed allocator);
     event DeleveragedForRedemption(
@@ -352,6 +355,20 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         emit Frozen(beneficiary, bounty);
     }
 
+    /// @notice Frozen -> Active, for a freeze the guard has cleared.
+    /// @dev Only the RiskGuard may call, and it allows this only for an unobservable
+    ///      freeze whose mark is fresh again. Once unwind() has taken a step the
+    ///      position is no longer the agent's, so the vault cannot come back. Fees
+    ///      restart from now: nothing accrues for the time the agent was stopped.
+    function resume() external {
+        if (msg.sender != address(riskGuard)) revert OnlyRiskGuard();
+        if (state != AgentState.Frozen) revert NotFrozen();
+        if (unwindStepsDone != 0) revert UnwindStarted();
+        state = AgentState.Active;
+        if (lastFeeAccrual != 0) lastFeeAccrual = block.timestamp;
+        emit Resumed();
+    }
+
     /// @notice Ask for `shares` more to be redeemable in cash within REDEEM_NOTICE.
     /// @dev withdraw() pays out of the cash in the vault, and on a venue that holds
     ///      margin an open position can leave too little of it. The request is the
@@ -479,6 +496,8 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     ///      terminal: no trades, no deposits, withdrawals only.
     function unwind() external nonReentrant returns (bool closed) {
         if (state != AgentState.Frozen) revert NotFrozen();
+        uint256 allowedAt = riskGuard.unwindAllowedAt(address(this));
+        if (block.timestamp < allowedAt) revert UnwindNotYet(allowedAt);
         if (lastUnwindBlock == block.number) revert UnwindCooldown();
         lastUnwindBlock = block.number;
 

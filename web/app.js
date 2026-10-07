@@ -337,10 +337,13 @@ async function refresh() {
 
         const terms = hasTerms() ? await readTermState(meta) : null;
         // A guard from before the freeze tiers has no recovery window: 0, unwind at once.
-        const unwindAllowedAt = Number(await contracts.guard.unwindAllowedAt?.(meta.address).catch(() => 0n) ?? 0n);
+        // Only a frozen vault has one, so an active one skips the call.
+        const unwindAllowedAt = agentState === 1n
+          ? Number(await contracts.guard.unwindAllowedAt?.(meta.address).catch(() => 0n) ?? 0n)
+          : 0;
         // The allocator's redemption request, on vaults that have the queue.
         const redeem = state.wallet && vault.redeemRequestOf
-          ? await Promise.all([vault.redeemRequestOf(state.wallet), vault.REDEEM_NOTICE()])
+          ? await Promise.all([vault.redeemRequestOf(state.wallet), redeemNotice(vault)])
             .then(([r, notice]) => ({ shares: r.shares, dueAt: r.shares === 0n ? 0 : Number(r.requestedAt + notice) }))
             .catch(() => null)
           : null;
@@ -1273,15 +1276,40 @@ function renderAllocate() {
 // The redemption queue: when the cash on hand cannot pay a stake in full, the
 // allocator gives notice with requestRedeem(); once it has run, anyone may make the
 // vault free the cash with deleverageForRedemption(), and withdraw() pays it.
+// REDEEM_NOTICE is a constant of the contract: read it once per vault address.
+const redeemNotices = new Map();
+function redeemNotice(vault) {
+  const key = vault.target;
+  if (!redeemNotices.has(key)) {
+    redeemNotices.set(key, vault.REDEEM_NOTICE().catch((error) => {
+      redeemNotices.delete(key);
+      throw error;
+    }));
+  }
+  return redeemNotices.get(key);
+}
+
 function renderRedeem(vault, fair, claim) {
   const row = $("#redeemRow");
   const redeem = vault.redeem;
   const pending = redeem && redeem.shares > 0n;
   // Shown when there is a request to report, or cash that falls short of the stake.
-  row.hidden = !redeem || vault.agentState !== 0 || (!pending && (vault.userShares === 0n || claim >= fair));
+  // A request still standing when the vault froze can be cancelled; nothing else
+  // here applies to a vault that is being unwound.
+  const frozenWithRequest = pending && vault.agentState !== 0;
+  row.hidden = !redeem || (vault.agentState !== 0 && !frozenWithRequest) || (!pending && (vault.userShares === 0n || claim >= fair));
   if (row.hidden) return;
   const button = $("#redeemButton");
   $("#cancelRedeemButton").hidden = !pending;
+  if (frozenWithRequest) {
+    $("#redeemStatus").textContent =
+      `${usdc(redeem.shares)} shares requested, but the vault is not active. Unless it resumes, the unwind turns its position into cash and withdraw() pays from that. Cancelling frees the shares to transfer.`;
+    if (!button.dataset.busy) {
+      button.disabled = true;
+      button.textContent = "Vault not active";
+    }
+    return;
+  }
   if (!pending) {
     $("#redeemStatus").textContent =
       `The vault holds ${usdc(claim)} mUSDC of your ${usdc(fair)}; the rest is in the open position. requestRedeem() gives the agent notice to free it; after the notice anyone can make the vault reduce the position for you.`;
@@ -1292,13 +1320,18 @@ function renderRedeem(vault, fair, claim) {
     return;
   }
   const due = redeem.dueAt <= state.chainTime;
-  $("#redeemStatus").textContent = due
+  const owed = vault.totalSupply === 0n ? 0n : (redeem.shares * vault.equity6) / vault.totalSupply;
+  // After a deleverage the notice starts again, but the cash is already there.
+  const covered = owed > 0n && vault.totalAssets >= owed;
+  $("#redeemStatus").textContent = covered
+    ? `${usdc(redeem.shares)} shares requested, and the vault's cash covers them now: withdraw() pays them. Left unclaimed, the agent may put the cash back to work after the grace hour.`
+    : due
     ? `${usdc(redeem.shares)} shares requested and the notice has run. deleverageForRedemption() reduces every position by the shortfall plus 5%, and withdraw() then pays from the freed cash.`
     : `${usdc(redeem.shares)} shares requested. The agent has until ${new Date(redeem.dueAt * 1000).toLocaleString()} to free the cash on its own terms.`;
   if (!button.dataset.busy) {
     // The vault, not this page's last mark, decides whether there is cash to free.
-    button.disabled = !due;
-    button.textContent = due ? "deleverageForRedemption() — free the cash" : "Notice running";
+    button.disabled = !due || covered;
+    button.textContent = covered ? "Cash ready: withdraw above" : due ? "deleverageForRedemption() — free the cash" : "Notice running";
   }
 }
 

@@ -288,7 +288,9 @@ const server = createServer(async (req, res) => {
 server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
 
-server.listen(port, () => console.log(`\nMandate demo (${liveMode ? "live RPC" : "local chain"}) at http://localhost:${port}`));
+// The local chain's /rpc signs for funded accounts, so it answers this machine only.
+// Live mode sits behind a host's proxy and has its own signing allowlist. HOST overrides.
+server.listen(port, process.env.HOST ?? (liveMode ? undefined : "127.0.0.1"), () => console.log(`\nMandate demo (${liveMode ? "live RPC" : "local chain"}) at http://localhost:${port}`));
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {

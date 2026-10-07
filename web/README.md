@@ -20,7 +20,7 @@ Then open `http://localhost:3000`.
 
 The page talks to the node over `/rpc`, which the server proxies to the in-process
 chain, so no wallet extension and no testnet funds are needed. The header's
-"Connect allocator" button adopts one of the node's funded accounts.
+"Connect" menu adopts one of the node's funded accounts as the allocator.
 
 For the live mode, fill `.env` (`MONAD_RPC_URL`, `DEMO_MNEMONIC`, `DEMO_ADMIN_TOKEN`),
 run `npm run deploy:demo` once, then `npm run web:live`. The server boots from
@@ -51,7 +51,9 @@ single market move produces four different outcomes. On a live chain the oracle 
 paid transaction every 5 seconds, so the live profile widens Tight Mandate's mark age
 to 10 seconds; everything else is identical (`web/mandates.mjs` is the one definition).
 
-## The six screens
+## The screens
+
+Seven, counting Launch, which appears only on a book with a factory and needs a browser wallet. The other six:
 
 **Market** — the mandate book. Drawdown, leverage and mark age each shown against the
 limit the allocator accepted, not against each other. A vault past a limit reads

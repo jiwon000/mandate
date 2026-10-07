@@ -28,6 +28,9 @@
    - 실패한 장면만 다시 찍을 때: `ONLY=1,7 SEGS=segs.patch.json node record.mjs`. 나머지 장면은 건너뛴다.
    - 로컬 노드에서 연습할 때: `BASE=http://localhost:3222/ RPC=http://127.0.0.1:8545 CHAIN_ID=31337 LABEL=31337`.
 3. 합성: `node mux.mjs ko segs.final.json` (영어는 `en`). 무음판은 오디오 없이 같은 컷. 자막은 ffmpeg가 아니라 브라우저에서 구워 넣는다.
+   - 자막은 장면의 첫 줄이 0.2초에 걸쳐 나타나고 마지막 줄이 0.2초에 걸쳐 사라진다. 클릭 표시(테두리, 동작 배지, 물결)도 서서히 켜지고 꺼진다. 클릭 표시는 녹화 화면에 찍히므로 재녹화해야 바뀌고, 자막은 기존 녹화로 다시 합성만 하면 된다.
+   - Chrome 대신 다른 Chromium 브라우저를 쓰려면 `CHROME=<실행 파일 경로>`.
+   - `KEY_FILE`은 `[{private_key}]` 목록이나 `{privateKey}` 객체 둘 다 읽는다. Launch 영수증에서 새 볼트를 찾을 팩토리 주소는 `BASE`의 `/api/deployment`에서 읽는다.
 
 ## 녹화에서 배운 것
 

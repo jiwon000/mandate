@@ -29,7 +29,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = pres.addSlide(); n++;
   s.background = { color: C.bg };
-  txt(s, "HYBLOCK · 모나드 메트로폴리스 · 트랙 1 — 온체인 금융과 트레이딩", { x:X0, y:1.3, w:11, h:0.35, fontSize:13, color:C.acc, charSpacing:1 });
+  txt(s, "HYBLOCK · Monad Metropolis · Track 1 — Onchain Finance & Trading", { x:X0, y:1.3, w:11, h:0.35, fontSize:13, color:C.acc, charSpacing:1 });
   txt(s, "Mandate", { x:X0, y:1.85, w:10, h:1.4, bold:true, fontSize:80 });
   txt(s, "트레이더가 아니라 조건을 보고 돈을 맡기는 시장", { x:X0, y:3.35, w:11, h:0.6, bold:true, fontSize:28, color:C.text });
   txt(s, "에이전트는 맡긴 돈으로 거래만 할 수 있고, 꺼내 갈 수는 없습니다.\n지키기로 한 조건은 운영자의 약속이 아니라 컨트랙트가 지킵니다.", { x:X0, y:4.15, w:10, h:0.9, fontSize:17, color:C.muted, paraSpaceAfter:4 });
@@ -42,8 +42,8 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("팀 구성", "팀원별 담당 파트");
   const cols = [
-    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰 4회: registerAgent 수정, 마켓 기능 점검"]],
-    ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "Perpl 거래소 어댑터: 포크 테스트, 테스트넷 배포", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
+    ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·fuzzing 테스트", "보안 리뷰 4회: registerAgent 수정, 마켓 기능 점검"]],
+    ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "PerplAdapter: fork test, 테스트넷 배포", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
   ];
   cols.forEach(([who, items], i) => {
     const x = X0 + i * 6.1, y = 1.95;
@@ -80,10 +80,10 @@ const chip = (s, t, x, y, color = C.acc) => {
   const s = base("접근 방식", "질문을 바꿉니다");
   txt(s, "“이 트레이더를 믿을 수 있나?”", { x:X0, y:1.95, w:5.6, h:0.6, fontSize:24, color:C.dim, strike:"sngStrike" });
   txt(s, "“이 조건을 받아들일 수 있나?”", { x:X0, y:2.6, w:7, h:0.7, bold:true, fontSize:32, color:C.text });
-  txt(s, "조건은 첫 입금 전에 체인에 잠기고, 잠긴 뒤에는 운영자도 바꿀 수 없습니다. 배분자는 성과 주장 대신 잠긴 조건을 읽고 결정합니다.", { x:X0, y:3.45, w:7.2, h:0.9, fontSize:16, color:C.muted, lineSpacingMultiple:1.25 });
+  txt(s, "조건은 첫 입금 전에 체인에 잠기고, 잠긴 뒤에는 운영자도 바꿀 수 없습니다. Allocator는 성과 주장 대신 잠긴 조건을 읽고 결정합니다.", { x:X0, y:3.45, w:7.2, h:0.9, fontSize:16, color:C.muted, lineSpacingMultiple:1.25 });
   const R = [
     ["에이전트 운영자", "조건을 걸고 스스로 등록합니다. 맡은 돈으로 주문만 낼 수 있습니다.", C.acc],
-    ["배분자", "조건을 읽고 입금합니다. 맡긴 돈은 배분자만 꺼낼 수 있습니다.", C.green],
+    ["Allocator", "조건을 읽고 입금합니다. 맡긴 돈은 Allocator만 꺼낼 수 있습니다.", C.green],
     ["누구나", "조건 위반을 증명해 동결시키고, 청산을 실행하고 보상을 받습니다.", C.amber],
   ];
   R.forEach(([h, b, col], i) => {
@@ -96,7 +96,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   card(s, X0, 4.75, 7.2, 1.6, C.panel2, C.panel2);
   txt(s, [
     { text:"플랫폼이 정하는 것", options:{ bold:true, color:C.acc, breakLine:true } },
-    { text:"조건의 종류와 허용 범위 (예: 손실 한도 최대 50%, 마크 유효시간 최대 60초, 성과 수수료 최대 30%)", options:{ breakLine:true } },
+    { text:"조건의 종류와 허용 범위 (예: 손실 한도 최대 50%, mark 유효시간 최대 60초, 성과 수수료 최대 30%)", options:{ breakLine:true } },
     { text:"운영자가 정하는 것", options:{ bold:true, color:C.acc, breakLine:true } },
     { text:"그 범위 안의 실제 값" },
   ], { x:X0+0.35, y:4.95, w:6.6, h:1.3, fontSize:14, color:C.text, paraSpaceAfter:3 });
@@ -106,12 +106,12 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("동작 방식", "한 번의 사이클: 등록부터 출금까지");
   const steps = [
-    ["등록", "createMandate()", "트랜잭션 하나로 볼트 배포, 조건 잠금, 레지스트리 등록. 승인 절차 없음."],
-    ["입금", "allocate()", "돈은 에이전트가 아니라 볼트 컨트랙트로. 배분자는 지분을 받음."],
+    ["등록", "createMandate()", "트랜잭션 하나로 Vault 배포, 조건 잠금, Registry 등록. 승인 절차 없음."],
+    ["입금", "allocate()", "돈은 에이전트가 아니라 Vault 컨트랙트로. Allocator는 지분을 받음."],
     ["주문", "execute()", "모든 주문이 RiskGuard를 먼저 통과해야 거래소에 닿음. 넘으면 트랜잭션째 취소."],
     ["동결", "poke()", "고점 대비 손실이나 보유 시간이 한도를 넘으면 누구나 증명해 동결. 호출자 보상 0.05%."],
     ["청산", "unwind()", "누구나 다섯 번에 걸쳐 20%씩 포지션을 닫음. 호출당 보상 0.01%."],
-    ["출금", "withdraw()", "배분자는 최신 가격 기준 지분만큼, 볼트 현금 한도 안에서 출금. 운영자 허락 필요 없음."],
+    ["출금", "withdraw()", "Allocator는 최신 가격 기준 지분만큼, Vault 현금 한도 안에서 출금. 운영자 허락 필요 없음."],
   ];
   const w = (W - 1.4 - 5 * 0.18) / 6;
   steps.forEach(([h, fn, b], i) => {
@@ -138,12 +138,12 @@ const chip = (s, t, x, y, color = C.acc) => {
     void label;
   };
   // actors
-  box(X0, 2.0, 2.2, 1.05, "배분자", "입금과 출금", C.green);
+  box(X0, 2.0, 2.2, 1.05, "Allocator", "입금과 출금", C.green);
   box(X0, 4.45, 2.2, 1.05, "에이전트", "주문 권한만", C.acc);
   // vault, guard, adapter, venue
-  box(3.75, 2.0, 2.6, 3.5, "MandateVault", "돈을 보관하고 지분을 계산. 마크 가격으로 자산을 평가. 동결·청산·현금 출구·출금 대기열.", C.line);
+  box(3.75, 2.0, 2.6, 3.5, "MandateVault", "돈을 보관하고 지분을 계산. mark price로 자산을 평가. 동결·청산·현금 출구·출금 대기열.", C.line);
   box(7.0, 2.0, 2.6, 1.55, "MandateRiskGuard", "잠긴 조건으로 주문 전·후를 검사. 가격 괴리와 노출 상한도 확인", C.acc, C.panel2);
-  box(7.0, 3.95, 2.6, 1.55, "VenueAdapter", "Mock 거래소 / Perpl 어댑터", C.line);
+  box(7.0, 3.95, 2.6, 1.55, "VenueAdapter", "MockVenueAdapter / PerplAdapter", C.line);
   box(10.25, 3.95, 2.38, 1.55, "거래소", "데모: mock\nPerpl: 테스트넷 배포", C.line);
   arrow(2.9, 2.5, 3.75, 2.5, "allocate");
   arrow(2.9, 4.95, 3.75, 4.95, "execute");
@@ -151,19 +151,19 @@ const chip = (s, t, x, y, color = C.acc) => {
   arrow(6.35, 4.7, 7.0, 4.7, "주문");
   arrow(9.6, 4.7, 10.25, 4.7, "");
   // factory / registry row
-  box(X0, 5.85, 3.6, 0.95, "MandateFactory", "볼트 배포 + 조건 잠금 + 등록을 한 번에", C.amber);
-  box(4.55, 5.85, 3.3, 0.95, "MandateRegistry", "조건 해시가 실제 볼트와 같아야 등록", C.line);
-  box(8.1, 5.85, 4.53, 0.95, "BatchAllocator · DP Reporter", "에폭 순정산 · 차등 프라이버시 성과 공개", C.line);
-  txt(s, "에이전트 키로는 배분자의 돈을 꺼낼 수 없습니다. 어댑터의 주문 형식이 같아서, 에이전트 코드를 바꾸지 않고 mock에서 Perpl로 옮길 수 있습니다.", { x:X0, y:1.55, w:11.8, h:0.35, fontSize:13, color:C.muted });
+  box(X0, 5.85, 3.6, 0.95, "MandateFactory", "Vault 배포 + 조건 잠금 + 등록을 한 번에", C.amber);
+  box(4.55, 5.85, 3.3, 0.95, "MandateRegistry", "조건 해시가 실제 Vault와 같아야 등록", C.line);
+  box(8.1, 5.85, 4.53, 0.95, "BatchAllocator · DP Reporter", "epoch netting · 차등 프라이버시 성과 공개", C.line);
+  txt(s, "에이전트 키로는 Allocator의 돈을 꺼낼 수 없습니다. Adapter의 주문 형식이 같아서, 에이전트 코드를 바꾸지 않고 mock에서 Perpl로 옮길 수 있습니다.", { x:X0, y:1.55, w:11.8, h:0.35, fontSize:13, color:C.muted });
 }
 
 // 7 Terms
 {
   const s = base("계약 조건", "컨트랙트가 강제하는 조건");
   const groups = [
-    ["위험 한도", "RiskLimits · 11개 필드", C.acc, ["레버리지", "고점 대비 손실 (드로다운)", "주문 사이 최소 블록 수", "마크 가격 최대 유효시간", "주문·포지션·전체·블록당 규모", "변동성 스트레스 테스트 (필드 3개)"]],
-    ["거래 조건", "TradeTerms · 6개", C.green, ["거래 가능한 마켓", "롱·숏 방향", "마크 대비 주문 가격 허용 폭", "하루 거래 횟수", "하루 손실 한도", "포지션 최대 보유 시간"]],
-    ["수수료", "FeeTerms · 2개", C.amber, ["성과 수수료 (상한 30%)", "운용 수수료 (상한 연 5%)", "", "에이전트에게 현금이 아니라 볼트 지분으로만 지급", "최고 NAV를 넘은 이익에만 성과 수수료"]],
+    ["위험 한도", "RiskLimits · 11개 필드", C.acc, ["레버리지", "drawdown (고점 대비 손실)", "주문 사이 최소 블록 수", "mark price 최대 유효시간", "주문·포지션·전체·블록당 규모", "변동성 스트레스 테스트 (필드 3개)"]],
+    ["거래 조건", "TradeTerms · 6개", C.green, ["거래 가능한 마켓", "롱·숏 방향", "mark 대비 주문 가격 허용 폭", "하루 거래 횟수", "하루 손실 한도", "포지션 최대 보유 시간"]],
+    ["수수료", "FeeTerms · 2개", C.amber, ["성과 수수료 (상한 30%)", "운용 수수료 (상한 연 5%)", "", "에이전트에게 현금이 아니라 Vault 지분으로만 지급", "high-water mark를 넘은 이익에만 성과 수수료"]],
   ];
   const w = (W - 1.4 - 0.5) / 3;
   groups.forEach(([h, sub, col, items], i) => {
@@ -186,8 +186,8 @@ const chip = (s, t, x, y, color = C.acc) => {
   const s = base("위반 이후", "한도를 넘은 뒤에 일어나는 일");
   const K = [
     ["멈춤 3단계", C.red, "poke()", "하루 손실: 다음 UTC 날까지 새 위험만 일시정지. 가격 끊김: 정지, 새 가격이 한도 안이면 누구나 resume()으로 재개. 고점 대비 손실·보유 시간 초과: 동결, 되돌릴 수 없음.", "가격이 유효시간의 3배 넘게 끊기면 정지. 청산은 15분 뒤부터"],
-    ["청산", C.amber, "unwind()", "누구나 다섯 번에 걸쳐 포지션을 20%씩 닫습니다. 포지션을 줄이는 방향으로만 거래하고, 마크에서 1% 넘게 불리한 가격은 받지 않습니다.", "운영자가 사라져도 남이 끝까지 닫아 줄 보상 구조"],
-    ["출금", C.green, "withdraw()", "출금은 동결 중에도 열려 있고, 청산이 현금을 만듭니다. 활성 볼트에서 현금이 모자라면 requestRedeem()으로 요청하고, 1일 뒤 누구나 포지션을 줄여 현금을 마련합니다.", "취소는 cancelRedeem(). 피드가 멈추면 withdrawUnpriced()로 현금 몫 출금"],
+    ["청산", C.amber, "unwind()", "누구나 다섯 번에 걸쳐 포지션을 20%씩 닫습니다. 포지션을 줄이는 방향으로만 거래하고, mark에서 1% 넘게 불리한 가격은 받지 않습니다.", "운영자가 사라져도 남이 끝까지 닫아 줄 보상 구조"],
+    ["출금", C.green, "withdraw()", "출금은 동결 중에도 열려 있고, 청산이 현금을 만듭니다. 활성 Vault에서 현금이 모자라면 requestRedeem()으로 요청하고, 1일 뒤 누구나 포지션을 줄여 현금을 마련합니다.", "취소는 cancelRedeem(). 피드가 멈추면 withdrawUnpriced()로 현금 몫 출금"],
   ];
   const w = (W - 1.4 - 0.5) / 3;
   K.forEach(([h, col, fn, b, foot], i) => {
@@ -207,8 +207,8 @@ const chip = (s, t, x, y, color = C.acc) => {
 
 // 9 Why Monad
 {
-  const s = base("왜 모나드인가", "가격 유효시간 조건은 체인이 지킬 수 있어야 합니다");
-  txt(s, "예: maxMarkAgeSeconds = 4초인 볼트는 4초보다 오래된 가격으로 주문을 받지 않습니다. 가격은 트랜잭션으로 갱신되므로, 블록 간격이 이 조건의 바닥이 됩니다.", { x:X0, y:1.6, w:11.9, h:0.7, fontSize:15, color:C.muted, lineSpacingMultiple:1.2 });
+  const s = base("Why Monad", "가격 유효시간 조건은 체인이 지킬 수 있어야 합니다");
+  txt(s, "예: maxMarkAgeSeconds = 4초인 Vault는 4초보다 오래된 가격으로 주문을 받지 않습니다. 가격은 트랜잭션으로 갱신되므로, 블록 간격이 이 조건의 바닥이 됩니다.", { x:X0, y:1.6, w:11.9, h:0.7, fontSize:15, color:C.muted, lineSpacingMultiple:1.2 });
   const lane = (y, label, every, col, note) => {
     txt(s, label, { x:X0, y, w:3.2, h:0.4, bold:true, fontSize:17, color:col });
     txt(s, note, { x:X0, y:y+0.42, w:3.2, h:0.6, fontSize:12, color:C.muted });
@@ -228,15 +228,15 @@ const chip = (s, t, x, y, color = C.acc) => {
   s.addShape(pres.shapes.RECTANGLE, { x:5.4, y:5.12, w:0.18, h:0.14, fill:{ color:C.red, transparency:55 }, line:{ type:"none" } });
   txt(s, "가격이 낡아 취소", { x:5.65, y:5.05, w:1.8, h:0.3, fontSize:10.5, color:C.muted });
   card(s, X0, 5.6, W-1.4, 1.15, C.panel2, C.panel2);
-  txt(s, "블록 간격은 바닥일 뿐이고, 가격도 그만큼 자주 넣어야 합니다. 테스트넷 데모는 오라클이 5초마다 갱신해서 가장 엄격한 볼트가 10초 조건을 씁니다. Monad 위에 만드는 더 직접적인 이유는 실제 거래소 Perpl이 Monad에 있기 때문입니다. Perpl의 마크는 측정 시 1~50초 전 값이었고, Perpl 자신도 60초 넘은 가격은 거부합니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
+  txt(s, "블록 간격은 바닥일 뿐이고, 가격도 그만큼 자주 넣어야 합니다. 테스트넷 데모는 오라클이 5초마다 갱신해서 가장 엄격한 Vault가 10초 조건을 씁니다. Monad 위에 만드는 더 직접적인 이유는 실제 거래소 Perpl이 Monad에 있기 때문입니다. Perpl의 mark는 측정 시 1~50초 전 값이었고, Perpl 자신도 60초 넘은 가격은 거부합니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
 }
 
 // 10 Perpl
 {
-  const s = base("실제 거래소", "실제 거래소 연결: Perpl 어댑터");
+  const s = base("실제 거래소", "실제 거래소 연결: PerplAdapter");
   const L = [
-    ["가격을 운영자가 정하지 않음", "Perpl이 체인에 쓰는 마크와 그 타임스탬프를 그대로 씁니다. 가격 유효시간 검사가 실제 거래소의 시계로 돌아갑니다."],
-    ["볼트마다 Perpl 계정 하나", "마진은 거래하는 순간에만 볼트에서 Perpl로 가고, 남는 돈은 바로 돌아옵니다. 출금 대상은 그 볼트뿐입니다."],
+    ["가격을 운영자가 정하지 않음", "Perpl이 체인에 쓰는 mark와 그 타임스탬프를 그대로 씁니다. 가격 유효시간 검사가 실제 거래소의 시계로 돌아갑니다."],
+    ["Vault마다 Perpl 계정 하나", "마진은 거래하는 순간에만 Vault에서 Perpl로 가고, 남는 돈은 바로 돌아옵니다. 출금 대상은 그 Vault뿐입니다."],
     ["전부 체결 아니면 취소", "주문은 지정가에 즉시·전량 체결로만 냅니다. 거래소가 보고한 포지션이 예상과 다르면 트랜잭션 전체를 되돌립니다."],
     ["에이전트 코드는 그대로", "mock 거래소와 같은 주문 형식이라 에이전트를 바꿀 필요가 없습니다."],
   ];
@@ -247,8 +247,8 @@ const chip = (s, t, x, y, color = C.acc) => {
   });
   const x = 8.0, y = 1.85, w = 4.63;
   card(s, x, y, w, 4.9, C.panel2, C.line);
-  txt(s, "Monad 테스트넷 포크 테스트", { x:x+0.35, y:y+0.3, w:w-0.7, h:0.4, bold:true, fontSize:16, color:C.acc });
-  const st = ["누구나 등록 (createMandate)", "500 aUSD 입금", "0.001 BTC 롱, Perpl에 기록", "한도 넘는 주문은 Perpl 전에 거부", "롱에서 숏으로 전환", "보유 시간 초과로 동결", "청산 끝까지, Perpl 계정 비움", "배분자 전액 출금"];
+  txt(s, "Monad 테스트넷 fork test", { x:x+0.35, y:y+0.3, w:w-0.7, h:0.4, bold:true, fontSize:16, color:C.acc });
+  const st = ["누구나 등록 (createMandate)", "500 aUSD 입금", "0.001 BTC 롱, Perpl에 기록", "한도 넘는 주문은 Perpl 전에 거부", "롱에서 숏으로 전환", "보유 시간 초과로 동결", "청산 끝까지, Perpl 계정 비움", "Allocator 전액 출금"];
   txt(s, st.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < st.length-1 } })), { x:x+0.35, y:y+0.85, w:w-0.6, h:2.9, fontSize:13, color:C.text, paraSpaceAfter:4 });
   txt(s, "10회 연속 통과 (2026-10-06)\n같은 날 테스트넷 배포, Perpl에서 체결 10건,\n한도 초과 주문 5건 온체인 거부", { x:x+0.35, y:y+3.9, w:w-0.7, h:0.8, fontSize:12.5, color:C.amber, lineSpacingMultiple:1.2 });
 }
@@ -257,7 +257,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("데모", "데모 영상");
   s.addMedia({ type:"video", path:process.env.VIDEO || "mandate-demo-ko.mp4", cover:"data:image/png;base64,"+require("fs").readFileSync(process.env.COVER || "cover.png").toString("base64"), x:X0, y:1.55, w:9.0, h:5.06 });
-  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "탐색기에서 트랜잭션 확인"];
+  const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "explorer에서 트랜잭션 확인"];
   txt(s, "영상 순서", { x:10.05, y:1.6, w:2.6, h:0.35, bold:true, fontSize:15, color:C.acc });
   txt(s, D.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < D.length-1 } })), { x:10.05, y:2.05, w:2.6, h:3.6, fontSize:12.5, color:C.text, paraSpaceAfter:6 });
   txt(s, "2분 59초 · 테스트넷 공개 데모\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
@@ -270,7 +270,7 @@ const chip = (s, t, x, y, color = C.acc) => {
     ["돈", "에이전트는 돈을 못 꺼낸다", "주문만 낼 수 있고, 맡긴 돈의 출금은 맡긴 사람만. 묶인 몫은 요청 1일 뒤 누구나 줄여 현금화"],
     ["한도", "넘는 주문은 미리 막힌다", "거래소에 닿기 전에 컨트랙트가 조건을 검사하고 거부한다"],
     ["정지", "단계별로 멈춘다", "하루 손실은 일시정지, 가격 끊김은 정지, 큰 손실은 동결. 포지션은 누구나 나눠 정리"],
-    ["공개", "지금 직접 해 볼 수 있다", "모나드 테스트넷 공개 데모. 모든 동작이 트랜잭션으로 남는다"],
+    ["공개", "지금 직접 해 볼 수 있다", "Monad 테스트넷 공개 데모. 모든 동작이 트랜잭션으로 남는다"],
   ];
   const w = (W - 1.4 - 0.75) / 4;
   N.forEach(([v, l, d], i) => {

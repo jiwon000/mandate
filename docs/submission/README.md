@@ -5,7 +5,7 @@
 Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 상태판입니다. 제출 폼에 넣은 글의 원본과 영상 대본 초안도 이 폴더에 있습니다. 기능이 어디까지 구현됐는지는 루트 [README](../../README.md)의 "현재 상태", "한계"와 Roadmap이 원본이고, 이 문서는 제출에 필요한 일만 다룹니다.
 
 - 마감: 2026-10-13 23:59 ET (한국 시각 2026-10-14 12:59)
-- 마지막 갱신: 2026-10-06
+- 마지막 갱신: 2026-10-07
 - 제출 폼: <https://hackathon.monad.xyz/project?tab=submission> (팀 계정 로그인 필요)
 - 담당은 GitHub 계정으로 적습니다 (@jiwon000, @yahamang)
 
@@ -14,7 +14,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
 - 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-07 04:30 UTC에 현재 main 컨트랙트(PR #35·#37~#39: 기준가 한도, 동결 3단계, 환매 대기열, 리뷰 수정)로 재배포됐습니다. 서빙되는 `app.js`가 main(fe74b8e)과 같음을 확인했습니다(2026-10-07). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다. 10-07 데모 영상 녹화가 Tight Mandate를 동결해 05:21 UTC에 같은 컨트랙트로 새 장부가 배포됐고, 주소 표는 이 장부를 가리킵니다.
 - 데모 영상은 2026-10-07 공개 데모에서 다시 녹화했습니다(한국어·영어, 2분 59초, 녹화 스크립트는 `demo-video/`). 동결 3단계와 출금 대기열을 반영했습니다. 피치 영상은 아직입니다.
-- 세 `.txt` 문안을 10-06 상태(마켓 기능, 수수료, Perpl 포크 테스트, 공개 데모 재녹화)로 다시 썼습니다. 폼 세 칸에도 같은 날 다시 붙여 넣고 저장 뒤 일치를 확인했습니다.
+- 세 `.txt` 문안을 10-06 상태(마켓 기능, 수수료, Perpl 포크 테스트, 공개 데모 재녹화)로 다시 썼고 폼 세 칸에도 같은 날 붙여 넣었습니다. 10-07에 동결 3단계와 출금 대기열을 반영해 `.txt`를 또 고쳤으므로, 폼에 다시 붙여 넣어야 합니다.
 - 10-05 동결 규칙(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md))과 10-06 마켓 기능이 모두 main에 머지됐고 공개 데모에 반영됐습니다.
 
 ## 이 폴더의 파일
@@ -26,12 +26,12 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | [`judge-access.txt`](judge-access.txt) | 폼 "Judge access instructions"에 넣을 영문 본문. 5,264자 (한도 8,000자) |
 | [`demo-video-script.md`](demo-video-script.md) | Technical demo video (3분 이하) 대본 초안 |
 | [`pitch-video-script.md`](pitch-video-script.md) | Pitch video (2분 이하) 대본 초안. 팀 소개 줄은 비어 있음 |
-| [`demo-video/`](demo-video/README.md) | 데모 영상 녹화 스크립트. 10-06 공개 데모 녹화본(2분 45초)을 만든 스크립트 |
+| [`demo-video/`](demo-video/README.md) | 데모 영상 녹화 스크립트. 10-07 공개 데모 녹화본(2분 59초)을 만든 스크립트 |
 | [`club-deck/`](club-deck/README.md) | HYBLOCK 학회 발표 덱 (PDF와 원본). 제출물 아님 |
 | [`mandate-logo.png`](mandate-logo.png) | 폼에 올린 로고, 1024×1024 |
 | [`mandate-logo.source.html`](mandate-logo.source.html) | 로고 원본 (SVG). 데모 페이지의 브랜드 마크와 같은 그림 |
 
-세 `.txt` 파일은 2026-10-06에 고쳤고, 폼에 저장된 값(2026-10-05 00:26 UTC)과 다릅니다. 폼의 글을 바꿀 때는 이 폴더의 파일을 먼저 고치고 그 내용을 폼에 붙여 넣습니다. 그래야 폼과 저장소가 어긋나지 않습니다.
+세 `.txt` 파일은 2026-10-07에 고쳤고, 폼에 저장된 값(10-06에 붙여 넣은 글)과 다릅니다. 폼의 글을 바꿀 때는 이 폴더의 파일을 먼저 고치고 그 내용을 폼에 붙여 넣습니다. 그래야 폼과 저장소가 어긋나지 않습니다.
 
 글과 대본은 AI 도구(Claude Code)로 쓴 초안입니다. Go-to-market의 가정과 대본의 문장은 팀이 읽고 확정해야 합니다.
 
@@ -43,7 +43,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | --- | --- | --- |
 | 공개 GitHub 저장소: 전체 소스, 설치법 README, 오픈소스 라이선스, 외부 코드 출처, 빌드 기간의 커밋 이력 | 충족 | MIT `LICENSE`, README "Third-party code" |
 | README에 AI 코딩 도구 사용 고지 | 충족 | README "AI tool disclosure". 아래 "정해야 할 것" 5번 참고 |
-| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 녹화 완료, 업로드 남음 | 2026-10-06 공개 데모(Monad 테스트넷)에서 녹화, 2분 45초. 화면의 트랜잭션은 monadscan 링크로 남음. 공개 링크로 올려 폼에 넣어야 함 |
+| 데모 영상: 3분 이하, 공개 링크(YouTube, Loom, Vimeo), 실제 동작과 Monad 상호작용 장면 | 녹화 완료, 업로드 남음 | 2026-10-07 공개 데모(Monad 테스트넷)에서 재녹화, 2분 59초. 화면의 트랜잭션은 monadscan 링크로 남음. 공개 링크로 올려 폼에 넣어야 함 |
 | Monad 메인넷 또는 테스트넷 배포, 컨트랙트 주소 또는 트랜잭션 해시 | 충족 | README "Recorded run on Monad testnet"에 컨트랙트 주소 11개와 트랜잭션 해시 |
 | Monad를 쓰는 이유 설명 | 초안 있음 | `description.txt`. 가격 기준 시각(mark age) 논리 |
 | 문서: 프로젝트 설명, 아키텍처, 기술 스택, 설치와 배포 방법 | 충족 | 루트 README |

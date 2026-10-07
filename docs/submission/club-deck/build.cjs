@@ -260,7 +260,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   const D = ["Launch로 새 에이전트 등록", "조건표 확인", "1,000 USDC 입금", "한도 안 주문 통과, 넘는 주문 거부", "−2% 충격, poke로 동결", "unwind 청산, 출금", "탐색기에서 트랜잭션 확인"];
   txt(s, "영상 순서", { x:10.05, y:1.6, w:2.6, h:0.35, bold:true, fontSize:15, color:C.acc });
   txt(s, D.map((t, k) => ({ text:t, options:{ bullet:{ type:"number" }, breakLine:k < D.length-1 } })), { x:10.05, y:2.05, w:2.6, h:3.6, fontSize:12.5, color:C.text, paraSpaceAfter:6 });
-  txt(s, "2분 45초 · 테스트넷 공개 데모\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
+  txt(s, "2분 59초 · 테스트넷 공개 데모\n거래소와 USDC는 mock", { x:10.05, y:5.85, w:2.6, h:0.75, fontSize:11, color:C.muted });
 }
 
 // 12 Results

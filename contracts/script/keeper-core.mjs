@@ -21,6 +21,11 @@ const ACTIVE = 0n;
 const FROZEN = 1n;
 
 const reason = (error) => error.shortMessage ?? error.message;
+// A staticCall that reverts answers "no"; anything else (a timeout, a rate
+// limit) is not an answer and is reported as a skip instead of read as one.
+const reverted = (error) => {
+  if (error?.code !== "CALL_EXCEPTION") throw error;
+};
 
 async function send(call, action) {
   const receipt = await (await call).wait();
@@ -49,7 +54,9 @@ async function serveActive({ guard, vault, adapter, now, mode }) {
   try {
     await guard.freezeUnobservable.staticCall(vault.address);
     unobservable = true;
-  } catch { /* still observable, or nothing to protect */ }
+  } catch (error) {
+    reverted(error); // still observable, or nothing to protect
+  }
   if (unobservable) {
     try {
       return await send(guard.freezeUnobservable(vault.address), { ...base, action: "freezeUnobservable" });
@@ -108,7 +115,9 @@ export async function keeperTick({ guard, vaults, signer, mode = "check", unwind
         try {
           await guard.resume.staticCall(vault.address);
           resumable = true;
-        } catch { /* not an unobservable freeze, or a limit still breached */ }
+        } catch (error) {
+          reverted(error); // not an unobservable freeze, or a limit still breached
+        }
         if (resumable) {
           actions.push(await send(guard.resume(vault.address), { ...base, action: "resume" }));
           continue;

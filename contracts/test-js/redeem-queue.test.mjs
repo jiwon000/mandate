@@ -32,6 +32,7 @@ test("a due request takes enough of the position off for the allocator to leave 
   const { vault, allocator, agent, keeper } = s;
   const part = (s.shares * 8n) / 10n; // about $800 against about $630 of cash
   await s.wait(vault.connect(allocator).requestRedeem(part));
+  assert.equal(await vault.redeemSharesRequested(), part);
 
   // Before the notice runs out nobody can force it, and the requested shares stay put.
   await s.fresh();
@@ -46,6 +47,9 @@ test("a due request takes enough of the position off for the allocator to leave 
   // Part of the position, not all of it: about half closes, with the buffer.
   assert.ok(lotsAfter > 0n && lotsAfter < lotsBefore, `lots ${lotsBefore} -> ${lotsAfter}`);
   assert.ok(lotsAfter > lotsBefore / 3n, `closed more than needed: ${lotsAfter}`);
+  // The step restarts the request's notice: it cannot be forced again tomorrow-minus-a-block.
+  await s.fresh();
+  await assert.rejects(vault.connect(keeper).deleverageForRedemption(allocator.address), revertsWith(vault, "RedeemNoticePending"));
 
   // For the grace period the agent may reduce but not add.
   await s.fresh();
@@ -64,6 +68,7 @@ test("a due request takes enough of the position off for the allocator to leave 
   const paid = (await s.usdc.balanceOf(allocator.address)) - before;
   assert.equal(paid, owed);
   assert.equal((await vault.redeemRequestOf(allocator.address)).shares, 0n);
+  assert.equal(await vault.redeemSharesRequested(), 0n);
 });
 
 test("withdraw() without a request pays only the cash, and a request reaches the rest", async (t) => {
@@ -101,9 +106,16 @@ test("a request the cash already covers, or none at all, forces nothing", async 
   await s.wait(vault.connect(allocator).requestRedeem((s.shares * 7n) / 10n));
   await s.fresh();
   await assert.rejects(vault.connect(keeper).deleverageForRedemption(allocator.address), revertsWith(vault, "RedeemNoticePending"));
+  const requested = s.shares / 10n + (s.shares * 7n) / 10n;
+  assert.equal(await vault.redeemSharesRequested(), requested);
+
+  // A withdrawal counts against the request; the total follows it.
+  await s.wait(vault.connect(allocator).withdraw(s.shares / 20n, allocator.address));
+  assert.equal(await vault.redeemSharesRequested(), requested - s.shares / 20n);
 
   await s.wait(vault.connect(allocator).cancelRedeem());
   assert.equal((await vault.redeemRequestOf(allocator.address)).shares, 0n);
+  assert.equal(await vault.redeemSharesRequested(), 0n);
   await s.later(DAY);
   await assert.rejects(vault.connect(keeper).deleverageForRedemption(allocator.address), revertsWith(vault, "NoRedeemRequest"));
   assert.equal(await s.lots(BTC), 3_000n);

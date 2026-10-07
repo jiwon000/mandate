@@ -289,6 +289,26 @@ test("claims recover from the settleEpoch calldata alone, by tx hash or epoch", 
   assert.deepEqual(recovered.map((c) => c.claimed), [false, false, false]);
   assert.deepEqual(await recoverClaims(provider, batch.target, 0), recovered);
   await assert.rejects(recoverClaims(provider, batch.target, 1n), /found 0/);
+  // A node that refuses wide log ranges: the epoch is still found, window by window.
+  const capped = new Proxy(provider, {
+    get(target, key) {
+      if (key !== "getLogs") return typeof target[key] === "function" ? target[key].bind(target) : target[key];
+      return async (filter) => {
+        if (Number(filter.toBlock) - Number(filter.fromBlock) + 1 > 4) throw new Error("block range too large");
+        return target.getLogs(filter);
+      };
+    }
+  });
+  assert.deepEqual(await recoverClaims(capped, batch.target, 0, { chunk: 4 }), recovered);
+  const scanned = [];
+  const counting = new Proxy(capped, {
+    get(target, key) {
+      if (key !== "getLogs") return target[key];
+      return async (filter) => { scanned.push(Number(filter.toBlock) - Number(filter.fromBlock) + 1); return target.getLogs(filter); };
+    }
+  });
+  await recoverClaims(counting, batch.target, 0, { chunk: 4 });
+  assert.ok(scanned.reduce((a, b) => a + b, 0) < await provider.getBlockNumber(), "only the settlement window is scanned");
   // The recovered proofs are the ones that claim, and `claimed` follows the chain.
   await (await batch.connect(agent).claimShares(recovered[1].intent, recovered[1].proof)).wait();
   await (await batch.connect(agent).claimShares(recovered[0].intent, recovered[0].proof)).wait();

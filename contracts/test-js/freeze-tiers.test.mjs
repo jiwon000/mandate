@@ -105,3 +105,18 @@ test("the registry records a resume, and a later freeze over it", async (t) => {
   assert.equal(outcome.state, 1n);
   assert.equal(outcome.reason, 1n, "drawdown this time");
 });
+
+test("a feed that drops out again within a day of a resume freezes the vault but pays no bounty", async (t) => {
+  const f = await unobservable(t);
+  await (await f.venue.setPrice(e18(1995))).wait();
+  await (await f.guard.resume(f.vaultAddress)).wait();
+  assert.ok((await f.guard.resumedAt(f.vaultAddress)) > 0n);
+
+  await advance(f, 31);
+  const before = await f.usdc.balanceOf(f.keeper.address);
+  const receipt = await (await f.guard.connect(f.keeper).freezeUnobservable(f.vaultAddress)).wait();
+  const event = receipt.logs.map((log) => f.guard.interface.parseLog(log)).find((e) => e?.name === "Unobservable");
+  assert.equal(await f.vault.state(), 1n, "frozen all the same");
+  assert.equal(event.args.bounty, 0n);
+  assert.equal(await f.usdc.balanceOf(f.keeper.address), before);
+});

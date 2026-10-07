@@ -50,20 +50,22 @@ const guardInterface = new Interface(GUARD_ABI);
 const vaultInterface = new Interface(VAULT_ABI);
 
 /// eth_getLogs over [from, to] in windows of `chunk` blocks. A window the node
-/// refuses (Monad testnet caps the range per call) is retried once as two halves.
+/// refuses (Monad testnet caps the range per call) is split in halves until the
+/// node answers or a single block still fails.
 export async function getLogsChunked(provider, filter, from, to, chunk = 100) {
   if (!(chunk >= 1)) throw new Error("chunk must be at least 1 block");
-  const logs = [];
-  for (let start = from; start <= to; start += chunk) {
-    const end = Math.min(start + chunk - 1, to);
+  const window = async (start, end) => {
     try {
-      logs.push(...await provider.getLogs({ ...filter, fromBlock: start, toBlock: end }));
+      return await provider.getLogs({ ...filter, fromBlock: start, toBlock: end });
     } catch (error) {
       if (end === start) throw error;
       const mid = start + Math.floor((end - start) / 2);
-      logs.push(...await provider.getLogs({ ...filter, fromBlock: start, toBlock: mid }));
-      logs.push(...await provider.getLogs({ ...filter, fromBlock: mid + 1, toBlock: end }));
+      return [...await window(start, mid), ...await window(mid + 1, end)];
     }
+  };
+  const logs = [];
+  for (let start = from; start <= to; start += chunk) {
+    logs.push(...await window(start, Math.min(start + chunk - 1, to)));
   }
   return logs;
 }

@@ -1,4 +1,5 @@
 import { Contract, Interface, TypedDataEncoder, concat, getAddress, keccak256, toBeHex } from "ethers";
+import { getLogsChunked } from "./track-record.mjs";
 
 export const intentTypes = {
   AllocationIntent: [
@@ -53,24 +54,47 @@ const intentTuple = "tuple(address allocator, address vault, uint256 amount, uin
 const batchInterface = new Interface([
   `function settleEpoch(uint256 epoch, bytes32 intentRoot, tuple(address vault, tuple(${intentTuple} intent, bytes signature)[] intents)[] nets)`,
   "function claimableShares(bytes32 intentHash) view returns (uint256)",
+  "function epochEnd(uint256 epoch) view returns (uint256)",
+  "function settlementDeadline(uint256 epoch) view returns (uint256)",
   "event EpochSettled(uint256 indexed epoch, bytes32 intentRoot, uint256 intentCount)",
 ]);
 const settledTopic = batchInterface.getEvent("EpochSettled").topicHash;
 
+// The first block at or after `time` (unix seconds), or latest + 1 if none yet.
+// Timestamps never decrease, so a binary search over [0, latest].
+async function firstBlockAt(provider, time, latest) {
+  let lo = 0;
+  let hi = latest + 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (BigInt((await provider.getBlock(mid)).timestamp) >= time) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
 // Rebuilds the claim proofs of a settled epoch from its settleEpoch() calldata, which
 // is all a restart of the demo server loses. Read-only: claimShares is permissionless
 // and pays the signed allocator, so anyone can relay the result.
-// `settle` is a transaction hash, or an epoch number (number/bigint) to find the
-// EpochSettled log first. Throws if the calldata does not rebuild the settled root.
+// `settle` is a transaction hash, or an epoch number (number/bigint). An epoch can
+// only settle between its epochEnd and settlementDeadline, so its EpochSettled log is
+// looked for in the blocks of that window alone, found by timestamp: Monad testnet
+// refuses an eth_getLogs range wider than 100 blocks.
+// Throws if the calldata does not rebuild the settled root.
 // A claimed intent keeps its proof; `claimed` only says it has nothing left to claim.
-export async function recoverClaims(provider, batchAddress, settle) {
+export async function recoverClaims(provider, batchAddress, settle, { chunk = 100 } = {}) {
   const batch = getAddress(batchAddress);
   let hash = settle;
   if (typeof settle === "number" || typeof settle === "bigint") {
-    const logs = await provider.getLogs({
-      address: batch, fromBlock: 0, toBlock: "latest",
-      topics: [settledTopic, toBeHex(BigInt(settle), 32)],
-    });
+    const epoch = BigInt(settle);
+    const windowed = new Contract(batch, batchInterface, provider);
+    const [opens, closes] = await Promise.all([windowed.epochEnd(epoch), windowed.settlementDeadline(epoch)]);
+    const latest = await provider.getBlockNumber();
+    const from = await firstBlockAt(provider, opens, latest);
+    const to = Math.min(latest, (await firstBlockAt(provider, closes + 1n, latest)) - 1);
+    const logs = from > to ? [] : await getLogsChunked(provider, {
+      address: batch, topics: [settledTopic, toBeHex(epoch, 32)],
+    }, from, to, chunk);
     if (logs.length !== 1) throw new Error(`Expected one EpochSettled log for epoch ${settle}, found ${logs.length}`);
     hash = logs[0].transactionHash;
   }

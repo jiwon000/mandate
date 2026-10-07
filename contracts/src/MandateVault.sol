@@ -103,6 +103,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     ///         allocator's and keep earning or losing with the vault until withdrawn,
     ///         but they cannot be transferred while the request stands.
     mapping(address => RedeemRequest) public redeemRequestOf;
+    /// @notice The sum of every standing request: what the agent has been asked to
+    ///         keep payable in cash.
+    uint256 public redeemSharesRequested;
     /// @notice Until this time the agent may only reduce exposure.
     uint64 public riskLockedUntil;
 
@@ -381,12 +384,15 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         uint256 total = request.shares + shares;
         if (total > balanceOf[msg.sender]) revert InsufficientShares();
         request.shares = total;
+        redeemSharesRequested += shares;
         request.requestedAt = uint64(block.timestamp);
         emit RedeemRequested(msg.sender, total, block.timestamp + REDEEM_NOTICE);
     }
 
     function cancelRedeem() external {
-        if (redeemRequestOf[msg.sender].shares == 0) revert NoRedeemRequest();
+        uint256 requested = redeemRequestOf[msg.sender].shares;
+        if (requested == 0) revert NoRedeemRequest();
+        redeemSharesRequested -= requested;
         delete redeemRequestOf[msg.sender];
         emit RedeemCancelled(msg.sender);
     }
@@ -400,6 +406,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     ///      path and its slippage bound. For REDEEM_GRACE after, the agent may only
     ///      reduce exposure, so the freed cash waits for the allocator. Nothing is
     ///      paid to the caller: the allocator who is owed the cash is the one who calls.
+    ///      The request's notice then starts again, so one request forces at most one
+    ///      step per REDEEM_NOTICE: a request nobody withdraws against cannot keep
+    ///      taking the agent's position off.
     function deleverageForRedemption(address allocator) external nonReentrant returns (uint16 fractionBps) {
         if (state != AgentState.Active) revert AgentNotActive();
         RedeemRequest memory request = redeemRequestOf[allocator];
@@ -423,6 +432,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         (uint256 closedNotional, int256 realizedPnl) = venueAdapter.reduce(address(this), fractionBps);
         if (closedNotional == 0) revert NothingToDeleverage();
         riskLockedUntil = uint64(block.timestamp + REDEEM_GRACE);
+        redeemRequestOf[allocator].requestedAt = uint64(block.timestamp);
         emit DeleveragedForRedemption(allocator, msg.sender, fractionBps, closedNotional, realizedPnl);
 
         // Re-mark as after any fill: the guard keeps its holding clock and drawdown
@@ -531,8 +541,13 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     function _fillRequest(address allocator, uint256 shares) private {
         uint256 requested = redeemRequestOf[allocator].shares;
         if (requested == 0) return;
-        if (shares >= requested) delete redeemRequestOf[allocator];
-        else redeemRequestOf[allocator].shares = requested - shares;
+        if (shares >= requested) {
+            redeemSharesRequested -= requested;
+            delete redeemRequestOf[allocator];
+        } else {
+            redeemSharesRequested -= shares;
+            redeemRequestOf[allocator].shares = requested - shares;
+        }
     }
 
     /// @dev The guard's definition: more total exposure, or a crossing through flat.

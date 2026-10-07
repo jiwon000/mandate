@@ -85,6 +85,18 @@ contract MandateInvariants is Test {
         assertEq(sum, vault.totalSupply());
     }
 
+    /// Redemption queue: the vault's running total of redemption requests is the sum
+    /// of every allocator's request, and no request is larger than its holder's balance.
+    function invariant_redeemTotalMatchesRequests() public view {
+        uint256 sum;
+        for (uint256 i; i < allocators.length; i++) {
+            (uint256 shares,) = vault.redeemRequestOf(allocators[i]);
+            assertLe(shares, vault.balanceOf(allocators[i]));
+            sum += shares;
+        }
+        assertEq(sum, vault.redeemSharesRequested());
+    }
+
     /// Invariant #1: the agent key can trade but never ends up holding allocator funds.
     function invariant_agentNeverCustodiesFunds() public view {
         assertFalse(handler.ghost_agentReceivedFunds());

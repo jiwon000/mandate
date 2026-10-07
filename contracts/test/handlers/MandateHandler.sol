@@ -124,6 +124,20 @@ contract MandateHandler is Test {
         try vault.withdraw(sharesAmount, who) {} catch {}
     }
 
+    function requestRedeem(uint256 actorSeed, uint256 sharesAmount) external track {
+        address who = _allocator(actorSeed);
+        uint256 bal = vault.balanceOf(who);
+        if (bal == 0) return;
+        sharesAmount = bound(sharesAmount, 1, bal);
+        vm.prank(who);
+        try vault.requestRedeem(sharesAmount) {} catch {}
+    }
+
+    function cancelRedeem(uint256 actorSeed) external track {
+        vm.prank(_allocator(actorSeed));
+        try vault.cancelRedeem() {} catch {}
+    }
+
     function transferShares(uint256 fromSeed, uint256 toSeed, uint256 amount) external track {
         address from = _allocator(fromSeed);
         address to = _allocator(toSeed);

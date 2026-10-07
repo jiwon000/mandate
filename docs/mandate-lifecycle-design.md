@@ -6,7 +6,7 @@ This note answers three questions together, because they share one answer: what 
 
 ## Principles
 
-1. One vault is one mandate. Its terms are fixed when they are locked and a finished mandate is never reopened. Today `MandateRiskGuard.lockTerms()` and the terminal `Closed` state already follow this.
+1. One vault is one mandate. Its terms are fixed when they are locked and a finished mandate is never reopened. Today `MandateRiskGuard.lockTerms()` and the terminal `Closed` state already follow this. A stop is not always a finish: since 2026-10-07 a vault stopped only because nobody could see it may resume on the same terms, see "Freeze tiers" below. Once unwinding has started, it is finished.
 2. Enforcement is permissionless. Freezing, unwinding and recording an outcome can be done by anyone, so the guarantee survives the operator disappearing. Today `poke()` and `unwind()` follow this; registration and outcome recording do not.
 3. An allocator's exit is never closed by a term or a state. Withdrawal does not pass through any term check.
 4. The registrant sets the values and the protocol sets the rules. The protocol decides which kinds of terms exist, how each is measured and what range a value may take. It does not pick the values.
@@ -20,7 +20,7 @@ Proposed rule: the kind of term decides the consequence. A registrant does not c
 | Class | What it covers | Consequence | Why |
 |---|---|---|---|
 | Pre-trade | Order size, position and total notional, leverage, cooldown, stress test, and later market allowlist, slippage cap, trades per day | The order reverts. No freeze. | The breach can be stopped before it happens, so nothing has gone wrong yet. |
-| State | Drawdown from high-water, and later daily loss and maximum holding time | Anyone may freeze the vault. | Price moves can cross these with the agent doing nothing. They cannot be prevented, only detected. |
+| State | Drawdown from high-water, and later daily loss and maximum holding time | Anyone may freeze the vault. Since 2026-10-07 daily loss pauses new risk for the day instead, see "Freeze tiers". | Price moves can cross these with the agent doing nothing. They cannot be prevented, only detected. |
 | Unobservable | No fresh mark for a set multiple of `maxMarkAgeSeconds` | Anyone may freeze the vault. | New. Today a stale mark makes `poke()` revert with `MarkTooOld`, so a vault whose price feed stops stays `Active` with nobody able to check it. If the guarantee cannot be verified, new risk should stop. |
 
 One rule then covers every future term: a vault freezes when a state term breaks or when it can no longer be observed.
@@ -41,7 +41,7 @@ Proposed:
 |---|---|---|---|
 | Freeze | `execute()` and `allocate()` close; `withdraw()` and share transfers stay open; the caller who proved the breach is paid `POKE_BOUNTY_BPS` (0.05%). | Same. | |
 | Unwind | Anyone calls `unwind()` once per block; five steps close the position in equal slices, each paying `UNWIND_BOUNTY_BPS` (0.01%); a call that finds the position already flat closes the vault and pays nothing. | Same. | The step count and pace are protocol constants for now. Revisit them against real slippage once the Perpl adapter exists. |
-| Close | Position at zero moves the vault to `Closed`. Terminal. | Same. | Principle 1. |
+| Close | Position at zero moves the vault to `Closed`. Terminal. | Same. | Principle 1. An unobservable freeze gets a recovery window before unwinding, see "Freeze tiers". |
 | Funds | Each allocator withdraws their own share. No automatic payout. | Same. | A push to every allocator has unbounded gas and one failing receiver blocks all of them. A pull fails only for the one caller. |
 | Fees | Management fee stops accruing at the freeze. Performance fee is charged only above the high-water mark, so a frozen vault accrues none. | Fees are declared in `FeeTerms` and never charged. | These rules are part of implementing fee deduction, not a separate patch. |
 | Record | Anyone calls `recordOutcome(vault)` on the registry. The registry reads `state()` and the final mark from the vault itself and stores the outcome permanently. | The registry stores nothing about outcomes. | No trusted reporter is needed for a fact the chain already holds. Principle 2. |
@@ -100,6 +100,16 @@ Added 2026-10-06 (items 6 to 8):
 - `TradeTerms` on the guard. A market allowlist, direction, limit-price deviation and trades per day each refuse the order. Daily loss and maximum holding time are state terms, so anyone may freeze the vault through `poke()`, with reasons 3 and 4. This follows the class rule in section 1.
 - `FeeTerms` charged by the vault. Fees are paid in shares minted to the agent. The management fee is capped at 500 bps a year. The performance fee is capped at 3000 bps and charged only above the fee high-water mark. Both accrue only on a fresh mark while `Active`, and stop at a freeze. The guard restates its high-water mark by the minted shares, so a fee is never counted as drawdown. `termsHash` binds limits, trade terms and fees.
 - `PerplAdapter`, see [`perpl-adapter.md`](perpl-adapter.md).
+
+Added 2026-10-07, freeze tiers. Treating every stop as final was a gap, not a principle: a stalled feed says nothing about the agent, and a bad day is not a broken mandate. Three tiers now, by what the stop means:
+
+| Tier | Trigger | Consequence | Bounty | Way back |
+|---|---|---|---|---|
+| Pause | Loss since the day's opening NAV past `maxDailyLossBps` | Orders that add risk revert `DailyLossPaused(resumesAt)`; reducing orders and withdrawals pass. `poke()` records the pause (`DailyLossPause`). No freeze. | None | Lifts by itself at the next UTC day. |
+| Halt | No fresh mark for 3 x `maxMarkAgeSeconds` | `freezeUnobservable()` freezes as before. For `UNOBSERVABLE_RECOVERY` (15 minutes) `unwind()` reverts `UnwindNotYet(allowedAt)`. | Freeze bounty as before | Inside the window anyone may call `guard.resume(vault)`. It re-marks; a mark still too old reverts `MarkTooOld`, a mark past any state term reverts `StillBreached()`. Otherwise the vault is `Active` again with the same terms and the same high-water mark, and no fee accrues for the frozen time. After the window, or after the first unwind step (`UnwindStarted()`), only unwind remains. |
+| Freeze | Drawdown or holding time past its term | Freeze, unwind, `Closed`, as before. | As before | None. `resume()` reverts `NotResumable()`. |
+
+Freeze reason 3 (daily loss) is no longer used; `freezeOf` keeps the last freeze after a resume. `recordOutcome` may record a resumed vault as `Active` again, keeping the reason it was stopped, and then a later freeze over it; `Closed` stays final. Withdrawal is unchanged in every tier (principle 3), and `withdrawUnpriced()` stays open through the recovery window. The keeper (`contracts/script/keeper-core.mjs`) tries `resume()` before `unwind()` on a frozen vault and no longer pokes for a daily loss, since a pause pays nothing. Tests: `contracts/test-js/freeze-tiers.test.mjs`.
 
 Tests: `contracts/test-js/lifecycle.test.mjs`, `contracts/test-js/marketplace.test.mjs`, and the opt-in `contracts/test-js/perpl-fork.test.mjs`. The Foundry invariant handler also calls `freezeUnobservable`; it is type-checked locally and runs in CI.
 

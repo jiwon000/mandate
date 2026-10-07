@@ -17,11 +17,11 @@ A mandate is a set of terms written into a contract and locked before the first 
 - Open registration. MandateFactory lets anyone deploy a vault, set its terms, lock them and list it in one transaction. Nobody approves it. The guard and the factory refuse values outside their ranges.
 - Custody separation. MandateVault holds the USDC and issues shares at marked NAV. The agent can call execute() and nothing else. A freeze stops the agent and leaves withdrawals open.
 - Pre-trade limits. The venue adapter previews the exposure an order would leave. MandateRiskGuard checks order, position and total size, leverage, per-block notional, trade spacing, allowed markets, direction, limit-price distance from the mark and trades per day before any external call. An order that fails reverts and no venue state changes.
-- Terms checked on the mark. After every trade the guard re-marks the vault. Drawdown against the high-water mark, loss since the day's open and holding time are checked there, and anyone can call poke() between trades to prove a breach. The vault freezes and the caller is paid a 0.05% bounty, so enforcement does not depend on a trusted keeper.
+- Terms checked on the mark. After every trade the guard re-marks the vault. Drawdown against the high-water mark and holding time are checked there, and anyone can call poke() between trades to prove a breach. The vault freezes and the caller is paid a 0.05% bounty, so enforcement does not depend on a trusted keeper. A loss past the daily bound only pauses new risk until the next UTC day.
 - Unwind after a freeze. Anyone can call unwind() to close a frozen position in five reduce-only steps of 20%, each inside a 1% slippage bound, for a 0.01% bounty. The vault ends Closed.
-- Locked terms. lockTerms() is one-way. A vault refuses deposits until its terms are locked, and afterwards nothing in them can change.
+- Locked terms. lockTerms() is one-way. A vault refuses deposits until its terms are locked.
 - Volatility clause. From its own marks the guard estimates realised volatility and refuses an order that adds exposure (StressBreach) when a k-sigma move would push the vault past its drawdown limit. Reducing orders always pass.
-- Mark age. A vault whose venue price is older than maxMarkAgeSeconds cannot trade or take deposits. If no price arrives for three times that age, anyone can freeze it, and allocators of a frozen vault can then take a cash-only exit (withdrawUnpriced) without waiting for the feed.
+- Mark age. A vault whose venue price is older than maxMarkAgeSeconds cannot trade or take deposits. If no price arrives for three times that age, anyone can freeze it; anyone can resume it if a price returns within 15 minutes inside every limit. Allocators keep a cash-only exit (withdrawUnpriced).
 - Fees as terms. A management fee (at most 5% a year) and a performance fee (at most 30%, only above the fee high-water mark) are charged by the vault in new shares, on a fresh mark only.
 - Batch allocation and releases. BatchAllocator takes EIP-712 signed intents with escrow, nets an epoch into one deposit per vault and pays shares against Merkle proofs. MandateRegistry anchors each agent's locked terms and accepts signed statistical releases, each stating the epsilon it spends, up to a cap.
 
@@ -31,7 +31,7 @@ The mark-age term has a floor, and the floor is the block interval. A mark is re
 
 The local build simulates this with a switch that holds the oracle to one mark per 12 seconds, the most a 12-second chain can deliver, while the local chain keeps mining. At 1-second cadence, orders on the Tight Mandate vault pass its 4-second term. At 12-second cadence the same order reverts with MarkTooOld for most of each interval.
 
-The block interval is the floor, not the whole bound: the price feed has to arrive that often too. On Monad testnet our demo oracle is a paid transaction every 5 seconds, so the tightest live mandate asks for a 10-second mark. Eight consecutive poke() calls on that vault all passed the term, each checked against a mark 1 to 5 seconds old (read back from the chain; the README lists them). The 4-second term runs on the local build.
+The block interval is the floor, not the whole bound: the price feed has to arrive that often too. On Monad testnet our demo oracle is a paid transaction every 5 seconds, so the tightest live mandate asks for a 10-second mark. Eight consecutive poke() calls on that vault all passed the term, each checked against a mark 1 to 5 seconds old (listed in the README). The 4-second term runs on the local build.
 
 WHAT IS LIVE TODAY
 
@@ -39,7 +39,7 @@ WHAT IS LIVE TODAY
 - A web app with Market, Agent, Allocate, Batch, Privacy, Launch and Live Risk screens. Every number is a contract read and every button is a transaction. Each vault shows its term sheet: the locked value, where the vault stands and what a breach does. A visitor can use a demo allocator the server signs for, or a browser wallet with a test-USDC faucet.
 - A demo video recorded on the hosted testnet demo: a mandate launched from a wallet, a deposit, an over-limit order refused, a price shock, poke() freezing the vault, the agent refused, unwind steps and a withdrawal.
 - An adapter for Perpl, the perpetuals exchange on Monad, tested against Perpl's deployed exchange on a fork of Monad testnet: open, a guard refusal, a flip, a freeze on holding time, unwind to Closed and a full withdrawal. Deployed to Monad testnet on 2026-10-06 and run once against Perpl's testnet exchange: allocate 150 aUSD, open and close 0.001 BTC, withdraw 149.91 aUSD. Then a rule-based agent script (not AI) traded it for about an hour: 10 orders filled, and 5 orders past the $200 cap were refused on chain by the guard.
-- 121 contract tests, 68 server tests and Foundry invariant and reentrancy suites, run in CI. Four rounds of internal security review; one found and fixed a bug in registry registration.
+- 127 contract tests, 68 server tests and Foundry invariant and reentrancy suites, run in CI. Four rounds of internal security review; one found and fixed a bug in registry registration.
 
 WHAT IS NOT BUILT YET
 

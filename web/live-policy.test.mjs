@@ -132,12 +132,12 @@ test("typed data for another signer, domain, type or vault is refused", () => {
   assert.equal(authoriseTypedData(withBatch, A(2), { primaryType: "AllocationIntent" }).reason, "malformed typed data");
 });
 
-test("on contracts with the lifecycle calls, allocator and keeper may freeze an unobservable vault and accrue fees", () => {
+test("on contracts with the lifecycle calls, allocator and keeper may freeze an unobservable vault, resume it and accrue fees", () => {
   const newer = {
     ...deployment,
     abis: {
       ...abis,
-      guard: [...abis.guard, "function freezeUnobservable(address) returns (uint256)"],
+      guard: [...abis.guard, "function freezeUnobservable(address) returns (uint256)", "function resume(address)"],
       vault: [...abis.vault, "function accrueFees() returns (uint256)"]
     }
   };
@@ -147,6 +147,7 @@ test("on contracts with the lifecycle calls, allocator and keeper may freeze an 
   for (const from of [A(2), A(9)]) {
     assert.equal(authorise(p, tx(from, A(11), g.encodeFunctionData("freezeUnobservable", [A(20)]))).ok, true);
     assert.equal(authorise(p, tx(from, A(21), v.encodeFunctionData("accrueFees", []))).ok, true);
+    assert.equal(authorise(p, tx(from, A(11), g.encodeFunctionData("resume", [A(20)]))).ok, true);
   }
   // An agent still signs execute() on its own vault and nothing else.
   assert.match(authorise(p, tx(A(3), A(11), g.encodeFunctionData("freezeUnobservable", [A(20)]))).reason, /allowlist/);

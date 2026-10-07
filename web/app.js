@@ -336,6 +336,8 @@ async function refresh() {
           ]);
 
         const terms = hasTerms() ? await readTermState(meta) : null;
+        // A guard from before the freeze tiers has no recovery window: 0, unwind at once.
+        const unwindAllowedAt = Number(await contracts.guard.unwindAllowedAt?.(meta.address).catch(() => 0n) ?? 0n);
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
         const equity6 = mark[0];
         const equityE18 = equity6 * ASSET_TO_E18;
@@ -356,6 +358,7 @@ async function refresh() {
           drawdownBps: Number(drawdownBps),
           markedAt: Number(markedAt),
           markAge: Math.max(0, state.chainTime - Number(markedAt)),
+          unwindAllowedAt,
           totalAssets,
           totalSupply,
           agentState: Number(agentState),
@@ -592,6 +595,22 @@ function describeLog(log) {
           tag: "CLOSED",
           kind: "pass"
         };
+      case "DailyLossPause":
+        return {
+          at,
+          text: `${vaultLabel(parsed.args.vault)} · daily loss ${parsed.args.lossBps}bps, new risk paused until ${new Date(Number(parsed.args.resumesAt) * 1000).toUTCString().slice(17, 22)} UTC`,
+          tag: "PAUSE",
+          kind: "mark"
+        };
+      case "Resumed":
+        return parsed.args.vault
+          ? {
+              at,
+              text: `${vaultLabel(parsed.args.vault)} · mark back inside every limit, resumed by ${shortAddress(parsed.args.caller)}`,
+              tag: "RESUME",
+              kind: "pass"
+            }
+          : null;
       case "DailyLossBreach":
         return {
           at,
@@ -959,7 +978,11 @@ function termRows(vault) {
       locked: t.maxDailyLossBps ? `${pct(t.maxDailyLossBps)} from the day's opening NAV` : "off",
       now: t.maxDailyLossBps ? pct(terms?.dailyLossBps ?? 0) : "",
       over: t.maxDailyLossBps > 0 && (terms?.dailyLossBps ?? 0) > t.maxDailyLossBps,
-      breach: t.maxDailyLossBps ? freezes : "nothing to cross",
+      breach: !t.maxDailyLossBps
+        ? "nothing to cross"
+        : state.contracts.guard.interface.getFunction("resume")
+          ? `${reverts("DailyLossPaused")} for orders that add risk until the next UTC day; nothing freezes`
+          : freezes,
       action: t.maxDailyLossBps ? { label: "poke()", blocked: need } : null
     });
     const held = terms?.openedAt ? Math.max(0, state.chainTime - terms.openedAt) : null;
@@ -1162,6 +1185,8 @@ function renderRisk() {
 
   const frozen = vault.agentState === 1;
   const closed = vault.agentState === 2;
+  // An unobservable freeze waits out a recovery window before unwind() is allowed.
+  const recovering = frozen && vault.unwindStepsDone === 0 && vault.unwindAllowedAt > state.chainTime;
   // Breaching a limit does not freeze anything on its own - the vault stays
   // Active until someone calls poke(). That unclaimed window is its own state
   // and the panel has to name it, or the page reads as if nothing happened.
@@ -1185,7 +1210,9 @@ function renderRisk() {
   $("#guardCopy").textContent = closed
     ? "unwind() took the whole position off the book. The vault holds cash plus whatever was realised, and withdraw() pays it out without waiting on a mark."
     : frozen
-      ? `execute() and allocate() are closed. withdraw() is not. Anyone can call unwind() to close the position a fifth at a time (${vault.unwindStepsDone}/5 done) and take 0.01% for the gas.`
+      ? recovering
+        ? `Frozen because no fresh mark arrived. Until ${new Date(vault.unwindAllowedAt * 1000).toLocaleTimeString()} anyone can call resume(): if the mark is back and every limit holds, the agent trades again on the same terms. After that, unwind() takes over. withdraw() stays open throughout.`
+        : `execute() and allocate() are closed. withdraw() is not. Anyone can call unwind() to close the position a fifth at a time (${vault.unwindStepsDone}/5 done) and take 0.01% for the gas.`
       : breached
       ? `${ddOver ? `Drawdown is ${pct(vault.drawdownBps)} against a ${pct(vault.limits.maxDrawdownBps)} mandate` : `Leverage is ${lev(vault.levX100)} against a ${lev(vault.limits.maxLeverageX100)} mandate`}. Nothing freezes until someone calls poke() - and whoever does is paid for it.`
       : stale
@@ -1233,12 +1260,20 @@ function renderRisk() {
   // from a call that is still in flight.
   const unwindButton = $("#unwindButton");
   if (!unwindButton.dataset.busy) {
-    unwindButton.disabled = !frozen;
+    unwindButton.disabled = !frozen || recovering;
     unwindButton.textContent = closed
       ? `unwind(${vault.name}) — already closed`
+      : recovering
+        ? `unwind(${vault.name}) — recovery window until ${new Date(vault.unwindAllowedAt * 1000).toLocaleTimeString()}`
       : frozen
         ? `unwind(${vault.name}) — step ${vault.unwindStepsDone + 1}/5, close a fifth, take 0.01%`
         : `unwind(${vault.name}) — needs a frozen vault`;
+  }
+
+  const resumeButton = $("#resumeButton");
+  if (!resumeButton.dataset.busy) {
+    resumeButton.hidden = !recovering;
+    resumeButton.textContent = `resume(${vault.name}) — re-mark, and lift the freeze if every limit holds`;
   }
 
   const unenforceable = state.snapshot.filter(
@@ -2036,6 +2071,16 @@ $("#pokeButton").addEventListener("click", (event) =>
   })
 );
 
+$("#resumeButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "resume()…", async () => {
+    const vault = state.snapshot[state.selected];
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const guard = state.contracts.guard.connect(await signerFor(caller));
+    await (await guard.resume(vault.address)).wait();
+    showToast(`${vault.name} is active again on the same terms. ${shortAddress(caller)} lifted the freeze; resume pays no bounty.`);
+  })
+);
+
 $("#unwindButton").addEventListener("click", (event) =>
   withButton(event.currentTarget, "unwind()…", async () => {
     const vault = state.snapshot[state.selected];
@@ -2130,7 +2175,17 @@ const TERM_TESTS = {
     return `Order ${(vault.terms?.tradesToday ?? 0) + 1} of ${vault.trade.maxTradesPerDay} today filled`;
   },
   drawdown: pokeTest,
-  dailyLoss: pokeTest,
+  async dailyLoss(vault) {
+    // A guard from before the freeze tiers still freezes on a daily loss.
+    if (!state.contracts.guard.interface.getFunction("resume")) return pokeTest(vault);
+    const caller = state.wallet ?? state.deployment.accounts.keeper;
+    const guard = state.contracts.guard.connect(await signerFor(caller));
+    await (await guard.poke(vault.address, state.deployment.addresses.adapter)).wait();
+    const [lossBps] = await state.contracts.guard.dailyLossQuote(vault.address, state.deployment.addresses.adapter);
+    return Number(lossBps) > vault.trade.maxDailyLossBps
+      ? `${vault.name} re-marked ${pct(Number(lossBps))} down on the day: orders that add risk are refused until the next UTC day. Reducing still works, and no bounty is paid.`
+      : `${vault.name} re-marked and is inside its daily loss. Nothing paused.`;
+  },
   holding: pokeTest,
   async blind(vault) {
     const caller = state.wallet ?? state.deployment.accounts.keeper;

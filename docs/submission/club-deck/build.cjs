@@ -43,7 +43,7 @@ const chip = (s, t, x, y, color = C.acc) => {
   const s = base("팀 구성", "팀원별 담당 파트");
   const cols = [
     ["@jiwon000", ["MandateRegistry: 에이전트 카탈로그와 조건 대조", "DP Reporter: 차등 프라이버시 성과 공개", "Batch 정산과 Privacy 화면 연동", "Foundry invariant·퍼징 테스트", "보안 리뷰 4회: registerAgent 수정, 마켓 기능 점검"]],
-    ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "Perpl 거래소 어댑터와 포크 테스트", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
+    ["@yahamang", ["MandateVault, MandateRiskGuard: 수탁, 한도 검사, 동결과 청산", "MandateFactory와 Launch 화면: 누구나 등록", "거래 조건 6종과 수수료 징수", "Perpl 거래소 어댑터: 포크 테스트, 테스트넷 배포", "테스트넷 데모 서버, 제출 문서, 데모 영상"]],
   ];
   cols.forEach(([who, items], i) => {
     const x = X0 + i * 6.1, y = 1.95;
@@ -111,7 +111,7 @@ const chip = (s, t, x, y, color = C.acc) => {
     ["주문", "execute()", "모든 주문이 RiskGuard를 먼저 통과해야 거래소에 닿음. 넘으면 트랜잭션째 취소."],
     ["동결", "poke()", "고점 대비 손실이나 보유 시간이 한도를 넘으면 누구나 증명해 동결. 호출자 보상 0.05%."],
     ["청산", "unwind()", "누구나 다섯 번에 걸쳐 20%씩 포지션을 닫음. 호출당 보상 0.01%."],
-    ["출금", "withdraw()", "배분자는 언제든 지분만큼 출금. 운영자 허락 필요 없음."],
+    ["출금", "withdraw()", "배분자는 최신 가격 기준 지분만큼, 볼트 현금 한도 안에서 출금. 운영자 허락 필요 없음."],
   ];
   const w = (W - 1.4 - 5 * 0.18) / 6;
   steps.forEach(([h, fn, b], i) => {
@@ -185,7 +185,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("위반 이후", "한도를 넘은 뒤에 일어나는 일");
   const K = [
-    ["멈춤 3단계", C.red, "poke()", "하루 손실: 다음 UTC 날까지 새 위험만 일시정지. 가격 끊김: 정지, 운영자·키퍼가 resume()으로 재개. 고점 대비 손실·보유 시간 초과: 동결, 되돌릴 수 없음.", "가격이 유효시간의 3배 넘게 끊기면 정지. 청산은 15분 뒤부터"],
+    ["멈춤 3단계", C.red, "poke()", "하루 손실: 다음 UTC 날까지 새 위험만 일시정지. 가격 끊김: 정지, 새 가격이 한도 안이면 누구나 resume()으로 재개. 고점 대비 손실·보유 시간 초과: 동결, 되돌릴 수 없음.", "가격이 유효시간의 3배 넘게 끊기면 정지. 청산은 15분 뒤부터"],
     ["청산", C.amber, "unwind()", "누구나 다섯 번에 걸쳐 포지션을 20%씩 닫습니다. 포지션을 줄이는 방향으로만 거래하고, 마크에서 1% 넘게 불리한 가격은 받지 않습니다.", "운영자가 사라져도 남이 끝까지 닫아 줄 보상 구조"],
     ["출금", C.green, "withdraw()", "출금은 동결 중에도 열려 있습니다. 현금이 모자라면 requestRedeem()으로 요청하고, 1일 뒤 누구나 포지션을 줄여 현금을 마련합니다.", "취소는 cancelRedeem(). 피드가 멈추면 withdrawUnpriced()로 현금 몫 출금"],
   ];
@@ -208,7 +208,7 @@ const chip = (s, t, x, y, color = C.acc) => {
 // 9 Why Monad
 {
   const s = base("왜 모나드인가", "가격 유효시간 조건은 체인이 지킬 수 있어야 합니다");
-  txt(s, "maxMarkAgeSeconds = 4초인 볼트: 4초보다 오래된 가격으로는 주문을 받지 않습니다. 가격은 블록에 실려야 갱신되므로, 블록 간격이 이 조건의 바닥이 됩니다.", { x:X0, y:1.6, w:11.9, h:0.7, fontSize:15, color:C.muted, lineSpacingMultiple:1.2 });
+  txt(s, "예: maxMarkAgeSeconds = 4초인 볼트는 4초보다 오래된 가격으로 주문을 받지 않습니다. 가격은 트랜잭션으로 갱신되므로, 블록 간격이 이 조건의 바닥이 됩니다.", { x:X0, y:1.6, w:11.9, h:0.7, fontSize:15, color:C.muted, lineSpacingMultiple:1.2 });
   const lane = (y, label, every, col, note) => {
     txt(s, label, { x:X0, y, w:3.2, h:0.4, bold:true, fontSize:17, color:col });
     txt(s, note, { x:X0, y:y+0.42, w:3.2, h:0.6, fontSize:12, color:C.muted });
@@ -221,14 +221,14 @@ const chip = (s, t, x, y, color = C.acc) => {
     }
   };
   lane(2.6, "12초 블록 체인", 12, C.red, "가격 갱신 12초마다\n각 구간의 2/3는 MarkTooOld");
-  lane(3.95, "Monad", 1, C.green, "가격 갱신 1초마다 (데모)\n항상 통과");
-  txt(s, "36초 구간", { x:4.0, y:5.05, w:8.6, h:0.3, fontFace:M, fontSize:10, color:C.dim, align:"right" });
+  lane(3.95, "블록이 짧은 체인", 1, C.green, "가격 갱신 1초마다\n항상 통과");
+  txt(s, "로컬 빌드에서 오라클을 12초로 묶는 스위치로 재현 · 36초 구간", { x:4.0, y:5.05, w:8.6, h:0.3, fontFace:M, fontSize:10, color:C.dim, align:"right" });
   s.addShape(pres.shapes.RECTANGLE, { x:4.0, y:5.12, w:0.18, h:0.14, fill:{ color:C.green, transparency:35 }, line:{ type:"none" } });
   txt(s, "주문 가능", { x:4.25, y:5.05, w:1.2, h:0.3, fontSize:10.5, color:C.muted });
   s.addShape(pres.shapes.RECTANGLE, { x:5.4, y:5.12, w:0.18, h:0.14, fill:{ color:C.red, transparency:55 }, line:{ type:"none" } });
   txt(s, "가격이 낡아 취소", { x:5.65, y:5.05, w:1.8, h:0.3, fontSize:10.5, color:C.muted });
   card(s, X0, 5.6, W-1.4, 1.15, C.panel2, C.panel2);
-  txt(s, "조건은 체인이 가격을 새로 쓸 수 있는 만큼만 요구할 수 있습니다. 짧은 가격 유효시간을 실제로 강제할 수 있는 체인이어서 Monad 위에 만듭니다. 실제 거래소 Perpl의 마크도 Monad 위에서 측정해 보니 1~50초 전 값이었고, Perpl 자신도 60초 넘은 가격은 거부합니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
+  txt(s, "블록 간격은 바닥일 뿐이고, 가격도 그만큼 자주 넣어야 합니다. 테스트넷 데모는 오라클이 5초마다 갱신해서 가장 엄격한 볼트가 10초 조건을 씁니다. Monad 위에 만드는 더 직접적인 이유는 실제 거래소 Perpl이 Monad에 있기 때문입니다. Perpl의 마크는 측정 시 1~50초 전 값이었고, Perpl 자신도 60초 넘은 가격은 거부합니다.", { x:X0+0.35, y:5.6, w:W-2.1, h:1.15, fontSize:14.5, valign:"middle", lineSpacingMultiple:1.2 });
 }
 
 // 10 Perpl

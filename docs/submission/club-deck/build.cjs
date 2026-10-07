@@ -185,9 +185,21 @@ const chip = (s, t, x, y, color = C.acc) => {
 {
   const s = base("위반 이후", "한도를 넘은 뒤에 일어나는 일");
   const K = [
-    ["멈춤 3단계", C.red, "poke()", "하루 손실: 다음 UTC 날까지 새 위험만 일시정지. 가격 끊김: 정지, 새 가격이 한도 안이면 누구나 resume()으로 재개. 고점 대비 손실·보유 시간 초과: 동결, 되돌릴 수 없음.", "가격이 유효시간의 3배 넘게 끊기면 정지. 청산은 15분 뒤부터"],
-    ["청산", C.amber, "unwind()", "누구나 다섯 번에 걸쳐 포지션을 20%씩 닫습니다. 포지션을 줄이는 방향으로만 거래하고, mark에서 1% 넘게 불리한 가격은 받지 않습니다.", "운영자가 사라져도 남이 끝까지 닫아 줄 보상 구조"],
-    ["출금", C.green, "withdraw()", "출금은 동결 중에도 열려 있고, 청산이 현금을 만듭니다. 활성 Vault에서 현금이 모자라면 requestRedeem()으로 요청하고, 1일 뒤 누구나 포지션을 줄여 현금을 마련합니다.", "취소는 cancelRedeem(). 피드가 멈추면 withdrawUnpriced()로 현금 몫 출금"],
+    ["멈춤 3단계", C.red, "poke()", [
+      ["하루 손실", "다음 UTC 날까지 새 위험만 멈춤"],
+      ["가격 끊김", "정지, 새 가격이 오면 재개 가능"],
+      ["고점 대비 손실 · 보유 시간", "동결, 되돌릴 수 없음"],
+    ], ["정지: 가격이 유효시간의 3배 넘게 끊김", "재개는 누구나 resume(), 청산은 15분 뒤"]],
+    ["청산", C.amber, "unwind()", [
+      ["누구나", "다섯 번에 걸쳐 20%씩 닫음"],
+      ["방향", "포지션을 줄이는 쪽으로만"],
+      ["가격", "mark보다 1% 넘게 불리하면 거부"],
+    ], ["운영자가 사라져도", "남이 끝까지 닫아 줄 보상 구조"]],
+    ["출금", C.green, "withdraw()", [
+      ["언제든", "동결 중에도 지분만큼 출금"],
+      ["현금이 모자라면", "요청 1일 뒤 누구나 포지션 축소"],
+      ["가격 피드가 멈추면", "현금 몫만 받는 출구"],
+    ], ["requestRedeem() · cancelRedeem()", "withdrawUnpriced()"]],
   ];
   const w = (W - 1.4 - 0.5) / 3;
   K.forEach(([h, col, fn, b, foot], i) => {
@@ -195,13 +207,17 @@ const chip = (s, t, x, y, color = C.acc) => {
     card(s, x, y, w, 3.8);
     txt(s, h, { x:x+0.35, y:y+0.3, w:2, h:0.5, bold:true, fontSize:24, color:col });
     txt(s, fn, { x:x+0.35, y:y+0.85, w:w-0.7, h:0.3, fontFace:M, fontSize:12, color:col });
-    txt(s, b, { x:x+0.35, y:y+1.3, w:w-0.7, h:1.6, fontSize:14, color:C.text, lineSpacingMultiple:1.2 });
-    txt(s, foot, { x:x+0.35, y:y+3.0, w:w-0.7, h:0.65, fontSize:11.5, color:C.muted, lineSpacingMultiple:1.15 });
+    txt(s, b.flatMap(([l, t], k) => [
+      { text:l, options:{ bold:true, color:col, breakLine:true } },
+      { text:t, options:{ breakLine:k < b.length-1, paraSpaceAfter:4 } },
+    ]), { x:x+0.35, y:y+1.25, w:w-0.6, h:1.75, fontSize:14, color:C.text, lineSpacingMultiple:1.1, valign:"top" });
+    txt(s, foot.map((t, k) => ({ text:t, options:{ breakLine:k < foot.length-1 } })), { x:x+0.35, y:y+3.1, w:w-0.6, h:0.55, fontSize:11.5, color:C.muted, lineSpacingMultiple:1.15, valign:"top" });
   });
   card(s, X0, 5.9, W-1.4, 0.85, C.panel2, C.panel2);
   txt(s, [
     { text:"정직하게  ", options:{ bold:true, color:C.amber } },
-    { text:"손실 한도는 “넘는 순간 멈춤”이 아닙니다. 가격이 한 번에 크게 움직이면 동결 시점 손실이 한도를 넘습니다 (10-06 테스트넷 데모: 한도 3%, 동결 시 4.24%). 보장하는 것은 위반 뒤에 새 위험이 더 쌓이지 않는다는 것입니다." },
+    { text:"손실 한도는 “넘는 순간 멈춤”이 아닙니다. 급락하면 동결 시점 손실이 한도를 넘습니다 (10-06 테스트넷: 한도 3%, 동결 시 4.24%).", options:{ breakLine:true } },
+    { text:"보장하는 것은 위반 뒤에 새 위험이 더 쌓이지 않는다는 것입니다." },
   ], { x:X0+0.35, y:5.9, w:W-2.1, h:0.85, fontSize:13.5, valign:"middle", lineSpacingMultiple:1.15 });
 }
 

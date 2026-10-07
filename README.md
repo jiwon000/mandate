@@ -540,9 +540,12 @@ cp .env.example .env        # MONAD_RPC_URL, DEPLOYER_PRIVATE_KEY, AGENT_ADDRESS
 npm run compile
 npm run deploy:monad        # one vault + BatchAllocator, writes contracts/deployments.latest.json
 npm run keeper:monad        # keeps the venue price fresh and calls poke() on every vault it finds
+KEEPER_PRICE=0 npm run keeper:monad   # watch-only: no setPrice, any funded key, any venue
 ```
 
 The single-vault deploy configures the vault with `maxMarkAgeSeconds = 30` and locks its terms in the same run, so without a keeper every `execute`, `allocate` and `withdraw` starts reverting with `MarkTooOld` thirty seconds after deployment. The keeper walks the mock price inside a band and serves every vault in the deployment file it finds (`contracts/deployments.latest.json` first, then `web/deployments/<chainId>.json`, or `DEPLOYMENT_FILE`): `poke()` while a vault is `Active`, `observe()` once it is not, so a drawdown breach is caught and the volatility estimate stays fed. It accepts `DEPLOYER_PRIVATE_KEY` or `DEMO_MNEMONIC` (account 0), whichever owns the venue. Do not run it next to `web:live` on the same deployment: two oracles from one key fight over nonces. Never commit a private key or the mnemonic; `.env` is ignored.
+
+`KEEPER_PRICE=0` makes it watch-only: it never calls `setPrice`, so the key does not have to own anything and the venue can be any (a Perpl-backed vault, say). Each tick it reads the guard's views and sends a transaction only when it earns a bounty: `poke()` when drawdown, daily loss or holding time is past its limit, `freezeUnobservable()` once the mark is three ages old, and one `unwind()` step on a `Frozen` vault. Besides the deployment file's vaults it reads every vault of the deployment's `MandateFactory` (`addresses.factory`, or `MandateFactory` in a flat file such as `contracts/deployments/perpl-10143.json` via `DEPLOYMENT_FILE`). The per-tick logic is `contracts/script/keeper-core.mjs`; `contracts/test-js/keeper.test.mjs` covers it. A watch-only keeper does not poke a healthy vault, so the high-water mark only moves on trades and on the pokes of others.
 
 See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
 

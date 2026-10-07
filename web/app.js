@@ -288,7 +288,7 @@ async function boot() {
 }
 
 function eventInterfacesFor(abis) {
-  return [abis.vault, abis.guard, abis.venue, abis.factory, abis.batch].filter(Boolean).map((abi) => new ethers.Interface(abi));
+  return [abis.vault, abis.guard, abis.venue, abis.factory, abis.batch, abis.registry].filter(Boolean).map((abi) => new ethers.Interface(abi));
 }
 
 function reportError(error) {
@@ -515,6 +515,7 @@ async function scanLogs() {
     state.deployment.addresses.guard,
     ...(state.deployment.addresses.factory ? [state.deployment.addresses.factory] : []),
     ...(state.deployment.batch?.address && state.deployment.abis.batch ? [state.deployment.batch.address] : []),
+    ...(state.deployment.registry?.address && state.deployment.abis.registry ? [state.deployment.registry.address] : []),
     ...state.deployment.vaults.map((v) => v.address)
   ];
   const logs = await state.provider.getLogs({
@@ -708,6 +709,27 @@ function describeLog(log) {
           text: `batch · ${shortAddress(parsed.args.allocator)} claimed ${usdc(parsed.args.shares)} shares of ${vaultLabel(parsed.args.vault)}`,
           tag: "CLAIM",
           kind: "pass"
+        };
+      case "LeaderboardPosted":
+        return {
+          at,
+          text: `registry · leaderboard for epoch ${parsed.args.epoch} posted, ε spent so far ${(Number(parsed.args.cumulativeEpsilonE6) / 1e6).toFixed(2)}`,
+          tag: "DP",
+          kind: "pass"
+        };
+      case "AgentRegistered":
+        return {
+          at,
+          text: `registry · ${vaultLabel(parsed.args.vault)} registered, terms ${parsed.args.termsHash.slice(0, 10)}…`,
+          tag: "LISTED",
+          kind: "pass"
+        };
+      case "OutcomeRecorded":
+        return {
+          at,
+          text: `registry · ${vaultLabel(parsed.args.vault)} recorded as ${stateName(Number(parsed.args.state))}${parsed.args.reason ? ` (${FREEZE_REASONS[Number(parsed.args.reason)] ?? "unknown"})` : ""}`,
+          tag: "RECORD",
+          kind: Number(parsed.args.state) === 1 ? "breach" : "mark"
         };
       case "RedeemRequested":
         return {

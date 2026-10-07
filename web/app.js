@@ -667,6 +667,27 @@ function describeLog(log) {
           tag: "BURN",
           kind: "pass"
         };
+      case "RedeemRequested":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · ${shortAddress(parsed.args.allocator)} asked to redeem ${usdc(parsed.args.shares)} shares, notice runs until ${new Date(Number(parsed.args.dueAt) * 1000).toLocaleString()}`,
+          tag: "NOTICE",
+          kind: "mark"
+        };
+      case "RedeemCancelled":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · ${shortAddress(parsed.args.allocator)} cancelled a redemption request`,
+          tag: "NOTICE",
+          kind: "mark"
+        };
+      case "DeleveragedForRedemption":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · position cut ${pct(Number(parsed.args.fractionBps))} to pay ${shortAddress(parsed.args.allocator)}, called by ${shortAddress(parsed.args.caller)}`,
+          tag: "REDEEM",
+          kind: "mark"
+        };
       default:
         return null;
     }

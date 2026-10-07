@@ -292,24 +292,24 @@ const chip = (s, t, x, y, color = C.acc) => {
 
 // 13 Limits
 {
-  const s = base("한계", "아직 아닌 것");
+  const s = base("검증 범위", "어디까지 확인했고, 무엇을 보장하지 않나");
   const demo = [
-    "거래소와 USDC는 가짜(mock)다",
-    "가격은 우리 서버가 넣는다",
-    "실제 거래소(Perpl) 연결은 테스트넷에서 소액(0.001 BTC, 짧은 실행 3회)으로만 확인했다",
+    "Mandate 컨트랙트 전체가 Monad 테스트넷에 배포되어 실제 트랜잭션으로 동작한다",
+    "실제 거래소 Perpl 테스트넷에 연결해 소액 거래로 확인: 체결 10건, 한도 초과 주문 5건 온체인 거부",
+    "공개 데모는 누구나 바로 써 볼 수 있도록 테스트용 거래소·USDC와 팀 오라클 가격을 쓴다",
   ];
   const not = [
-    "전략이 돈을 번다는 것. 조건은 행동을 제한할 뿐이다",
-    "손실이 정확히 한도에서 멈춘다는 것. 급락하면 넘을 수 있다",
-    "묶인 돈을 바로 뺄 수 있다는 것. 요청 뒤 1일 대기",
+    "전략의 수익. Mandate는 행동의 범위를 강제하는 인프라다",
+    "손실이 정확히 한도에서 멈추는 것. 급락하면 넘을 수 있고, 그 뒤 새 위험을 막는다",
+    "포지션에 묶인 돈의 즉시 출금. 요청 1일 뒤 누구나 현금화를 강제할 수 있다",
   ];
   const col = (x, h, color, items) => {
-    card(s, x, 1.85, 5.85, 3.0);
+    card(s, x, 1.85, 5.85, 3.5);
     txt(s, h, { x:x+0.4, y:2.15, w:5, h:0.45, bold:true, fontSize:21, color });
-    txt(s, items.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < items.length-1 } })), { x:x+0.4, y:2.8, w:5.1, h:1.9, fontSize:16, color:C.text, paraSpaceAfter:14, lineSpacingMultiple:1.1 });
+    txt(s, items.map((t, k) => ({ text:t, options:{ bullet:{ indent:14 }, breakLine:k < items.length-1 } })), { x:x+0.4, y:2.8, w:5.1, h:2.3, fontSize:16, color:C.text, paraSpaceAfter:14, lineSpacingMultiple:1.15 });
   };
-  col(X0, "데모라서 다른 점", C.amber, demo);
-  col(X0 + 6.1, "보장하지 않는 것", C.red, not);
+  col(X0, "확인한 것", C.green, demo);
+  col(X0 + 6.1, "설계상 보장하지 않는 것", C.amber, not);
 }
 
 // 14 Close

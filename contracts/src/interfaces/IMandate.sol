@@ -152,7 +152,8 @@ interface IVenueAdapter {
     /// @dev Vault-only. The adapter derives the closing order from the position it can
     ///      see, so the caller never has to know the venue's units or direction. Fills
     ///      worse than the adapter's slippage bound against the current mark revert.
-    ///      `closedNotional` is what came off the book at the fill price.
+    ///      `closedNotional` is what came off the book, at the fill price on the mock
+    ///      venue and at the mark on Perpl.
     function reduce(address vault, uint16 fractionBps)
         external returns (uint256 closedNotional, int256 realizedPnl);
 

@@ -288,7 +288,7 @@ async function boot() {
 }
 
 function eventInterfacesFor(abis) {
-  return [abis.vault, abis.guard, abis.venue, abis.factory].filter(Boolean).map((abi) => new ethers.Interface(abi));
+  return [abis.vault, abis.guard, abis.venue, abis.factory, abis.batch].filter(Boolean).map((abi) => new ethers.Interface(abi));
 }
 
 function reportError(error) {
@@ -514,6 +514,7 @@ async function scanLogs() {
   const addresses = [
     state.deployment.addresses.guard,
     ...(state.deployment.addresses.factory ? [state.deployment.addresses.factory] : []),
+    ...(state.deployment.batch?.address && state.deployment.abis.batch ? [state.deployment.batch.address] : []),
     ...state.deployment.vaults.map((v) => v.address)
   ];
   const logs = await state.provider.getLogs({
@@ -665,6 +666,47 @@ function describeLog(log) {
           at,
           text: `${vaultLabel(log.address)} · withdrew ${usdc(parsed.args.assets)} mUSDC`,
           tag: "BURN",
+          kind: "pass"
+        };
+      case "WithdrawnUnpriced":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · cash-only exit paid ${usdc(parsed.args.assets)} mUSDC, the open position stays with the vault`,
+          tag: "BURN",
+          kind: "pass"
+        };
+      case "SharesTransferred":
+        return {
+          at,
+          text: `${vaultLabel(log.address)} · ${usdc(parsed.args.shares)} shares moved from ${shortAddress(parsed.args.from)} to ${shortAddress(parsed.args.to)}`,
+          tag: "SHARES",
+          kind: "mark"
+        };
+      case "EscrowDeposited":
+        return { at, text: `batch · ${shortAddress(parsed.args.allocator)} put ${usdc(parsed.args.assets)} mUSDC in escrow`, tag: "ESCROW", kind: "mark" };
+      case "EscrowWithdrawn":
+        return { at, text: `batch · ${shortAddress(parsed.args.allocator)} took ${usdc(parsed.args.assets)} mUSDC out of escrow`, tag: "ESCROW", kind: "mark" };
+      case "IntentCancelled":
+        return { at, text: `batch · ${shortAddress(parsed.args.allocator)} cancelled intent #${parsed.args.nonce}`, tag: "INTENT", kind: "mark" };
+      case "EpochSettled":
+        return {
+          at,
+          text: `batch · epoch ${parsed.args.epoch} settled, ${parsed.args.intentCount} intent${parsed.args.intentCount === 1n ? "" : "s"} under root ${parsed.args.intentRoot.slice(0, 10)}…`,
+          tag: "EPOCH",
+          kind: "pass"
+        };
+      case "VaultAllocated":
+        return {
+          at,
+          text: `batch · epoch ${parsed.args.epoch} put ${usdc(parsed.args.assets)} mUSDC into ${vaultLabel(parsed.args.vault)} in one allocate()`,
+          tag: "MINT",
+          kind: "pass"
+        };
+      case "SharesClaimed":
+        return {
+          at,
+          text: `batch · ${shortAddress(parsed.args.allocator)} claimed ${usdc(parsed.args.shares)} shares of ${vaultLabel(parsed.args.vault)}`,
+          tag: "CLAIM",
           kind: "pass"
         };
       case "RedeemRequested":

@@ -91,7 +91,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 - 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 스크립트 실행 약 1시간).
 - 차등 프라이버시는 공개 데이터에만 적용됩니다. 리포터는 이미 체인에 있는 수익률을 집계하므로 메커니즘과 온체인 ε 장부를 보여줄 뿐, 비공개 데이터를 보호하지 않습니다. 명시한 ε은 평균에 대해서만 정확하고, 보호 단위는 수익률 한 틱이라 k개 틱을 낸 Vault 전체는 k·ε로 보호됩니다. 체인은 서명과 ε 장부만 확인하고 노이즈 자체는 확인하지 못합니다. 배치 intent와 서명은 정산 calldata에 공개됩니다.
-- 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다.
+- 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다. 서버가 재시작돼도 정산 calldata에서 `npm run claims:recover`로 proof를 다시 만들 수 있습니다.
 - guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다. 실현 손실은 슬리피지와 가격 갭만큼 drawdown 조건을 넘을 수 있습니다.
 - 외부 감사를 받지 않았습니다. 지금까지의 검토는 [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)의 내부 리뷰입니다.
 
@@ -168,7 +168,7 @@ What the contracts and the demo do today:
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (105 cases, one of them a single end-to-end run from agent registration to withdrawal; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (68 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (107 cases, one of them a single end-to-end run from agent registration to withdrawal; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (68 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 

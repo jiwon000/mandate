@@ -2,11 +2,11 @@
   "chainId": 10143,
   "profile": "live",
   "addresses": {
-    "usdc": "0xf30eBc7C2F74A1eA0270Ab4f05AA7D267Ad16Fc2",
-    "guard": "0xB0A208f93532457bF3293C961ed140E07C0aaC80",
-    "venue": "0x58fc4454Ac11ABA5AdE06bb0d76A54a6dB5fa7eA",
-    "adapter": "0xB837E7E85134b1e2897725be30c0A95E3f1B6E0e",
-    "factory": "0xa616314B13C636e728D705bcd2EcE867398B8Fa0"
+    "usdc": "0x2960c0D0d257E4b5eB94e201362800883680aA5B",
+    "guard": "0x417FA8c63736aB3b7F9D887377BE04e35499198E",
+    "venue": "0x1E4eC2064170d828Bf607f0943d7a664d9868C53",
+    "adapter": "0x41A98f3a19EDd0807223AE2335519D87Dd6CBc19",
+    "factory": "0xb16629791b69a4C05fC3C80216CAF918425461Fa"
   },
   "markets": [
     {
@@ -24,13 +24,13 @@
     "keeper": "0xBa66888Ab2520c337E4898a01CAEe6ABa96321c3"
   },
   "batch": {
-    "address": "0x55B082EC7c04daF546bCb9b91C07c02680fd601E",
-    "genesis": 1791260366,
+    "address": "0xA47F468dfcd48fFdCb2151Bb2B2E3F7820eABC0a",
+    "genesis": 1791347403,
     "epochDuration": 20,
     "settlementWindow": 600
   },
   "registry": {
-    "address": "0x431fd7097dBfa2808270D9de9f7A0ceF136d1435",
+    "address": "0x38c21EC85EacF2a7737Dfc10c6cdf900911c8c9D",
     "clipBound": 0.1,
     "epsilon": 0.5
   },
@@ -67,7 +67,7 @@
         "performanceFeeBps": 1000,
         "managementFeeBps": 100
       },
-      "address": "0x2597755019aa8cA237BEF67cb9d2D3e296a978ff",
+      "address": "0x8A0B0e47f068a88E96E3E2c3bdfB9F7b079D52e5",
       "agent": "0xFCC74b23BED38b2b67cfd33Fef31A21a4914A7D2",
       "termsHash": "0x0a380bc8f042166aac4b5850a3157624b3f86b10be46ff877b8bdb7b3ca29f0b"
     },
@@ -103,7 +103,7 @@
         "performanceFeeBps": 1500,
         "managementFeeBps": 150
       },
-      "address": "0xF9343F59e7922387039F8b3A907e340FD35EB71b",
+      "address": "0x0763eC0323E73832590Dd92fA7817bc7860c7726",
       "agent": "0x20544f94547226574f5e0AaD0aC61B8914866aA3",
       "termsHash": "0xa13708f66b25dc3ebd33c018c6faa7d07dc95e559854b5b0a461edddfb0257bc"
     },
@@ -139,7 +139,7 @@
         "performanceFeeBps": 2000,
         "managementFeeBps": 200
       },
-      "address": "0xdb1f4bDA5f1885f2e1Fe86e77474C7A9E4358412",
+      "address": "0x793Beb051457806808CF827CC653A67Dda3Aa141",
       "agent": "0x3F56cE0ca324dBd32Afc2F85E1b2860517dFA88F",
       "termsHash": "0x5c015feb724af2eb0bb5128531125e957e0ba1bfcf5d013f2649ba972f15839b"
     },
@@ -175,14 +175,14 @@
         "performanceFeeBps": 1000,
         "managementFeeBps": 50
       },
-      "address": "0xac0B02595ccc91d44D44cdD338629815E3413904",
+      "address": "0x9eFc7658f94c1B8B6b9FadF02B701cF05eDFDaf4",
       "agent": "0x55e8e5FAb663e7F00D7C52dfB345545B56BfCA6B",
       "termsHash": "0xc24f1103eb44f106f8f564a709edac42f57fdac33026bce98571822780d85ba0"
     }
   ],
-  "startBlock": 68589154,
-  "startedAt": 1791260311000,
-  "deployedAt": "2026-10-06T04:18:31.000Z",
+  "startBlock": 68875907,
+  "startedAt": 1791347429030,
+  "deployedAt": "2026-10-07T04:30:29.030Z",
   "network": {
     "label": "Monad testnet",
     "explorer": "https://testnet.monadscan.com"

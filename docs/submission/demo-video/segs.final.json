@@ -1,75 +1,103 @@
 {
- "video": "raw/take-1791264101820.webm",
+ "video": "raw/take-1791350333139.webm",
  "segs": [
   {
    "i": 0,
-   "start": 5.688,
-   "end": 34.447,
-   "video": "raw/take-1791264101820.webm"
+   "start": 6.261,
+   "end": 35.761
   },
   {
    "i": 1,
-   "start": 5.703,
-   "end": 36.274,
-   "video": "raw/take-1791264235409.webm"
+   "start": 36.097,
+   "end": 63.265
   },
   {
    "i": 2,
-   "start": 135.042,
-   "end": 143.228,
-   "video": "raw/take-1791264101820.webm"
+   "start": 63.266,
+   "end": 88.538
   },
   {
    "i": 3,
-   "start": 143.229,
-   "end": 161.286,
-   "video": "raw/take-1791264101820.webm",
+   "parts": [
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 88.538,
+     "end": 96.0
+    },
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 110.5,
+     "end": 116.362
+    }
+   ],
    "speed": 1.5
   },
   {
    "i": 4,
-   "start": 161.286,
-   "end": 179.589,
-   "video": "raw/take-1791264101820.webm",
-   "speed": 1.2
+   "parts": [
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 116.362,
+     "end": 131.0
+    },
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 140.4,
+     "end": 146.714
+    }
+   ],
+   "speed": 1.46
   },
   {
    "i": 5,
-   "start": 179.59,
-   "end": 200.368,
-   "video": "raw/take-1791264101820.webm"
+   "parts": [
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 146.714,
+     "end": 150.7
+    },
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 156.0,
+     "end": 158.0
+    },
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 170.7,
+     "end": 184.326
+    }
+   ],
+   "speed": 1.19
   },
   {
    "i": 6,
-   "start": 200.368,
-   "end": 223.922,
-   "video": "raw/take-1791264101820.webm",
-   "speed": 1.6
-  },
-  {
-   "i": 7,
    "parts": [
     {
-     "video": "raw/take-1791264101820.webm",
-     "start": 223.923,
-     "end": 233.0
+     "video": "raw/take-1791350333139.webm",
+     "start": 184.326,
+     "end": 190.3
     },
     {
-     "video": "raw/take-1791264235409.webm",
-     "start": 40.5,
-     "end": 55.792
+     "video": "raw/take-1791350333139.webm",
+     "start": 201.8,
+     "end": 209.6
+    },
+    {
+     "video": "raw/take-1791350333139.webm",
+     "start": 214.8,
+     "end": 222.932
     }
    ]
   },
   {
+   "i": 7,
+   "start": 222.932,
+   "end": 248.38
+  },
+  {
    "i": 8,
-   "start": 248.293,
-   "end": 258.446,
-   "video": "raw/take-1791264101820.webm"
+   "start": 248.38,
+   "end": 258.78
   }
- ],
- "sent": [
-  "0x3258dea11159460f19e8e248f2a1061b83569da730ccbb95ce100fe126a2a939"
- ],
- "launched": "0x3258dea11159460f19e8e248f2a1061b83569da730ccbb95ce100fe126a2a939"
+ ]
 }

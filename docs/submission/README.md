@@ -12,8 +12,8 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 ## 요약
 
 - 제출 폼 체크리스트 5개 중 4개가 끝났습니다. 남은 하나는 영상 2개의 링크입니다.
-- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-07 04:30 UTC에 현재 main 컨트랙트(PR #35·#37~#39: 기준가 한도, 동결 3단계, 환매 대기열, 리뷰 수정)로 재배포됐습니다. 서빙되는 `app.js`가 main(fe74b8e)과 같음을 확인했습니다(2026-10-07). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다.
-- 데모 영상은 2026-10-06 공개 데모에서 녹화했습니다(한국어·영어, 2분 45초, 녹화 스크립트는 `demo-video/`). 피치 영상은 아직입니다.
+- 공개 데모 <https://mandate-e4kb.onrender.com> 은 2026-10-07 04:30 UTC에 현재 main 컨트랙트(PR #35·#37~#39: 기준가 한도, 동결 3단계, 환매 대기열, 리뷰 수정)로 재배포됐습니다. 서빙되는 `app.js`가 main(fe74b8e)과 같음을 확인했습니다(2026-10-07). README "Recorded run on Monad testnet"의 주소 표와 `web/deployments/10143.json`은 이 장부를 가리킵니다. 공개 데모는 `AUTO_RESET_MIN_FROZEN=1`이라, 심사 안내대로 Tight Mandate 하나를 닫으면 다음 방문 때 새 장부로 바뀝니다. 10-07 데모 영상 녹화가 Tight Mandate를 동결해 05:21 UTC에 같은 컨트랙트로 새 장부가 배포됐고, 주소 표는 이 장부를 가리킵니다.
+- 데모 영상은 2026-10-07 공개 데모에서 다시 녹화했습니다(한국어·영어, 2분 59초, 녹화 스크립트는 `demo-video/`). 동결 3단계와 출금 대기열을 반영했습니다. 피치 영상은 아직입니다.
 - 세 `.txt` 문안을 10-06 상태(마켓 기능, 수수료, Perpl 포크 테스트, 공개 데모 재녹화)로 다시 썼습니다. 폼 세 칸에도 같은 날 다시 붙여 넣고 저장 뒤 일치를 확인했습니다.
 - 10-05 동결 규칙(`ea596a0`, 설계 [`docs/mandate-lifecycle-design.md`](../mandate-lifecycle-design.md))과 10-06 마켓 기능이 모두 main에 머지됐고 공개 데모에 반영됐습니다.
 
@@ -91,7 +91,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 
 - 호스트는 Render 웹 서비스이고, 라이브 모드(chainId 10143)로 돕니다. 2026-10-06 재배포 뒤 서빙되는 `app.js`는 main과 같습니다.
 - `web/live-recover.mjs`가 부팅할 때 체인에서 가장 최근 완성 장부를 찾아 쓰므로, 커밋된 `10143.json`이나 재배포 가능성에 의존하지 않습니다.
-- 공개 데모에 Batch·Privacy·Launch 화면이 보입니다. 지금 장부는 2026-10-07 04:30 UTC에 배포한 장부(마켓 기능에 동결 3단계·환매 대기열까지 포함)이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 공개 데모에서 Launch는 브라우저 지갑으로만 할 수 있습니다(가스는 방문자 지갑 부담). 그 전 장부들(10-06 04:18, 10-05 08:08·09:47 UTC 등)은 체인에 남아 있습니다.
+- 공개 데모에 Batch·Privacy·Launch 화면이 보입니다. 지금 장부는 2026-10-07 05:21 UTC에 배포한 장부(마켓 기능에 동결 3단계·환매 대기열까지 포함)이고, 그 주소가 README "Recorded run on Monad testnet"과 `web/deployments/10143.json`에 반영돼 있습니다. 공개 데모에서 Launch는 브라우저 지갑으로만 할 수 있습니다(가스는 방문자 지갑 부담). 그 전 장부들(10-07 04:30, 10-06 04:18, 10-05 08:08·09:47 UTC 등)은 체인에 남아 있습니다.
 - Render의 파일시스템은 재시작과 재배포 때 초기화되지만, 빌드는 그때마다 배포 계정의 트랜잭션을 거꾸로 훑어 가장 최근 완성 장부로 부팅하므로(읽기만 하고 MON은 들지 않음, 테스트넷에서 약 40초) 더 이상 재시작마다 재배포가 일어나지 않습니다.
 - 대기 중인 의향, claim 증명, 리포터 표본은 메모리에만 있습니다. 재시작하면 사라집니다.
 - 공개 데모의 페이지나 `/api`를 열면 오라클이 60초 동안 5초 간격으로 가격을 갱신하고, 그만큼 배포 계정의 테스트넷 MON을 씁니다. 상태 확인은 필요한 만큼만 합니다.

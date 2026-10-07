@@ -164,13 +164,19 @@ async function smoothScroll(px, steps = 20, ms = 60) {
   for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, px / steps); await sleep(ms); }
 }
 // Orders and poke need a mark younger than Tight Mandate's 10s limit. Send
-// right after the oracle's next mark rather than late in its cycle.
+// right after the oracle's next mark rather than late in its cycle. The cell
+// refreshes every few seconds in step with the oracle, so a small age may
+// never show; the age read the moment the cell changes is the true one.
 async function freshMark(maxAge = 3, timeout = 60000) {
+  const limit = Math.max(maxAge, 4);
+  await page.evaluate(() => (window.__lastAge = undefined));
   const ok = await page.waitForFunction((m) => {
     const t = document.querySelector('.agent-row[aria-label="Open Tight Mandate"] [data-cell="age"]')?.textContent ?? "";
+    const changed = window.__lastAge !== undefined && t !== window.__lastAge;
+    window.__lastAge = t;
     const age = parseInt(t, 10);
-    return Number.isFinite(age) && age <= m;
-  }, maxAge, { timeout, polling: 250 }).then(() => true, () => false);
+    return changed && Number.isFinite(age) && age <= m;
+  }, limit, { timeout, polling: 100 }).then(() => true, () => false);
   if (!ok) log("no fresh mark within", timeout / 1000, "s");
 }
 async function scene(i, fn) {
@@ -214,12 +220,26 @@ await scene(1, async () => {
   log("launch ok", ok, launched);
 });
 
+// The narration walks the "If crossed" column: a refused order, the final
+// freeze, the daily pause, the resumable freeze on a stalled feed.
 await scene(2, async () => {
+  const t0 = now();
+  const until = (t) => sleep(Math.max(0, (t0 + t - now()) * 1000));
   await nav("market", "Market");
   await click('.agent-row[aria-label="Open Tight Mandate"]', "Tight Mandate");
   await page.locator("#termSheet").scrollIntoViewIfNeeded();
   await sleep(600);
-  await smoothScroll(500, 20, 120);
+  for (const [t, sel, label, ms] of [
+    [7.3, "#termSheet .term-row .term-breach", "order refused", 2600],
+    [10.4, '[data-term="drawdown"] .term-breach', "freeze, final", 2700],
+    [13.5, '[data-term="dailyLoss"] .term-breach', "pause until next UTC day", 3000],
+    [16.8, '[data-term="blind"] .term-breach', "freeze, resumable", 4500]
+  ]) {
+    await until(t - 0.8);
+    await page.locator(sel).first().evaluate((el) => el.scrollIntoView({ block: "center", behavior: "smooth" }));
+    await until(t);
+    await point(sel, label, ms);
+  }
 });
 
 await scene(3, async () => {

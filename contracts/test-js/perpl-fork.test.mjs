@@ -13,7 +13,9 @@ import { BASE_LIMITS, DEFAULT_TRADE, NO_FEES, coder } from "./fixture.mjs";
 // Perpl refuses orders against a mark older than 60s and the guard does the same, so
 // the test pins each block's timestamp a second after the last instead of letting
 // wall-clock time run while the fork fetches state. The whole run spends about 25 of
-// those 60 seconds, so it forks only once the testnet mark is at most 10s old.
+// those 60 seconds, so it forks only once the testnet mark and oracle are at most 20s old.
+// Perpl's testnet updates each about every 50s, about 15s apart (measured 2026-10-07),
+// so both are never under 10s at once; 20s plus the run still fits inside 60.
 
 const RPC = process.env.PERPL_FORK_RPC ?? "https://testnet-rpc.monad.xyz";
 const EXCHANGE = "0x1964C32f0bE608E7D29302AFF5E61268E72080cc";
@@ -29,7 +31,7 @@ const ERC20 = [
   "function approve(address,uint256) returns (bool)"
 ];
 
-/// Fork Monad testnet at a block whose BTC mark and oracle are at most 10s old, trying again
+/// Fork Monad testnet at a block whose BTC mark and oracle are at most 20s old, trying again
 /// for up to two minutes.
 async function forkWithFreshMark(abi) {
   for (let i = 0; i < 40; i++) {
@@ -38,12 +40,12 @@ async function forkWithFreshMark(abi) {
     provider.pollingInterval = 10;
     const exchange = new Contract(EXCHANGE, abi, provider);
     const [latest, info] = await Promise.all([provider.getBlock("latest"), exchange.getPerpetualInfoV2(16)]);
-    const fresh = (at) => latest.timestamp - Number(at) <= 10;
+    const fresh = (at) => latest.timestamp - Number(at) <= 20;
     if (fresh(info.markTimestamp) && fresh(info.oracleTimestampSec)) return { chain, provider, exchange, latest, info };
     await chain.close();
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
-  throw new Error("Perpl's testnet BTC mark or oracle stayed older than 10s for two minutes");
+  throw new Error("Perpl's testnet BTC mark or oracle stayed older than 20s for two minutes");
 }
 
 test("a Perpl-backed mandate trades, is refused past its cap, freezes and unwinds on Perpl", {

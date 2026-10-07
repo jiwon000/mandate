@@ -42,7 +42,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 7. Unwind steps until the vault is `Closed`. The position at Perpl is zero and the Perpl account is empty.
 8. The allocator withdraws everything except the vault's `MIN_SHARES` dust.
 
-The test forks only at a block whose BTC mark and oracle price are both at most 10 seconds old, because the run spends about 25 of Perpl's 60 seconds. With that it passed ten runs in a row on 2026-10-06, and once more with the reference bound on 2026-10-07. Run it with:
+The test forks only at a block whose BTC mark and oracle price are both at most 20 seconds old, because the run spends about 25 of Perpl's 60 seconds. With a 10-second bar it passed ten runs in a row on 2026-10-06. On 2026-10-07 Perpl's testnet updated the mark and the oracle each about every 50 seconds, about 15 seconds apart, so the two were never both under 10 seconds and the test could not start; at 20 seconds it passed three runs in a row the same day. Run it with:
 
 ```bash
 npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.monad.xyz
@@ -136,6 +136,6 @@ What has to be true before a Perpl-backed vault is deployed to Monad testnet, ho
 | Account minimum | `getMinAccountOpenCNS()`; docs say $100 on testnet, $10 on mainnet | Checked on the fork | Fund the vault above it before its first trade, or the trade reverts `BelowAccountMinimum` |
 | Margin mode | Docs: Perpl is restricted to isolated margin for now | Matches the adapter, which models isolated positions | Re-check equity and liquidation notes if Perpl enables cross margin |
 | Taker settlement | `maxNegPnlCollatBPS` above 0 | Set to 10000, checked on the fork | See Findings |
-| Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark is at most 10 s old | Use a longer mark-age term on Perpl than on the mock demo |
+| Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark and oracle are at most 20 s old | Use a longer mark-age term on Perpl than on the mock demo |
 | Deploy key | A team member deploys with their own key; nothing in this repository holds one | Done: deployed 2026-10-06 | No deployment |
 | Team agreement | The team agrees to list the adapter on the factory | Done | Perpl stays fork-tested only |

@@ -102,3 +102,21 @@ test("a mark three ages old is frozen as unobservable", async (t) => {
   assert.equal(await f.vault.state(), 1n, "Frozen");
   assert.equal(await f.usdc.balanceOf(keeperAddress), (parseUnits("1000", 6) * 5n) / 10_000n, "bounty paid");
 });
+
+test("a vault frozen for a stopped feed is resumed, not unwound, when the feed comes back", async (t) => {
+  const { f, args } = await setup(t, { maxMarkAgeSeconds: 10 });
+  await f.chain.provider.request({ method: "evm_increaseTime", params: [31] });
+  await f.chain.provider.request({ method: "evm_mine", params: [] });
+  let [action] = await keeperTick(args);
+  assert.equal(action.action, "freezeUnobservable");
+
+  // Inside the recovery window, still no feed: nothing to resume and no unwind yet.
+  [action] = await keeperTick(args);
+  assert.equal(action.action, "skip");
+  assert.match(action.reason, /unwind/);
+
+  await (await f.venue.setPrice(parseUnits("2000", 18))).wait();
+  [action] = await keeperTick(args);
+  assert.equal(action.action, "resume");
+  assert.equal(await f.vault.state(), 0n, "Active");
+});

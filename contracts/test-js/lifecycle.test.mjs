@@ -110,6 +110,9 @@ test("recordOutcome reads the chain: nothing for an active vault, then Frozen, t
   assert.equal(outcome.frozenAt, frozenAt);
   await assert.rejects(registry.recordOutcome(f.vaultAddress), revertsWith(registry, "NothingToRecord"), "the same state twice");
 
+  // An unobservable freeze leaves a recovery window before anyone may unwind.
+  await assert.rejects(f.vault.connect(f.keeper).unwind(), revertsWith(f.vault, "UnwindNotYet"));
+  await ageMark(f, 31 + 15 * 60);
   // Nothing on the book, so the first unwind closes the vault.
   await (await f.vault.connect(f.keeper).unwind()).wait();
   assert.equal(await f.vault.state(), 2n);

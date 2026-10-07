@@ -22,12 +22,14 @@ export const ROLE_RULES = {
     ["guard", "poke"],
     ["guard", "observe"],
     ["guard", "freezeUnobservable"],
+    ["guard", "resume"],
     ["vault", "accrueFees"]
   ],
   keeper: [
     ["guard", "poke"],
     ["guard", "observe"],
     ["guard", "freezeUnobservable"],
+    ["guard", "resume"],
     ["vault", "unwind"],
     ["vault", "accrueFees"]
   ],
@@ -50,7 +52,8 @@ export function buildPolicy(deployment) {
   const batchAddress = deployment.batch?.address && deployment.abis.batch ? deployment.batch.address : null;
   if (batchAddress) ifaces.batch = new Interface(deployment.abis.batch);
   // null when the deployment's contracts predate the function (a book from
-  // before open registration has no freezeUnobservable or accrueFees).
+  // before open registration has no freezeUnobservable or accrueFees, one
+  // from before the freeze tiers has no resume).
   const selectorOf = (kind, fn) => ifaces[kind === "ownVault" ? "vault" : kind].getFunction(fn)?.selector.toLowerCase() ?? null;
 
   const allow = new Map(); // from -> Map(to -> Map(selector -> name))

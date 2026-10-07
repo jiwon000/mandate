@@ -7,7 +7,6 @@ import { BASE_LIMITS, DEFAULT_TRADE, NO_FEES, coder, fixture, termsHashOf } from
 // canonical guard, trade terms beyond size and leverage, several markets on one
 // venue, fees taken as shares, and the exit from a vault whose feed stopped.
 
-const DAILY_LOSS = 3n;
 const HOLDING_TIME = 4n;
 const UNOBSERVABLE = 2n;
 const e18 = (x) => parseUnits(String(x), 18);
@@ -235,15 +234,28 @@ test("the daily trade count stops new exposure but never a reduction, and resets
   await run(f, order0("0.25", "2000"));
 });
 
-test("a daily loss past its bound freezes the vault even inside the drawdown cap", async (t) => {
-  // Drawdown cap 2%, daily loss 1%: a 1.5% loss trips only the daily term.
+test("a daily loss past its bound pauses new risk for the day, inside the drawdown cap", async (t) => {
+  // Drawdown cap 2%, daily loss 1%: a 1.5% loss trips only the daily term, which pauses.
   const f = await fixture(t, {}, { trade: { maxDailyLossBps: 100 } });
   await run(f, f.order);
   await (await f.venue.setPrice(e18(1970))).wait();
-  await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
-  assert.equal(await f.vault.state(), 1n);
+  // No mark has recorded the loss yet, and adding risk is refused anyway.
+  await assert.rejects(run(f, order0("0.1", "1970")), revertsWith(f.guard, "DailyLossPaused"));
+  const receipt = await (await f.guard.connect(f.keeper).poke(f.vaultAddress, f.adapterAddress)).wait();
+  assert.ok(receipt.logs.some((log) => f.guard.interface.parseLog(log)?.name === "DailyLossPause"));
+  assert.equal(await f.vault.state(), 0n, "a pause is not a freeze");
   const [reason] = await f.guard.freezeOf(f.vaultAddress);
-  assert.equal(reason, DAILY_LOSS);
+  assert.equal(reason, 0n);
+
+  // The agent can still take risk off, and the pause holds even if the price recovers.
+  await run(f, order0("-0.1", "1970"));
+  await (await f.venue.setPrice(e18(2000))).wait();
+  await assert.rejects(run(f, order0("0.1", "2000")), revertsWith(f.guard, "DailyLossPaused"));
+
+  // The next UTC day it trades normally again.
+  await advance(f, 86_400);
+  await (await f.venue.setPrice(e18(2000))).wait();
+  await run(f, order0("0.1", "2000"));
 
   const control = await fixture(t);
   await run(control, control.order);
@@ -349,6 +361,8 @@ test("a vault whose feed stopped reaches exit: freeze, five unwinds, then withdr
   await (await f.guard.connect(f.keeper).freezeUnobservable(f.vaultAddress)).wait();
   const [reason] = await f.guard.freezeOf(f.vaultAddress);
   assert.equal(reason, UNOBSERVABLE);
+  await assert.rejects(f.vault.connect(f.keeper).unwind(), revertsWith(f.vault, "UnwindNotYet"));
+  await advance(f, 15 * 60);
   for (let i = 0; i < 5; i++) await (await f.vault.connect(f.keeper).unwind()).wait();
   assert.equal(await f.vault.state(), 2n, "Closed");
 

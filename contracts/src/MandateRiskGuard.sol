@@ -62,6 +62,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     error NoReferencePrice(address adapter);
     error MarkDeviationExceeded(uint256 deviationBps);
     error ReferenceTooOld(uint256 updatedAt, uint256 maxAge);
+    /// @notice Today's loss is past `maxDailyLossBps`: orders that add risk wait for
+    ///         the next UTC day. Orders that take risk off still go through.
+    error DailyLossPaused(uint256 resumesAt);
+    /// @notice Only a vault frozen for having no fresh mark can be resumed.
+    error NotResumable();
+    /// @notice The fresh mark shows a limit breached, so the vault stays frozen.
+    error StillBreached();
 
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
@@ -74,6 +81,9 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice A vault whose mark is older than this many mark ages can be frozen by
     ///         anyone. One late update is noise; three in a row means no feed.
     uint256 public constant UNOBSERVABLE_MARK_AGES = 3;
+    /// @notice After an unobservable freeze, unwind() waits this long. If the feed comes
+    ///         back inside it and every limit holds, anyone can resume() the vault.
+    uint256 public constant UNOBSERVABLE_RECOVERY = 15 minutes;
 
     /// @notice Yearly management fee cap, in bps.
     uint16 public constant MAX_MANAGEMENT_FEE_BPS = 500;
@@ -85,7 +95,6 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     uint8 private constant REASON_DRAWDOWN = 1;
     uint8 private constant REASON_UNOBSERVABLE = 2;
-    uint8 private constant REASON_DAILY_LOSS = 3;
     uint8 private constant REASON_HOLDING_TIME = 4;
 
     struct BlockUsage {
@@ -147,6 +156,9 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => TradeCount) public tradesOf;
     /// @notice When the vault last went from flat to holding a position; 0 while flat.
     mapping(address => uint64) public positionOpenedAt;
+    /// @notice The UTC day (timestamp / 1 days) on which a mark last found the vault
+    ///         past its daily loss cap. Adding risk is refused for the rest of that day.
+    mapping(address => uint64) public pausedDayOf;
 
     /// @notice The one MandateFactory allowed to configure and lock vaults it deploys.
     ///         Set once by the owner.
@@ -154,7 +166,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     event LimitsConfigured(address indexed vault);
     event FactorySet(address indexed factory);
-    event DailyLossBreach(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 bounty);
+    event DailyLossPause(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 resumesAt);
+    event Resumed(address indexed vault, address indexed caller, uint256 navPerShare);
     event HoldingTimeBreach(address indexed vault, address indexed caller, uint256 openedAt, uint256 bounty);
     event FeeRebased(address indexed vault, uint256 supplyBefore, uint256 supplyAfter);
     event ReferenceTermsSet(address indexed vault, uint16 maxMarkDeviationBps, uint32 maxReferenceAgeSeconds);
@@ -380,7 +393,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
         }
         _checkTradeTerms(vault, trade, addsRisk);
-        if (addsRisk) _checkReference(vault, adapter, trade);
+        if (addsRisk) {
+            _checkReference(vault, adapter, trade);
+            _checkDailyLoss(vault, adapter);
+        }
 
         // Pre-trade stress test, only for orders that add exposure. An order that takes
         // risk off is never refused here, whatever the market is doing: in a spike the
@@ -451,6 +467,22 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (deviationBps > r.maxMarkDeviationBps) revert MarkDeviationExceeded(deviationBps);
     }
 
+    /// @dev The first of three tiers. A daily loss past the cap pauses new risk until the
+    ///      next UTC day; the position stays with the agent, who can still take it off.
+    ///      Checked against the current mark as well as the stored pause, so a loss no
+    ///      mark has recorded yet still stops the order.
+    function _checkDailyLoss(address vault, address adapter) private view {
+        uint64 today = uint64(block.timestamp / 1 days);
+        uint256 cap = tradeTerms[vault].maxDailyLossBps;
+        if (pausedDayOf[vault] == today || (cap != 0 && _loss(vault, adapter) > cap)) {
+            revert DailyLossPaused((uint256(today) + 1) * 1 days);
+        }
+    }
+
+    function _loss(address vault, address adapter) private view returns (uint256 lossBps) {
+        (lossBps,) = dailyLossQuote(vault, adapter);
+    }
+
     /// @dev Distance of `price` from `ref` in bps of `ref`; no reference reads as infinitely far.
     function _deviationBps(uint256 price, uint256 ref) private pure returns (uint256) {
         if (ref == 0) return type(uint256).max;
@@ -501,6 +533,33 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     function freezeOf(address vault) external view returns (uint8 reason, uint64 frozenAt) {
         FreezeRecord memory record = freezeRecordOf[vault];
         return (record.reason, record.frozenAt);
+    }
+
+    /// @inheritdoc IRiskGuard
+    function unwindAllowedAt(address vault) external view returns (uint256) {
+        FreezeRecord memory record = freezeRecordOf[vault];
+        if (record.reason != REASON_UNOBSERVABLE) return 0;
+        return uint256(record.frozenAt) + UNOBSERVABLE_RECOVERY;
+    }
+
+    /// @notice Put a vault frozen for having no fresh mark back to work once it has one.
+    /// @dev The second tier. An unobservable freeze says nothing about the agent: the
+    ///      feed stopped. So it leaves UNOBSERVABLE_RECOVERY before unwind() may start,
+    ///      and inside it anyone may call this. It re-marks against the vault's own
+    ///      adapter and reverts unless every limit holds on that mark, measured from the
+    ///      same high-water mark as before: the terms do not reset. Drawdown and holding
+    ///      time freezes are the third tier and never come back; the agent's own record
+    ///      broke the terms, and different terms mean a new vault.
+    function resume(address vault) external {
+        if (freezeRecordOf[vault].reason != REASON_UNOBSERVABLE || IMandateVaultView(vault).state() != 1) {
+            revert NotResumable();
+        }
+        address adapter = IMandateVaultView(vault).venueAdapter();
+        IMandateVaultFreeze(vault).resume();
+        if (_markAndCheck(vault, adapter, address(0))) revert StillBreached();
+        (uint256 equity,) = IVenueAdapter(adapter).markEquity(vault);
+        uint256 supply = IMandateVaultView(vault).totalSupply();
+        emit Resumed(vault, msg.sender, supply == 0 ? ONE : Math.mulDiv(equity, ONE, supply));
     }
 
     /// @notice Feed the current mark into the vault's volatility estimate. Permissionless
@@ -602,9 +661,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         }
         TradeTerms memory t = tradeTerms[vault];
         if (t.maxDailyLossBps != 0 && dailyLossBps > t.maxDailyLossBps) {
-            uint256 bounty = _freeze(vault, REASON_DAILY_LOSS, beneficiary);
-            emit DailyLossBreach(vault, beneficiary, navPerShare, dailyLossBps, bounty);
-            return true;
+            _pauseForDay(vault, beneficiary, navPerShare, dailyLossBps);
         }
         uint64 openedAt = positionOpenedAt[vault];
         if (t.maxHoldingSeconds != 0 && openedAt != 0 && block.timestamp > uint256(openedAt) + t.maxHoldingSeconds) {
@@ -613,6 +670,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             return true;
         }
         return false;
+    }
+
+    function _pauseForDay(address vault, address caller, uint256 navPerShare, uint256 lossBps) private {
+        uint64 today = uint64(block.timestamp / 1 days);
+        if (pausedDayOf[vault] == today) return;
+        pausedDayOf[vault] = today;
+        emit DailyLossPause(vault, caller, navPerShare, lossBps, (uint256(today) + 1) * 1 days);
     }
 
     function _freeze(address vault, uint8 reason, address beneficiary) private returns (uint256) {
@@ -634,7 +698,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     }
 
     /// @notice Today's loss from the day's opening NAV, in bps, at the current mark.
-    function dailyLossQuote(address vault, address adapter) external view returns (uint256 lossBps, uint256 openNav) {
+    function dailyLossQuote(address vault, address adapter) public view returns (uint256 lossBps, uint256 openNav) {
         (uint256 equity,) = IVenueAdapter(adapter).markEquity(vault);
         uint256 supply = IMandateVaultView(vault).totalSupply();
         DayState memory d = dayOf[vault];

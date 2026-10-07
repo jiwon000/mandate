@@ -10,7 +10,10 @@ import { Contract, Interface, formatUnits, zeroPadValue } from "ethers";
 const GUARD_ABI = [
   "event Marked(address indexed vault, uint256 navPerShare, uint256 highWaterNavPerShare, uint256 drawdownBps)",
   "event DrawdownBreach(address indexed vault, address indexed caller, uint256 navPerShare, uint256 drawdownBps, uint256 bounty)",
+  // Guards before freeze tiers froze on a daily loss; current ones pause for the day.
   "event DailyLossBreach(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 bounty)",
+  "event DailyLossPause(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 resumesAt)",
+  "event Resumed(address indexed vault, address indexed caller, uint256 navPerShare)",
   "event HoldingTimeBreach(address indexed vault, address indexed caller, uint256 openedAt, uint256 bounty)",
   "event Unobservable(address indexed vault, address indexed caller, uint256 markedAt, uint256 bounty)",
   "function limitsOf(address vault) view returns (uint16 maxLeverageX100, uint16 maxDrawdownBps, uint32 minBlocksBetweenTrades, uint32 maxMarkAgeSeconds, uint256 maxOrderNotional, uint256 maxPositionNotional, uint256 maxTotalNotional, uint256 maxBlockNotional, uint32 volWindowSeconds, uint32 stressHorizonSeconds, uint16 stressSigmasX10)",
@@ -38,6 +41,7 @@ export const FREEZE_REASONS = ["none", "drawdown", "unobservable", "dailyLoss", 
 const BREACHES = {
   DrawdownBreach: "drawdown",
   DailyLossBreach: "dailyLoss",
+  DailyLossPause: "dailyLossPause",
   HoldingTimeBreach: "holdingTime",
   Unobservable: "unobservable"
 };
@@ -126,8 +130,9 @@ export function summarize(events, onchain = {}, { maxPoints = 200 } = {}) {
         block: e.blockNumber,
         txHash: e.txHash,
         drawdownBps: e.name === "DrawdownBreach" ? Number(e.args.drawdownBps) : undefined,
-        lossBps: e.name === "DailyLossBreach" ? Number(e.args.lossBps) : undefined
+        lossBps: e.name === "DailyLossBreach" || e.name === "DailyLossPause" ? Number(e.args.lossBps) : undefined
       })),
+    resumes: count("Resumed"),
     unwindSteps: count("Unwound"),
     closed: count("Closed") > 0,
     state: state === undefined ? null : (STATES[Number(state)] ?? String(state)),

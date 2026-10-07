@@ -191,6 +191,7 @@ contract PerplAdapter is IVenueAdapter, IReferencePriceSource {
             : keccak256(abi.encode(vault, marketId, sizeDeltaE18, limitPriceE18));
         p.marketId = marketId;
         p.resultingSizeE18 = resultingSize;
+        p.currentSizeE18 = size;
         p.limitPriceE18 = limitPriceE18;
         p.markPriceE18 = traded.markE18;
     }

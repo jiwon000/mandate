@@ -245,9 +245,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     /// @notice Bound the venue mark against the adapter's reference price. Optional, and
     ///         like every other term it can only be set before the terms are locked.
-    /// @dev The vault's own adapter must answer `referencePrice` for the vault's
-    ///      market now; an adapter that cannot (MockVenueAdapter) is refused here
-    ///      rather than at the first order. Setting all zero clears the term.
+    /// @dev The vault's own adapter must answer `referencePrice` with a set price for
+    ///      every allowed market now; an adapter that cannot (MockVenueAdapter), or a
+    ///      market whose oracle was never set, is refused here rather than at the first
+    ///      order. Setting all zero clears the term.
     function setReferenceTerms(address vault, ReferenceTerms calldata r) external onlyOwnerOrFactory {
         if (termsLocked[vault]) revert LimitsLocked();
         if (!configured[vault]) revert LimitsNotConfigured();
@@ -259,10 +260,14 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
                 r.maxReferenceAgeSeconds == 0 || r.maxReferenceAgeSeconds > MAX_MARK_AGE_CAP
             ) revert InvalidReferenceTerms();
             address adapter = IMandateVaultView(vault).venueAdapter();
-            try IReferencePriceSource(adapter).referencePrice(_referenceMarket(tradeTerms[vault].allowedMarkets))
-                returns (uint256, uint256) {}
-            catch {
-                revert NoReferencePrice(adapter);
+            uint32 allowed = tradeTerms[vault].allowedMarkets;
+            for (uint256 id; id < 32; ++id) {
+                if ((allowed >> id) & 1 == 0) continue;
+                try IReferencePriceSource(adapter).referencePrice(id) returns (uint256 price, uint256 updatedAt) {
+                    if (price == 0 || updatedAt == 0) revert NoReferencePrice(adapter);
+                } catch {
+                    revert NoReferencePrice(adapter);
+                }
             }
         }
         referenceTerms[vault] = r;
@@ -362,8 +367,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
         if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
 
+        // An order adds risk when it grows total exposure, and also when it crosses
+        // through flat: the size on the new side is a fresh position opened at this mark,
+        // even if it is no larger than the one it replaced.
         (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
-        bool addsRisk = trade.expectedTotalNotional > totalNotional;
+        bool addsRisk = trade.expectedTotalNotional > totalNotional ||
+            (trade.currentSizeE18 > 0 && trade.resultingSizeE18 < 0) ||
+            (trade.currentSizeE18 < 0 && trade.resultingSizeE18 > 0);
         _checkTradeTerms(vault, trade, addsRisk);
         if (addsRisk) _checkReference(vault, adapter, trade);
 

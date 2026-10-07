@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import hre from "hardhat";
-import { BrowserProvider, ContractFactory, keccak256, parseUnits, toUtf8Bytes } from "ethers";
+import { BrowserProvider, ContractFactory, ZeroHash, keccak256, parseUnits, toUtf8Bytes } from "ethers";
 import { artifact, compileContracts } from "../tools/compiler.mjs";
 import { BASE_LIMITS, DEFAULT_TRADE, NO_FEES, coder, termsHashOf } from "./fixture.mjs";
 
@@ -21,12 +21,12 @@ function revertsWith(contract, name) {
   return (error) => error?.revert?.name === name || String(error?.message).includes(selector);
 }
 
-async function setup(t, { reference = REFERENCE, lock = true } = {}) {
+async function setup(t, { reference = REFERENCE, lock = true, trade = {} } = {}) {
   const chain = await hre.network.create();
   t.after(() => chain.close());
   const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10;
-  const [owner, allocator, agent] = await Promise.all([0, 1, 2].map((i) => provider.getSigner(i)));
+  const [owner, allocator, agent, keeper] = await Promise.all([0, 1, 2, 3].map((i) => provider.getSigner(i)));
   const deploy = async (source, name, args = []) => {
     const { abi, bytecode } = artifact(compiled, `contracts/src/${source}.sol`, name);
     const c = await new ContractFactory(abi, bytecode, owner).deploy(...args);
@@ -42,7 +42,9 @@ async function setup(t, { reference = REFERENCE, lock = true } = {}) {
   const adapter = await deploy("perpl/PerplAdapter", "PerplAdapter", [exchange.target, usdc.target, 500, 300, [BTC]]);
   const vault = await deploy("MandateVault", "MandateVault", [usdc.target, guard.target, agent.address, adapter.target]);
   await wait(guard.setAdapter(vault.target, adapter.target, true));
-  await wait(guard.configureTerms(vault.target, BASE_LIMITS, DEFAULT_TRADE, NO_FEES));
+  await wait(guard.configureTerms(vault.target, BASE_LIMITS, { ...DEFAULT_TRADE, ...trade }, NO_FEES));
+  // The oracle has answered once, as on Perpl; a market it never priced cannot carry the term.
+  await wait(exchange.setOracle(BTC, BTC_PNS, (await provider.getBlock("latest")).timestamp));
   if (reference) await wait(guard.setReferenceTerms(vault.target, reference));
   if (lock) {
     await wait(guard.lockTerms(vault.target));
@@ -63,7 +65,11 @@ async function setup(t, { reference = REFERENCE, lock = true } = {}) {
     const [p] = await exchange.getPositionV2(BTC, await adapter.accountIdOf(vault.target));
     return p.lotLNS;
   };
-  return { provider, owner, agent, usdc, exchange, guard, adapter, vault, deploy, wait, prices, execute, lots };
+  const side = async () => {
+    const [p] = await exchange.getPositionV2(BTC, await adapter.accountIdOf(vault.target));
+    return { lots: p.lotLNS, type: p.positionType };
+  };
+  return { provider, owner, allocator, agent, keeper, usdc, exchange, guard, adapter, vault, deploy, wait, prices, execute, lots, side };
 }
 
 test("new exposure is refused while Perpl's mark sits too far from its oracle; a reduction still passes", async (t) => {
@@ -122,6 +128,11 @@ test("reference terms are range-checked, need an adapter that can quote them, an
   await s.wait(s.exchange.setBroken(true));
   await assert.rejects(s.guard.setReferenceTerms(s.vault.target, REFERENCE), revertsWith(s.guard, "NoReferencePrice"));
   await s.wait(s.exchange.setBroken(false));
+  // Nor can a market whose oracle has never answered: locking the term in would
+  // refuse every order that adds exposure, for good.
+  await s.wait(s.exchange.setOracle(BTC, 0, 0));
+  await assert.rejects(s.guard.setReferenceTerms(s.vault.target, REFERENCE), revertsWith(s.guard, "NoReferencePrice"));
+  await s.wait(s.exchange.setOracle(BTC, BTC_PNS, (await s.provider.getBlock("latest")).timestamp));
 
   const before = await s.guard.termsHash(s.vault.target);
   await s.wait(s.guard.setReferenceTerms(s.vault.target, REFERENCE));
@@ -175,4 +186,60 @@ test("the factory sets reference terms before the lock, and refuses them on an a
   await s.wait(factory.listAdapter(mockAdapter.target, true));
   await assert.rejects(factory.createMandateWithReference(params(mockAdapter.target), REFERENCE),
     revertsWith(s.guard, "NoReferencePrice"));
+});
+
+test("crossing through flat opens a new position, so it is checked like any other added exposure", async (t) => {
+  const s = await setup(t, { trade: { maxTradesPerDay: 2 } });
+  await s.prices();
+  await s.wait(s.execute("0.005", "60600"));
+
+  // With the mark 204 bps off the oracle, a flip from long 0.005 to short 0.005 leaves
+  // total notional where it was, but the short is opened at the suspect mark.
+  await s.prices(BTC_PNS, BTC_PNS * 98n / 100n);
+  await assert.rejects(s.execute("-0.010", "59400"), revertsWith(s.guard, "MarkDeviationExceeded"));
+  // A smaller flip shrinks the total and is refused for the same reason.
+  await assert.rejects(s.execute("-0.009", "59400"), revertsWith(s.guard, "MarkDeviationExceeded"));
+  assert.deepEqual(await s.side(), { lots: 500n, type: 0n });
+
+  // Prices agree again: the flip passes and counts as the day's second trade, so a
+  // third order that adds exposure is refused while closing is not.
+  await s.prices();
+  await s.wait(s.execute("-0.010", "59400"));
+  assert.deepEqual(await s.side(), { lots: 500n, type: 1n });
+  assert.equal((await s.guard.tradesOf(s.vault.target)).count, 2n);
+  await s.prices();
+  await assert.rejects(s.execute("0.010", "60600"), revertsWith(s.guard, "DailyTradesExceeded"));
+  await s.wait(s.execute("0.005", "60600"));
+  assert.equal(await s.lots(), 0n);
+});
+
+test("the guard owner can register a vault with reference terms in the registry", async (t) => {
+  const s = await setup(t);
+  const registry = await s.deploy("MandateRegistry", "MandateRegistry");
+  await s.wait(registry.registerAgent(s.vault.target, s.adapter.target, BASE_LIMITS, NO_FEES, ZeroHash));
+  const entry = await registry.agentOf(s.vault.target);
+  assert.notEqual(entry.registeredAt, 0n);
+  assert.equal(entry.termsHash, await s.guard.termsHash(s.vault.target));
+});
+
+test("a Closed vault pays out its cash even after the venue stops answering", async (t) => {
+  const s = await setup(t, { reference: null, trade: { maxHoldingSeconds: 5 } });
+  await s.prices();
+  await s.wait(s.execute("0.005", "60600"));
+  await s.provider.send("evm_increaseTime", [10]);
+  await s.provider.send("evm_mine", []);
+  await s.prices();
+  await s.wait(s.guard.connect(s.keeper).poke(s.vault.target, s.adapter.target));
+  for (let i = 0; i < 6 && (await s.vault.state()) === 1n; i++) {
+    await s.prices();
+    await s.wait(s.vault.connect(s.keeper).unwind());
+  }
+  assert.equal(await s.vault.state(), 2n);
+
+  await s.wait(s.exchange.setBroken(true));
+  const cash = await s.usdc.balanceOf(s.vault.target);
+  const shares = await s.vault.balanceOf(s.allocator.address);
+  await s.wait(s.vault.connect(s.allocator).withdraw(shares, s.allocator.address));
+  assert.equal(await s.vault.balanceOf(s.allocator.address), 0n);
+  assert.ok(cash - (await s.usdc.balanceOf(s.vault.target)) > usd(990));
 });

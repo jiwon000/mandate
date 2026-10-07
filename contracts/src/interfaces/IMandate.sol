@@ -109,6 +109,9 @@ struct TradePreview {
     uint256 limitPriceE18;
     /// @notice The venue's mark for `marketId` when the order was previewed.
     uint256 markPriceE18;
+    /// @notice Signed position in `marketId` before the order, 1e18 units. With
+    ///         `resultingSizeE18` it tells the guard when an order crosses through flat.
+    int256 currentSizeE18;
 }
 
 interface IMandateVaultView {
@@ -190,10 +193,14 @@ interface IRiskGuard {
     /// @notice True once the vault's limits and adapter allowlist can no longer change.
     function termsLocked(address vault) external view returns (bool);
 
-    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured terms.
+    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured
+    ///         terms, with the ReferenceTerms appended to the encoding when they are set.
     /// @dev What MandateRegistry.registerAgent() checks a caller's claimed terms
     ///      against, so a registry entry cannot disagree with the real terms.
     function termsHash(address vault) external view returns (bytes32);
+
+    /// @notice The vault's ReferenceTerms; all zero when the term is off.
+    function referenceTermsOf(address vault) external view returns (ReferenceTerms memory);
 
     /// @notice The vault's TradeTerms, as configured.
     function tradeTermsOf(address vault) external view returns (TradeTerms memory);

@@ -174,11 +174,20 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (balanceOf[msg.sender] < shares) revert InsufficientShares();
 
         _accrueFees();
-        (uint256 equity, uint256 markedAt) = markedAssets();
-        // A Closed vault holds no position, so no price can change what a share is
-        // worth and a stale mark has nothing left to misprice. Everywhere else the
-        // freshness rule stands.
-        if (state != AgentState.Closed) riskGuard.requireFreshMark(address(this), markedAt);
+        uint256 equity;
+        if (state == AgentState.Closed) {
+            // A Closed vault holds no position, so no price can change what a share is
+            // worth and a stale mark has nothing left to misprice. Nor may a venue that
+            // has since stopped answering lock the cash in: when its views revert, the
+            // vault's own balance prices the share, and anything still parked at the
+            // venue stays with the shares that remain.
+            (equity,) = _tryMarkedAssets();
+            if (equity == 0) equity = totalAssets();
+        } else {
+            uint256 markedAt;
+            (equity, markedAt) = markedAssets();
+            riskGuard.requireFreshMark(address(this), markedAt);
+        }
         if (equity == 0) revert NoMarkedEquity();
 
         uint256 supply = totalSupply;

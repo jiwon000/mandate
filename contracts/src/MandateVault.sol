@@ -29,6 +29,12 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     error ZeroAgent();
     error MarkIsFresh();
     error BelowMinimum(uint256 assets, uint256 minAssets);
+    error NoRedeemRequest();
+    error RedeemNoticePending(uint256 dueAt);
+    error CashCoversRedeem();
+    error NothingToDeleverage();
+    error SharesUnderRequest();
+    error RedemptionDeleveraging(uint256 until);
 
     /// @notice Share of idle assets paid to whoever's poke() first proves a breach.
     /// @dev Gives the freeze the same keeper economics as a liquidation: the vault does
@@ -76,6 +82,28 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
 
     /// @notice NAV per share above which the next performance fee is charged.
     /// @dev Starts at par and only moves up, and only when a fee is taken against it.
+    /// @notice How long the agent has, after an allocator asks to redeem, to free the
+    ///         cash for it before anyone may take positions off the book to do so.
+    uint256 public constant REDEEM_NOTICE = 1 days;
+    /// @notice After a forced deleverage, how long orders that add exposure stay
+    ///         refused, so the cash it freed is still there when the allocator comes.
+    uint256 public constant REDEEM_GRACE = 1 hours;
+    /// @notice A forced deleverage closes this much more than the shortfall it computes,
+    ///         for the fee and the fill on the way out.
+    uint16 public constant DELEVERAGE_BUFFER_BPS = 500;
+
+    struct RedeemRequest {
+        uint256 shares;
+        uint64 requestedAt;
+    }
+
+    /// @notice Shares each allocator has asked to redeem and when. They stay the
+    ///         allocator's and keep earning or losing with the vault until withdrawn,
+    ///         but they cannot be transferred while the request stands.
+    mapping(address => RedeemRequest) public redeemRequestOf;
+    /// @notice Until this time the agent may only reduce exposure.
+    uint64 public riskLockedUntil;
+
     uint256 public feeHighWaterNavPerShare = 1e18;
     /// @notice When fees were last accrued; 0 before the first deposit.
     uint256 public lastFeeAccrual;
@@ -88,6 +116,11 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     event Frozen(address indexed beneficiary, uint256 bounty);
     event Unwound(address indexed caller, uint8 step, uint256 closedNotional, int256 realizedPnl, uint256 bounty);
     event Closed();
+    event RedeemRequested(address indexed allocator, uint256 shares, uint256 dueAt);
+    event RedeemCancelled(address indexed allocator);
+    event DeleveragedForRedemption(
+        address indexed allocator, address indexed caller, uint16 fractionBps, uint256 closedNotional, int256 realizedPnl
+    );
     event FeesAccrued(address indexed agent, uint256 managementAssets, uint256 performanceAssets, uint256 shares);
 
     constructor(IERC20 asset_, IRiskGuard riskGuard_, address agent_, IVenueAdapter adapter_) {
@@ -203,6 +236,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
 
         balanceOf[msg.sender] -= shares;
         totalSupply = supply - shares;
+        _fillRequest(msg.sender, shares);
         asset.safeTransfer(receiver, assets);
         emit Withdrawn(msg.sender, assets, shares);
     }
@@ -244,6 +278,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
 
         balanceOf[msg.sender] -= shares;
         totalSupply = supply - shares;
+        _fillRequest(msg.sender, shares);
         asset.safeTransfer(receiver, assets);
         emit WithdrawnUnpriced(msg.sender, assets, shares);
     }
@@ -254,6 +289,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         if (receiver == address(0)) revert InvalidReceiver();
         if (shares == 0) revert ZeroShares();
         if (balanceOf[msg.sender] < shares) revert InsufficientShares();
+        if (balanceOf[msg.sender] - redeemRequestOf[msg.sender].shares < shares) revert SharesUnderRequest();
         balanceOf[msg.sender] -= shares;
         balanceOf[receiver] += shares;
         emit SharesTransferred(msg.sender, receiver, shares);
@@ -266,6 +302,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
 
         _accrueFees();
         TradePreview memory expected = IVenueAdapter(adapter).preview(address(this), order);
+        if (block.timestamp < riskLockedUntil && _addsRisk(adapter, expected)) {
+            revert RedemptionDeleveraging(riskLockedUntil);
+        }
         riskGuard.checkAndConsumeBefore(address(this), adapter, expected);
         // A venue that holds margin (PerplAdapter) pulls what the order needs from the
         // vault's cash during the call. The allowance exists only inside this frame,
@@ -311,6 +350,67 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
             bounty = 0;
         }
         emit Frozen(beneficiary, bounty);
+    }
+
+    /// @notice Ask for `shares` more to be redeemable in cash within REDEEM_NOTICE.
+    /// @dev withdraw() pays out of the cash in the vault, and on a venue that holds
+    ///      margin an open position can leave too little of it. The request is the
+    ///      notice the agent gets to free that cash on its own terms; once it is due,
+    ///      deleverageForRedemption() lets anyone free it instead. Adding to a request
+    ///      restarts its notice, so an agent always sees the full amount in time.
+    function requestRedeem(uint256 shares) external {
+        if (shares == 0) revert ZeroShares();
+        RedeemRequest storage request = redeemRequestOf[msg.sender];
+        uint256 total = request.shares + shares;
+        if (total > balanceOf[msg.sender]) revert InsufficientShares();
+        request.shares = total;
+        request.requestedAt = uint64(block.timestamp);
+        emit RedeemRequested(msg.sender, total, block.timestamp + REDEEM_NOTICE);
+    }
+
+    function cancelRedeem() external {
+        if (redeemRequestOf[msg.sender].shares == 0) revert NoRedeemRequest();
+        delete redeemRequestOf[msg.sender];
+        emit RedeemCancelled(msg.sender);
+    }
+
+    /// @notice Take enough of the position off the book to pay a redemption that is due.
+    /// @dev Permissionless, one step per block, Active vaults only: a Frozen vault is
+    ///      being unwound already. Runs only when the request is past its notice and
+    ///      the vault's cash is short of the shares' marked value. It closes the same
+    ///      fraction of every position, sized as the shortfall over what the vault has
+    ///      at the venue plus DELEVERAGE_BUFFER_BPS, through the adapter's reduce-only
+    ///      path and its slippage bound. For REDEEM_GRACE after, the agent may only
+    ///      reduce exposure, so the freed cash waits for the allocator. Nothing is
+    ///      paid to the caller: the allocator who is owed the cash is the one who calls.
+    function deleverageForRedemption(address allocator) external nonReentrant returns (uint16 fractionBps) {
+        if (state != AgentState.Active) revert AgentNotActive();
+        RedeemRequest memory request = redeemRequestOf[allocator];
+        if (request.shares == 0) revert NoRedeemRequest();
+        uint256 dueAt = uint256(request.requestedAt) + REDEEM_NOTICE;
+        if (block.timestamp < dueAt) revert RedeemNoticePending(dueAt);
+        // Shares unwind()'s per-block slot: the two never run in the same state.
+        if (lastUnwindBlock == block.number) revert UnwindCooldown();
+        lastUnwindBlock = block.number;
+
+        _accrueFees();
+        (uint256 equity, uint256 markedAt) = markedAssets();
+        riskGuard.requireFreshMark(address(this), markedAt);
+        uint256 claim = Math.mulDiv(request.shares, equity, totalSupply);
+        uint256 cash = totalAssets();
+        if (claim <= cash) revert CashCoversRedeem();
+        if (equity <= cash) revert NothingToDeleverage();
+
+        uint256 bps = Math.mulDiv(claim - cash, 10_000 + DELEVERAGE_BUFFER_BPS, equity - cash, Math.Rounding.Ceil);
+        fractionBps = bps >= 10_000 ? 10_000 : uint16(bps);
+        (uint256 closedNotional, int256 realizedPnl) = venueAdapter.reduce(address(this), fractionBps);
+        if (closedNotional == 0) revert NothingToDeleverage();
+        riskLockedUntil = uint64(block.timestamp + REDEEM_GRACE);
+        emit DeleveragedForRedemption(allocator, msg.sender, fractionBps, closedNotional, realizedPnl);
+
+        // Re-mark as after any fill: the guard keeps its holding clock and drawdown
+        // current, and may freeze here if the exit itself crossed a limit.
+        riskGuard.checkAfter(address(this), address(venueAdapter));
     }
 
     /// @notice Charge the fees accrued since the last accrual. Permissionless.
@@ -406,5 +506,21 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
             emit Closed();
             closed = true;
         }
+    }
+
+    /// @dev Burned shares count against the caller's request first.
+    function _fillRequest(address allocator, uint256 shares) private {
+        uint256 requested = redeemRequestOf[allocator].shares;
+        if (requested == 0) return;
+        if (shares >= requested) delete redeemRequestOf[allocator];
+        else redeemRequestOf[allocator].shares = requested - shares;
+    }
+
+    /// @dev The guard's definition: more total exposure, or a crossing through flat.
+    function _addsRisk(address adapter, TradePreview memory expected) private view returns (bool) {
+        (, uint256 totalBefore) = IVenueAdapter(adapter).positionState(address(this));
+        return expected.expectedTotalNotional > totalBefore ||
+            (expected.currentSizeE18 > 0 && expected.resultingSizeE18 < 0) ||
+            (expected.currentSizeE18 < 0 && expected.resultingSizeE18 > 0);
     }
 }

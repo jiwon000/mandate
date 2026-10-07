@@ -344,6 +344,8 @@ async function refresh() {
             .then(([r, notice]) => ({ shares: r.shares, dueAt: r.shares === 0n ? 0 : Number(r.requestedAt + notice) }))
             .catch(() => null)
           : null;
+        // Every allocator's standing requests together, on vaults that keep the total.
+        const redeemRequested = vault.redeemSharesRequested ? await vault.redeemSharesRequested().catch(() => null) : null;
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
         const equity6 = mark[0];
         const equityE18 = equity6 * ASSET_TO_E18;
@@ -380,7 +382,8 @@ async function refresh() {
           stressMoveBps: Number(stress[1]),
           stressedDrawdownBps: Number(stress[2]),
           userShares: shares,
-          redeem
+          redeem,
+          redeemRequested
         };
       })
     );
@@ -891,6 +894,11 @@ function renderAgent() {
       pct(vault.stressedDrawdownBps),
       pct(vault.limits.maxDrawdownBps)
     ]);
+  }
+  // Redemption requests the agent has had notice of, against the cash that pays them.
+  if (vault.redeemRequested > 0n && vault.totalSupply > 0n) {
+    const owed6 = (vault.redeemRequested * vault.equity6) / vault.totalSupply;
+    rows.push(["Redemptions requested vs cash", Number(owed6), Number(vault.totalAssets), `${usdc(owed6)} mUSDC`, `${usdc(vault.totalAssets)} cash`]);
   }
   $("#agentLimits").innerHTML = rows
     .map(([label, used, limit, usedText, limitText]) => {

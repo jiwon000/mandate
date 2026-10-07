@@ -103,6 +103,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     ///         allocator's and keep earning or losing with the vault until withdrawn,
     ///         but they cannot be transferred while the request stands.
     mapping(address => RedeemRequest) public redeemRequestOf;
+    /// @notice The sum of every standing request: what the agent has been asked to
+    ///         keep payable in cash.
+    uint256 public redeemSharesRequested;
     /// @notice Until this time the agent may only reduce exposure.
     uint64 public riskLockedUntil;
 
@@ -381,12 +384,15 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         uint256 total = request.shares + shares;
         if (total > balanceOf[msg.sender]) revert InsufficientShares();
         request.shares = total;
+        redeemSharesRequested += shares;
         request.requestedAt = uint64(block.timestamp);
         emit RedeemRequested(msg.sender, total, block.timestamp + REDEEM_NOTICE);
     }
 
     function cancelRedeem() external {
-        if (redeemRequestOf[msg.sender].shares == 0) revert NoRedeemRequest();
+        uint256 requested = redeemRequestOf[msg.sender].shares;
+        if (requested == 0) revert NoRedeemRequest();
+        redeemSharesRequested -= requested;
         delete redeemRequestOf[msg.sender];
         emit RedeemCancelled(msg.sender);
     }
@@ -531,8 +537,13 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     function _fillRequest(address allocator, uint256 shares) private {
         uint256 requested = redeemRequestOf[allocator].shares;
         if (requested == 0) return;
-        if (shares >= requested) delete redeemRequestOf[allocator];
-        else redeemRequestOf[allocator].shares = requested - shares;
+        if (shares >= requested) {
+            redeemSharesRequested -= requested;
+            delete redeemRequestOf[allocator];
+        } else {
+            redeemSharesRequested -= shares;
+            redeemRequestOf[allocator].shares = requested - shares;
+        }
     }
 
     /// @dev The guard's definition: more total exposure, or a crossing through flat.

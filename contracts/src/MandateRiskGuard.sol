@@ -362,11 +362,6 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         // so a shock that landed since the last observation counts against it.
         VolState memory vol = _observePrice(vault, adapter, limits);
 
-        if (trade.orderNotional > limits.maxOrderNotional) revert OrderNotionalExceeded();
-        if (trade.expectedPositionNotional > limits.maxPositionNotional) revert PositionNotionalExceeded();
-        if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
-        if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
-
         // An order adds risk when it grows total exposure, and also when it crosses
         // through flat: the size on the new side is a fresh position opened at this mark,
         // even if it is no larger than the one it replaced.
@@ -374,6 +369,16 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         bool addsRisk = trade.expectedTotalNotional > totalNotional ||
             (trade.currentSizeE18 > 0 && trade.resultingSizeE18 < 0) ||
             (trade.currentSizeE18 < 0 && trade.resultingSizeE18 > 0);
+
+        if (trade.orderNotional > limits.maxOrderNotional) revert OrderNotionalExceeded();
+        // A price move can carry a position past its caps without any trade. Holding the
+        // order that shrinks it to the same caps would leave the agent able to get out
+        // only in one piece, so the three exposure caps bind orders that add risk.
+        if (addsRisk) {
+            if (trade.expectedPositionNotional > limits.maxPositionNotional) revert PositionNotionalExceeded();
+            if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
+            if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
+        }
         _checkTradeTerms(vault, trade, addsRisk);
         if (addsRisk) _checkReference(vault, adapter, trade);
 

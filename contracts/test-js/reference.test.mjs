@@ -243,3 +243,17 @@ test("a Closed vault pays out its cash even after the venue stops answering", as
   assert.equal(await s.vault.balanceOf(s.allocator.address), 0n);
   assert.ok(cash - (await s.usdc.balanceOf(s.vault.target)) > usd(990));
 });
+
+test("a price move past the position cap still lets the agent shrink the position in pieces", async (t) => {
+  const s = await setup(t, { reference: null });
+  await s.prices();
+  // 0.03 BTC at $60,000 is $1,800, inside the $2,000 position cap.
+  await s.wait(s.execute("0.03", "60600"));
+  // At $70,000 the same position is $2,100: over the cap without any trade.
+  await s.prices(700_000n, 700_000n);
+  // Selling a thousandth leaves $2,030, still over the cap, and passes because it shrinks.
+  await s.wait(s.execute("-0.001", "69300"));
+  assert.equal(await s.lots(), 2_900n);
+  // Buying it back adds exposure, so the cap binds it.
+  await assert.rejects(s.execute("0.001", "70700"), revertsWith(s.guard, "PositionNotionalExceeded"));
+});

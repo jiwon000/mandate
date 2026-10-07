@@ -9,15 +9,15 @@ let n = 0; const TOTAL = 14;
 function base(eyebrow, title) {
   const s = pres.addSlide(); n++;
   s.background = { color: C.bg };
-  if (eyebrow) s.addText(eyebrow, { x:X0, y:0.45, w:9, h:0.3, fontFace:F, fontSize:11, color:C.acc, charSpacing:1, margin:0, isTextBox:true });
-  if (title) s.addText(title, { x:X0, y:0.78, w:W-1.4, h:0.8, fontFace:F, bold:true, fontSize:32, color:C.text, margin:0, isTextBox:true });
+  if (eyebrow) s.addText(eyebrow, { lang:"ko-KR", x:X0, y:0.45, w:9, h:0.3, fontFace:F, fontSize:11, color:C.acc, charSpacing:1, margin:0, isTextBox:true });
+  if (title) s.addText(title, { lang:"ko-KR", x:X0, y:0.78, w:W-1.4, h:0.8, fontFace:F, bold:true, fontSize:32, color:C.text, margin:0, isTextBox:true });
   s.addText("MANDATE", { x:X0, y:7.0, w:3, h:0.25, fontFace:M, fontSize:9, color:C.dim, charSpacing:3, margin:0, isTextBox:true });
   s.addText(`${String(n).padStart(2,"0")} / ${TOTAL}`, { x:W-X0-2, y:7.0, w:2, h:0.25, fontFace:M, fontSize:9, color:C.dim, align:"right", margin:0, isTextBox:true });
   return s;
 }
 const card = (s, x, y, w, h, fill = C.panel, line = C.line) =>
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h, rectRadius:0.08, fill:{ color:fill }, line:{ color:line, width:0.75 } });
-const txt = (s, t, o) => s.addText(t, { fontFace:F, color:C.text, margin:0, isTextBox:true, valign:"top", ...o });
+const txt = (s, t, o) => s.addText(t, { fontFace:F, color:C.text, margin:0, isTextBox:true, lang:"ko-KR", valign:"top", ...o });
 const chip = (s, t, x, y, color = C.acc) => {
   const w = 0.12 + t.length * 0.085;
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h:0.3, rectRadius:0.06, fill:{ color:C.panel2 }, line:{ color, width:0.75 } });

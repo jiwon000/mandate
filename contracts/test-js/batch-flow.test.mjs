@@ -3,7 +3,7 @@ import test from "node:test";
 import hre from "hardhat";
 import { BrowserProvider, ContractFactory, ZeroHash } from "ethers";
 import { artifact, compileContracts } from "../tools/compiler.mjs";
-import { buildIntentTree, hashIntent, intentDomain, intentTypes } from "../tools/batch.mjs";
+import { buildIntentTree, hashIntent, intentDomain, intentTypes, recoverClaims } from "../tools/batch.mjs";
 
 const compiled = compileContracts();
 
@@ -271,4 +271,56 @@ test("spent nonces cannot be reused across vaults or later epochs", async (t) =>
   assert.equal(await f.batch.escrowOf(f.alice.address), 800n);
   assert.equal(await f.batch.settled(1), true);
   assert.equal(await f.batch.intentRootOf(0), first.root);
+});
+
+test("claims recover from the settleEpoch calldata alone, by tx hash or epoch", async (t) => {
+  const f = await fixture(t);
+  const { alice, bob, agent, vaults, batch, provider } = f;
+  const data = f.build([
+    await f.signed(alice, { amount: 101n }),
+    await f.signed(bob, { amount: 203n }),
+    await f.signed(alice, { vault: vaults[1].target, amount: 97n, nonce: 1n }),
+  ]);
+  await f.at(f.end);
+  const receipt = await f.settle(data);
+  const recovered = await recoverClaims(provider, batch.target, receipt.hash);
+  assert.deepEqual(recovered.map((c) => c.intent), data.intents);
+  assert.deepEqual(recovered.map((c) => c.proof), data.proofs);
+  assert.deepEqual(recovered.map((c) => c.claimed), [false, false, false]);
+  assert.deepEqual(await recoverClaims(provider, batch.target, 0), recovered);
+  await assert.rejects(recoverClaims(provider, batch.target, 1n), /found 0/);
+  // The recovered proofs are the ones that claim, and `claimed` follows the chain.
+  await (await batch.connect(agent).claimShares(recovered[1].intent, recovered[1].proof)).wait();
+  await (await batch.connect(agent).claimShares(recovered[0].intent, recovered[0].proof)).wait();
+  const after = await recoverClaims(provider, batch.target, receipt.hash);
+  assert.deepEqual(after.map((c) => c.claimed), [true, true, false]);
+  await (await batch.connect(agent).claimShares(after[2].intent, after[2].proof)).wait();
+  assert.equal(await vaults[1].balanceOf(alice.address), 97n);
+});
+
+test("recovery refuses what is not the settlement of this batch, or calldata that does not rebuild its root", async (t) => {
+  const f = await fixture(t);
+  const { alice, bob, vaults, batch, usdc, provider } = f;
+  const data = f.build([await f.signed(alice), await f.signed(bob, { nonce: 1n })]);
+  await f.at(f.end);
+  const receipt = await f.settle(data);
+  const unrelated = await (await usdc.mint(alice.address, 1n)).wait();
+  await assert.rejects(recoverClaims(provider, batch.target, unrelated.hash), /not sent to/);
+  await assert.rejects(recoverClaims(provider, vaults[0].target, receipt.hash), /not sent to/);
+  await assert.rejects(recoverClaims(provider, batch.target, ZeroHash), /not found/);
+  // Same transaction, but the calldata a node reports carries a changed amount.
+  const tx = await provider.getTransaction(receipt.hash);
+  const [epoch, root, nets] = batch.interface.decodeFunctionData("settleEpoch", tx.data);
+  const tampered = nets.map((net) => ({
+    vault: net.vault,
+    intents: net.intents.map((s, i) => ({
+      signature: s.signature, intent: i === 0 ? { ...s.intent.toObject(), amount: s.intent.amount + 1n } : s.intent,
+    })),
+  }));
+  const lying = {
+    getTransaction: async () => ({ to: tx.to, data: batch.interface.encodeFunctionData("settleEpoch", [epoch, root, tampered]) }),
+    getTransactionReceipt: (hash) => provider.getTransactionReceipt(hash),
+    getNetwork: () => provider.getNetwork(),
+  };
+  await assert.rejects(recoverClaims(lying, batch.target, receipt.hash), /does not match settled root/);
 });

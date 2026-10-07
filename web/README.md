@@ -90,7 +90,8 @@ On a live chain both are transactions the deployer pays for, so they are bounded
 hourly allowance of signed gas for the two together. Queued intents, claim proofs and
 the reporter's samples are held in memory; a restart or a reset drops them. Shares
 settled before a restart stay claimable on chain, but the proof has to be rebuilt from
-the `settleEpoch()` calldata, which the demo does not do.
+the `settleEpoch()` calldata; `npm run claims:recover -- <batch address> <tx hash | epoch>`
+prints them (read-only, no key).
 
 **Live Risk** — the control room:
 

@@ -544,6 +544,17 @@ npm run keeper:monad        # keeps the venue price fresh and calls poke() on ev
 
 The single-vault deploy configures the vault with `maxMarkAgeSeconds = 30` and locks its terms in the same run, so without a keeper every `execute`, `allocate` and `withdraw` starts reverting with `MarkTooOld` thirty seconds after deployment. The keeper walks the mock price inside a band and serves every vault in the deployment file it finds (`contracts/deployments.latest.json` first, then `web/deployments/<chainId>.json`, or `DEPLOYMENT_FILE`): `poke()` while a vault is `Active`, `observe()` once it is not, so a drawdown breach is caught and the volatility estimate stays fed. It accepts `DEPLOYER_PRIVATE_KEY` or `DEMO_MNEMONIC` (account 0), whichever owns the venue. Do not run it next to `web:live` on the same deployment: two oracles from one key fight over nonces. Never commit a private key or the mnemonic; `.env` is ignored.
 
+### Track record
+
+Allocators choose a vault by its locked terms; the chain also holds what the vault did under them. `npm run track-record` rebuilds that from events alone, with no indexer and no trusted server: every `Marked` the guard emitted (NAV per share and drawdown), the guard's breach events, and the vault's `Allocated`, `Withdrawn`, `Executed`, `FeesAccrued` and `Unwound`.
+
+```bash
+npm run track-record                                  # every vault in web/deployments/<chainId>.json
+npm run track-record -- 0x<vault> --from-block 68601000 --to-block 68601600 --table
+```
+
+It is read-only and needs no key. The RPC is `MONAD_RPC_URL` or `RPC_URL` (default `https://testnet-rpc.monad.xyz`); the guard, start block and vault list come from the deployment file for that chain. The output (JSON, or `--table`) has first and last mark time, NAV per share and return, the largest drawdown observed against the vault's locked `maxDrawdownBps`, the trade count, deposits, withdrawals and fees, each breach with its transaction hash, the current state, and a NAV series of at most 200 points. Monad testnet caps the block range of one `eth_getLogs` call and rate-limits, so logs are read in windows of 100 blocks (`--chunk`; a refused window is retried once as two halves). At about 0.4 s per block a day is over 200,000 blocks, so scan a range around what you care about with `--from-block` and `--to-block` rather than from the deployment's start block; totals only cover the scanned range. On the 2026-10-06 testnet book it shows Tight Mandate's `DrawdownBreach` of 424 bps against its 300 bps limit, in transaction `0x05995a48…78c1`. The summary math is a pure function (`summarize` in `contracts/tools/track-record.mjs`) tested separately from the fetching.
+
 See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
 
 ## AI tool disclosure

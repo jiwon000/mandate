@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms} from "./interfaces/IMandate.sol";
+import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms, ReferenceTerms} from "./interfaces/IMandate.sol";
 
 /// @notice Public catalog of registered mandates and the signed anchor point for
 ///         DP Reporter releases (mandate-technical-spec-v0.2.md 3.7).
@@ -208,9 +208,12 @@ contract MandateRegistry is Ownable, EIP712 {
     ) external {
         IRiskGuard riskGuard = _guardOf(vault);
         if (msg.sender != Ownable(address(riskGuard)).owner()) revert OnlyGuardOwner();
-        // The trade terms are read from the guard, so the caller only restates the
-        // limits and fees; a mismatch in either changes the hash.
-        bytes32 hash = keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees));
+        // The trade and reference terms are read from the guard, so the caller only
+        // restates the limits and fees; a mismatch in either changes the hash.
+        ReferenceTerms memory refTerms = riskGuard.referenceTermsOf(vault);
+        bytes32 hash = refTerms.maxMarkDeviationBps == 0
+            ? keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees))
+            : keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees, refTerms));
         if (hash != riskGuard.termsHash(vault)) revert TermsMismatch();
         _register(vault, riskGuard, adapter, fees, modelHash, hash, msg.sender);
     }

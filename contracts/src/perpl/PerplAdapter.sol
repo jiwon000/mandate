@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IVenueAdapter, IMandateVaultView, TradePreview} from "../interfaces/IMandate.sol";
+import {IVenueAdapter, IMandateVaultView, IReferencePriceSource, TradePreview} from "../interfaces/IMandate.sol";
 import {IPerplExchange} from "./IPerplExchange.sol";
 import {PerplSubaccount} from "./PerplSubaccount.sol";
 
@@ -29,7 +29,7 @@ import {PerplSubaccount} from "./PerplSubaccount.sol";
 ///      Funding counts in equity as Perpl reports it in each position's
 ///      premiumPnlCNS, the same term Perpl's SDK adds to delta PnL. Taker fees count
 ///      once Perpl takes them from the account or the position's margin.
-contract PerplAdapter is IVenueAdapter {
+contract PerplAdapter is IVenueAdapter, IReferencePriceSource {
     using SafeERC20 for IERC20;
 
     error OnlyVault();
@@ -191,6 +191,7 @@ contract PerplAdapter is IVenueAdapter {
             : keccak256(abi.encode(vault, marketId, sizeDeltaE18, limitPriceE18));
         p.marketId = marketId;
         p.resultingSizeE18 = resultingSize;
+        p.currentSizeE18 = size;
         p.limitPriceE18 = limitPriceE18;
         p.markPriceE18 = traded.markE18;
     }
@@ -246,6 +247,15 @@ contract PerplAdapter is IVenueAdapter {
     function marketPrice(uint256 marketId) external view returns (uint256 priceE18, uint256 markedAt) {
         Market memory m = _market(marketId);
         return (m.markE18, m.markedAt);
+    }
+
+    /// @inheritdoc IReferencePriceSource
+    /// @dev Perpl's oracle price for the market (oraclePNS, from its Chainlink feed)
+    ///      with the oracle's own timestamp. The mark is Perpl's own price; the oracle
+    ///      is the outside one it is compared with.
+    function referencePrice(uint256 marketId) external view returns (uint256 priceE18, uint256 updatedAt) {
+        IPerplExchange.PerpetualInfo memory info = exchange.getPerpetualInfoV2(perpIdOf(marketId));
+        return (info.oraclePNS * 10 ** (18 - info.priceDecimals), info.oracleTimestampSec);
     }
 
     // ---------------------------------------------------------------- trading

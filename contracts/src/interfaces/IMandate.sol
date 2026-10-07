@@ -58,6 +58,29 @@ struct TradeTerms {
     uint32 maxHoldingSeconds;
 }
 
+/// @notice A bound on how far the venue mark may sit from a second, independent price.
+/// @dev Every other term trusts the venue mark: drawdown, leverage and the stress test
+///      are all measured against it. A mark pushed away from the market (a thin book,
+///      a stuck feed, a venue bug) would make those measures wrong in the same
+///      direction at once. This term compares the mark with the adapter's reference
+///      price (on Perpl, its oracle price) and refuses orders that add exposure while
+///      the two disagree, or while the reference is older than its age limit. Orders
+///      that only take risk off still pass, for the same reason as the stress test.
+///      Kept out of RiskLimits and TradeTerms so neither layout, nor the termsHash of
+///      a vault that does not set it, changes. All zero turns it off.
+struct ReferenceTerms {
+    /// @notice Largest distance between the venue mark and the reference price, in bps.
+    uint16 maxMarkDeviationBps;
+    /// @notice Oldest reference price the guard accepts, in seconds.
+    uint32 maxReferenceAgeSeconds;
+}
+
+/// @notice A venue adapter that can quote a reference price next to its mark.
+interface IReferencePriceSource {
+    /// @notice The reference price for `marketId`, 1e18-scaled, and when it was set.
+    function referencePrice(uint256 marketId) external view returns (uint256 priceE18, uint256 updatedAt);
+}
+
 /// @notice Fees the vault charges, as part of the locked terms.
 /// @dev Charged by MandateVault by minting shares to the agent, never by moving
 ///      cash. The management fee accrues per second on marked equity while the vault
@@ -86,6 +109,9 @@ struct TradePreview {
     uint256 limitPriceE18;
     /// @notice The venue's mark for `marketId` when the order was previewed.
     uint256 markPriceE18;
+    /// @notice Signed position in `marketId` before the order, 1e18 units. With
+    ///         `resultingSizeE18` it tells the guard when an order crosses through flat.
+    int256 currentSizeE18;
 }
 
 interface IMandateVaultView {
@@ -126,7 +152,8 @@ interface IVenueAdapter {
     /// @dev Vault-only. The adapter derives the closing order from the position it can
     ///      see, so the caller never has to know the venue's units or direction. Fills
     ///      worse than the adapter's slippage bound against the current mark revert.
-    ///      `closedNotional` is what came off the book at the fill price.
+    ///      `closedNotional` is what came off the book, at the fill price on the mock
+    ///      venue and at the mark on Perpl.
     function reduce(address vault, uint16 fractionBps)
         external returns (uint256 closedNotional, int256 realizedPnl);
 
@@ -167,10 +194,14 @@ interface IRiskGuard {
     /// @notice True once the vault's limits and adapter allowlist can no longer change.
     function termsLocked(address vault) external view returns (bool);
 
-    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured terms.
+    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured
+    ///         terms, with the ReferenceTerms appended to the encoding when they are set.
     /// @dev What MandateRegistry.registerAgent() checks a caller's claimed terms
     ///      against, so a registry entry cannot disagree with the real terms.
     function termsHash(address vault) external view returns (bytes32);
+
+    /// @notice The vault's ReferenceTerms; all zero when the term is off.
+    function referenceTermsOf(address vault) external view returns (ReferenceTerms memory);
 
     /// @notice The vault's TradeTerms, as configured.
     function tradeTermsOf(address vault) external view returns (TradeTerms memory);

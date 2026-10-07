@@ -1,6 +1,6 @@
 # Perpl venue adapter
 
-Status 2026-10-06: `contracts/src/perpl/PerplAdapter.sol` is written. It has been tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). No Perpl-backed vault has been deployed to Monad testnet yet: that costs testnet MON and is a team decision. The hosted demo still runs on the deterministic MockVenue with mock USDC.
+Status 2026-10-07: `contracts/src/perpl/PerplAdapter.sol` is written and tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). It was deployed to Monad testnet on 2026-10-06 (addresses below), run once end to end, and then traded by a rule-based agent script in three short runs. The reference-price bound added on 2026-10-07 is not in that deployment. The hosted demo still runs on the deterministic MockVenue with mock USDC.
 
 ## Why Perpl
 
@@ -25,6 +25,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 - **The limit stays near the mark.** On an order book the limit is the price the vault may be filled at. With no bound, an agent could rest a far-off order from an account of its own and have the vault take it, moving the vault's money to itself in one fill. The guard's `maxPriceDeviationBps` covers this only when a mandate sets it, and 0 disables it. So the adapter has its own bound, `maxAdverseLimitBps`, set once at deployment and the same for every vault on it: a buy limit more than that above Perpl's mark, or a sell limit more than that below it, reverts `LimitTooFarFromMark` before any money moves. Only the costly side is bounded. The tests deploy with 300 (3%). It caps what one fill can move to an agent's own order, it does not remove it: within the band, self-dealing is still possible, and the mandate's own deviation term should be set tighter.
 - **Fills are all or nothing.** Orders are sent immediate-or-cancel and fill-or-kill at the agent's limit price. The vault then checks that the position Perpl reports matches what `preview()` promised and reverts the whole transaction otherwise, as it does for the mock venue.
 - **Equity at Perpl's mark.** `markEquity()` is the vault's cash, plus the free and locked balance of its Perpl account, plus each open position's margin, its price PnL at Perpl's mark and the funding Perpl has booked against it (`premiumPnlCNS`, the term Perpl's SDK adds to delta PnL). `markedAt` is the oldest `markTimestamp` among the markets held, or market 0's when flat. That is Perpl's clock, never `block.timestamp`.
+- **A second price to check the mark against.** `referencePrice(marketId)` returns Perpl's oracle price for the market (`oraclePNS`, scaled to 18 decimals) and its `oracleTimestampSec`. A mandate that sets the guard's optional reference terms has every exposure-adding order refused while the mark sits more than `maxMarkDeviationBps` from that price, or the price is older than `maxReferenceAgeSeconds`. Read over the testnet RPC on 2026-10-07, the BTC oracle price was 3 to 12 seconds old and under 1 bps from the mark. The contracts deployed on 2026-10-06 predate this.
 - **Unwind.** `reduce()` sends Perpl's reduce-only close orders, at most 1% through the mark, for the requested fraction of every open position. So an unwind step can never flip or grow a position. Close orders may fill in part. If Perpl refuses a market's order (paused, stale mark, no liquidity within 1%, a slice under its minimum), the adapter tries once more for the whole position and otherwise skips that market for this step. One stuck market never holds up the rest. Free collateral goes back to the vault after each step.
 - **Sweep.** Anyone may call `sweep(vault)`. It moves free collateral from the vault's Perpl account to the vault and nowhere else.
 
@@ -32,8 +33,8 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 
 `contracts/test-js/perpl-fork.test.mjs` forks Monad testnet in process and runs the full stack against Perpl's deployed exchange. Nothing is broadcast. The steps:
 
-1. A permissionless `createMandate` through `MandateFactory`, with aUSD as the asset.
-2. An allocation of 500 aUSD.
+1. A permissionless `createMandateWithReference` through `MandateFactory`, with aUSD as the asset and a reference bound of 100 bps and 60 seconds.
+2. An allocation of 500 aUSD, then a read of `referenceQuote`: Perpl's mark and oracle price are inside the bound.
 3. A 0.001 BTC long. Perpl records 100 lots, side long. The margin sits at Perpl, and equity stays within fees of 500.
 4. An order that would take the position past its $200 cap. The guard refuses it with `PositionNotionalExceeded` before Perpl sees it.
 5. A sell of 0.002 BTC with its limit 3% under the mark, the edge of the adapter's band. The position goes through flat into a 0.001 short, which Perpl records as side 1.
@@ -41,7 +42,7 @@ Testnet perpetual ids, read from `getPerpetualInfoV2`: BTC 16, ETH 32, SOL 48, M
 7. Unwind steps until the vault is `Closed`. The position at Perpl is zero and the Perpl account is empty.
 8. The allocator withdraws everything except the vault's `MIN_SHARES` dust.
 
-The test forks only at a block whose BTC mark is at most 10 seconds old, because the run spends about 25 of Perpl's 60 seconds. With that it passed ten runs in a row on 2026-10-06. Run it with:
+The test forks only at a block whose BTC mark and oracle price are both at most 20 seconds old, because the run spends about 25 of Perpl's 60 seconds. With a 10-second bar it passed ten runs in a row on 2026-10-06. On 2026-10-07 Perpl's testnet updated the mark and the oracle each about every 50 seconds, about 15 seconds apart, so the two were never both under 10 seconds and the test could not start; at 20 seconds it passed three runs in a row the same day. Run it with:
 
 ```bash
 npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.monad.xyz
@@ -70,7 +71,7 @@ npm run test:perpl            # PERPL_FORK_RPC overrides https://testnet-rpc.mon
 - **Contract accounts work.** A contract can create a Perpl account, trade as a taker and rest a post-only order. Verified on the fork, 2026-10-06. Perpl's ABI has a whitelist event, but it was not enforced on testnet that day.
 - **Taker orders need `maxNegPnlCollatBPS` above 0.** With 0, every immediate-or-cancel taker order reverted `TakerOrderSettlementFailed` with result code 14, from contracts and from plain accounts alike. The adapter sets it to 10000, so Perpl's own check never binds. The price bound is the agent's limit price, held within the adapter's `maxAdverseLimitBps` of the mark, plus the guard's `maxPriceDeviationBps` when the mandate sets it.
 - **Cost.** A 0.001 BTC round trip, open and close as a taker, cost about 0.07 aUSD on the fork.
-- **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds. A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
+- **Mark age.** Perpl refuses prices older than 60 seconds (`refPriceMaxAgeSec`). Ages measured over the testnet RPC were 1 to 31 seconds when sampled on 2026-10-06, and the agent script's 20 ticks that day saw ages from 2 to 50 seconds (`markAge` in `contracts/deployments/perpl-agent-10143.jsonl`). A mandate's `maxMarkAgeSeconds` should be 60, or close to it, on Perpl. A tighter value will see `MarkTooOld` between Perpl's updates.
 
 ## Testnet deployment
 
@@ -111,7 +112,7 @@ Deployed on Monad testnet (chain 10143) on 2026-10-06:
 
 - In all, 10 orders filled and 5 were refused. Each refusal is a mined transaction with status 0 and the guard's `PositionNotionalExceeded()`, sent with a 500k gas limit, for example `0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff`.
 - A fill used about 2.1M gas and cost about 0.22 MON at ~102 gwei.
-- This is about 1.5 hours of small trades, not sustained trading.
+- The three runs span 12:48 to 15:28 UTC, with the script ticking for about an hour of it. Small trades, not sustained trading.
 
 ## Limits
 
@@ -135,6 +136,6 @@ What has to be true before a Perpl-backed vault is deployed to Monad testnet, ho
 | Account minimum | `getMinAccountOpenCNS()`; docs say $100 on testnet, $10 on mainnet | Checked on the fork | Fund the vault above it before its first trade, or the trade reverts `BelowAccountMinimum` |
 | Margin mode | Docs: Perpl is restricted to isolated margin for now | Matches the adapter, which models isolated positions | Re-check equity and liquidation notes if Perpl enables cross margin |
 | Taker settlement | `maxNegPnlCollatBPS` above 0 | Set to 10000, checked on the fork | See Findings |
-| Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark is at most 10 s old | Use a longer mark-age term on Perpl than on the mock demo |
+| Mark freshness | `getPerpetualInfoV2().markTimestamp` within the mandate's `maxMarkAgeSeconds` | Fork forks only when the mark and oracle are at most 20 s old | Use a longer mark-age term on Perpl than on the mock demo |
 | Deploy key | A team member deploys with their own key; nothing in this repository holds one | Done: deployed 2026-10-06 | No deployment |
 | Team agreement | The team agrees to list the adapter on the factory | Done | Perpl stays fork-tested only |

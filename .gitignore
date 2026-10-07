@@ -16,3 +16,6 @@ contracts/deployments.latest.json
 .DS_Store
 # rehearsal deployments against a local node; real networks are committed
 web/deployments/31337.json
+# local agent workspace and generated wallets
+.claude/
+wallet.json

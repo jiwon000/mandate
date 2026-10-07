@@ -25,8 +25,10 @@ function* uniformStream(seed) {
     const digest = createHash("sha256").update(seed).update(counterBytes).digest();
     // 6 bytes (48 bits) of precision, read big-endian so every bit of the hash
     // output contributes -- ample for a Laplace sample and free of the bias a
-    // narrower read could introduce at the distribution's edges.
-    yield digest.readUIntBE(0, 6) / 2 ** 48;
+    // narrower read could introduce at the distribution's edges. The half-step
+    // offset keeps the draw strictly inside (0, 1), so the Laplace transform
+    // below never takes ln(0).
+    yield (digest.readUIntBE(0, 6) + 0.5) / 2 ** 48;
     counter += 1;
   }
 }

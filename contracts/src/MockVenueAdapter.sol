@@ -51,7 +51,8 @@ contract MockVenueAdapter is IVenueAdapter {
         if (sizeDeltaE18 == 0) revert ZeroOrder();
 
         uint256 price = venue.priceOf(marketId);
-        int256 resultingSize = venue.positionOf(vault, marketId) + sizeDeltaE18;
+        p.currentSizeE18 = venue.positionOf(vault, marketId);
+        int256 resultingSize = p.currentSizeE18 + sizeDeltaE18;
         p.orderNotional = Math.mulDiv(_abs(sizeDeltaE18), price, 1e18);
 
         uint256 count = venue.marketCount();

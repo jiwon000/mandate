@@ -1,6 +1,6 @@
 # Mandate lifecycle and terms: design
 
-Status: decisions confirmed 2026-10-05; items 2 to 4 of the order of work are implemented, and on 2026-10-06 items 6 to 8 and the stale-feed exit from item 9 followed, see "Implemented" below. Where a line says "today" it describes the code as of commit `2359347`, before that work. Item 5 and the cash-only withdrawal in item 9 are not implemented.
+Status: decisions confirmed 2026-10-05; items 2 to 4 of the order of work are implemented, and on 2026-10-06 items 6 to 8 and the stale-feed exit from item 9 followed, see "Implemented" below. Where a line says "today" it describes the code as of commit `2359347`, before that work. Item 5 is not implemented; the cash-only withdrawal in item 9 followed as `withdrawUnpriced()`.
 
 This note answers three questions together, because they share one answer: what makes a vault freeze, who sets the freeze threshold, and what happens after a freeze. It also sets the structure for adding more kinds of terms later.
 
@@ -83,7 +83,7 @@ Planned for after the hackathon; 6 to 8 were brought forward on 2026-10-06:
 6. Done 2026-10-06. Factory and permissionless registration (roadmap 15).
 7. Done 2026-10-06. Fee deduction with the freeze rules above.
 8. Built 2026-10-06, verified on a fork, then deployed to testnet and run once from allocation to withdrawal. Perpl adapter (roadmap 16), see [`perpl-adapter.md`](perpl-adapter.md). Revisiting the unwind schedule against real fills still needs sustained trading on the deployed vault. Perpl liquidates an isolated position whose margin runs out. The adapter does not model that: the drawdown term is meant to freeze the vault first.
-9. Partly done. A vault whose feed stops can now be frozen by anyone, unwound in five steps and then withdrawn from without a mark, because `Closed` needs none. The cash-only withdrawal while unobservable is not built. On Perpl this route also stops while the feed is stale, because Perpl refuses orders against a stale mark.
+9. Done. A vault whose feed stops can now be frozen by anyone, unwound in five steps and then withdrawn from without a mark, because `Closed` needs none. Meanwhile `withdrawUnpriced()` pays the caller's cash share, capped at the last mark. On Perpl this route also stops while the feed is stale, because Perpl refuses orders against a stale mark.
 
 ## Implemented
 
@@ -114,7 +114,7 @@ Confirmed by the team on 2026-10-05.
 | Value | Range | Demo mandates today | Reason |
 |---|---|---|---|
 | `maxDrawdownBps` | above 0, at most 5000 (50%) | 300, 800, 1200, 2000 | Past half the capital a cap no longer reads as a loss bound. No floor: a tight cap is the registrant's choice and the allocator sees it before funding. |
-| `maxMarkAgeSeconds` | above 0, at most 60 | 4, 30, 30, 60 | The guarantee is a cap checked against a recent price. Perpl's index price updates every 1 to 5 seconds, so 60 leaves room for slow markets without turning the check into a minute-scale one. |
+| `maxMarkAgeSeconds` | above 0, at most 60 | 4, 30, 30, 60 | The guarantee is a cap checked against a recent price. Perpl's own limit is 60 seconds, and its testnet mark was 1 to 50 seconds old when sampled on 2026-10-06, so on Perpl 60 is the working value, not a generous one. |
 | Unobservable after | 3 x `maxMarkAgeSeconds` | 12 to 180 seconds | One missed update is noise; three in a row means the feed is not arriving. A fixed multiple keeps the rule proportional to what the registrant promised. |
 
 One consequence for the hosted demo, decided 2026-10-05 (keep the idle interval; accept that an idle vault can be frozen and reset): its oracle marks every 5 seconds while someone is watching and, when nobody is, every `ORACLE_IDLE_SECONDS` (300 by default, 3600 on the hosted demo since 2026-10-05). Once the demo is redeployed on these contracts, anyone could freeze an idle demo vault a few minutes after the last visitor leaves; the demo server itself never calls `freezeUnobservable`. With the Perpl adapter the venue keeps its own index fresh and this goes away. Marking within the shortest window (30 seconds for the live demo's 10-second mandate) whether or not anyone is watching would cost about 16 MON a day, so the demo keeps its idle interval and lets the existing auto-redeploy reset any vault frozen this way.

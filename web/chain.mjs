@@ -284,7 +284,12 @@ export async function startChain() {
       for (const key of ["allocator", "vault", "amount", "minShares", "epoch", "nonce", "deadline"]) {
         if (intent[key] === undefined || intent[key] === null) throw new HttpError(`intent missing ${key}`);
       }
-      const recovered = verifyTypedData(batchDomain, intentTypes, intent, signature);
+      let recovered;
+      try {
+        recovered = verifyTypedData(batchDomain, intentTypes, intent, signature);
+      } catch {
+        throw new HttpError("malformed intent or signature");
+      }
       if (recovered.toLowerCase() !== String(intent.allocator).toLowerCase()) {
         throw new HttpError("signature does not match intent.allocator");
       }

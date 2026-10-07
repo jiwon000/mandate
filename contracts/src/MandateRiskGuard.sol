@@ -11,6 +11,8 @@ import {
     RiskLimits,
     TradeTerms,
     FeeTerms,
+    ReferenceTerms,
+    IReferencePriceSource,
     TradePreview
 } from "./interfaces/IMandate.sol";
 
@@ -53,6 +55,13 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     error DirectionNotAllowed(int256 resultingSizeE18);
     error PriceDeviationExceeded(uint256 deviationBps);
     error DailyTradesExceeded();
+    /// @dev Reference terms out of range: a deviation above 10,000 bps, or an age that
+    ///      is zero or above MAX_MARK_AGE_CAP while the deviation bound is set.
+    error InvalidReferenceTerms();
+    /// @dev The vault's adapter cannot quote a reference price for the vault's market.
+    error NoReferencePrice(address adapter);
+    error MarkDeviationExceeded(uint256 deviationBps);
+    error ReferenceTooOld(uint256 updatedAt, uint256 maxAge);
 
     /// @dev NAV per share is scaled so a freshly funded vault starts at exactly 1e18.
     uint256 private constant ONE = 1e18;
@@ -133,6 +142,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => FreezeRecord) private freezeRecordOf;
     mapping(address => TradeTerms) private tradeTerms;
     mapping(address => FeeTerms) private fees;
+    mapping(address => ReferenceTerms) private referenceTerms;
     mapping(address => DayState) public dayOf;
     mapping(address => TradeCount) public tradesOf;
     /// @notice When the vault last went from flat to holding a position; 0 while flat.
@@ -147,6 +157,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     event DailyLossBreach(address indexed vault, address indexed caller, uint256 navPerShare, uint256 lossBps, uint256 bounty);
     event HoldingTimeBreach(address indexed vault, address indexed caller, uint256 openedAt, uint256 bounty);
     event FeeRebased(address indexed vault, uint256 supplyBefore, uint256 supplyAfter);
+    event ReferenceTermsSet(address indexed vault, uint16 maxMarkDeviationBps, uint32 maxReferenceAgeSeconds);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
     event TermsLocked(address indexed vault, bytes32 termsHash);
     event RiskConsumed(address indexed vault, bytes32 indexed orderHash, uint256 notional);
@@ -232,6 +243,37 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         emit LimitsConfigured(vault);
     }
 
+    /// @notice Bound the venue mark against the adapter's reference price. Optional, and
+    ///         like every other term it can only be set before the terms are locked.
+    /// @dev The vault's own adapter must answer `referencePrice` with a set price for
+    ///      every allowed market now; an adapter that cannot (MockVenueAdapter), or a
+    ///      market whose oracle was never set, is refused here rather than at the first
+    ///      order. Setting all zero clears the term.
+    function setReferenceTerms(address vault, ReferenceTerms calldata r) external onlyOwnerOrFactory {
+        if (termsLocked[vault]) revert LimitsLocked();
+        if (!configured[vault]) revert LimitsNotConfigured();
+        if (r.maxMarkDeviationBps == 0) {
+            if (r.maxReferenceAgeSeconds != 0) revert InvalidReferenceTerms();
+        } else {
+            if (
+                r.maxMarkDeviationBps > 10_000 ||
+                r.maxReferenceAgeSeconds == 0 || r.maxReferenceAgeSeconds > MAX_MARK_AGE_CAP
+            ) revert InvalidReferenceTerms();
+            address adapter = IMandateVaultView(vault).venueAdapter();
+            uint32 allowed = tradeTerms[vault].allowedMarkets;
+            for (uint256 id; id < 32; ++id) {
+                if ((allowed >> id) & 1 == 0) continue;
+                try IReferencePriceSource(adapter).referencePrice(id) returns (uint256 price, uint256 updatedAt) {
+                    if (price == 0 || updatedAt == 0) revert NoReferencePrice(adapter);
+                } catch {
+                    revert NoReferencePrice(adapter);
+                }
+            }
+        }
+        referenceTerms[vault] = r;
+        emit ReferenceTermsSet(vault, r.maxMarkDeviationBps, r.maxReferenceAgeSeconds);
+    }
+
     function setAdapter(address vault, address adapter, bool allowed) external onlyOwnerOrFactory {
         if (termsLocked[vault]) revert LimitsLocked();
         adapterAllowed[vault][adapter] = allowed;
@@ -250,9 +292,34 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         emit TermsLocked(vault, termsHash(vault));
     }
 
-    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)): every term the vault runs under.
+    /// @notice keccak256(abi.encode(limits, tradeTerms, fees)): every term the vault runs
+    ///         under. A vault with reference terms appends them to the encoding, so the
+    ///         hash of a vault without them is unchanged.
     function termsHash(address vault) public view returns (bytes32) {
-        return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault]));
+        ReferenceTerms memory r = referenceTerms[vault];
+        if (r.maxMarkDeviationBps == 0) {
+            return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault]));
+        }
+        return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault], r));
+    }
+
+    function referenceTermsOf(address vault) external view returns (ReferenceTerms memory) {
+        return referenceTerms[vault];
+    }
+
+    /// @notice The venue mark, the reference price, the reference's timestamp and the
+    ///         distance between the two in bps, for the vault's market, as the order
+    ///         check would read them now. Reverts if the adapter has no reference price.
+    function referenceQuote(address vault)
+        external
+        view
+        returns (uint256 markE18, uint256 referenceE18, uint256 updatedAt, uint256 deviationBps)
+    {
+        IVenueAdapter adapter = IVenueAdapter(IMandateVaultView(vault).venueAdapter());
+        uint256 marketId = _referenceMarket(tradeTerms[vault].allowedMarkets);
+        (markE18,) = adapter.marketPrice(marketId);
+        (referenceE18, updatedAt) = IReferencePriceSource(address(adapter)).referencePrice(marketId);
+        deviationBps = _deviationBps(markE18, referenceE18);
     }
 
     /// @inheritdoc IRiskGuard
@@ -295,14 +362,25 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         // so a shock that landed since the last observation counts against it.
         VolState memory vol = _observePrice(vault, adapter, limits);
 
-        if (trade.orderNotional > limits.maxOrderNotional) revert OrderNotionalExceeded();
-        if (trade.expectedPositionNotional > limits.maxPositionNotional) revert PositionNotionalExceeded();
-        if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
-        if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
-
+        // An order adds risk when it grows total exposure, and also when it crosses
+        // through flat: the size on the new side is a fresh position opened at this mark,
+        // even if it is no larger than the one it replaced.
         (, uint256 totalNotional) = IVenueAdapter(adapter).positionState(vault);
-        bool addsRisk = trade.expectedTotalNotional > totalNotional;
+        bool addsRisk = trade.expectedTotalNotional > totalNotional ||
+            (trade.currentSizeE18 > 0 && trade.resultingSizeE18 < 0) ||
+            (trade.currentSizeE18 < 0 && trade.resultingSizeE18 > 0);
+
+        if (trade.orderNotional > limits.maxOrderNotional) revert OrderNotionalExceeded();
+        // A price move can carry a position past its caps without any trade. Holding the
+        // order that shrinks it to the same caps would leave the agent able to get out
+        // only in one piece, so the three exposure caps bind orders that add risk.
+        if (addsRisk) {
+            if (trade.expectedPositionNotional > limits.maxPositionNotional) revert PositionNotionalExceeded();
+            if (trade.expectedTotalNotional > limits.maxTotalNotional) revert TotalNotionalExceeded();
+            if (trade.expectedLeverageX100 > limits.maxLeverageX100) revert LeverageExceeded();
+        }
         _checkTradeTerms(vault, trade, addsRisk);
+        if (addsRisk) _checkReference(vault, adapter, trade);
 
         // Pre-trade stress test, only for orders that add exposure. An order that takes
         // risk off is never refused here, whatever the market is doing: in a spike the
@@ -357,6 +435,27 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
             if (count >= t.maxTradesPerDay) revert DailyTradesExceeded();
             tradesOf[vault] = TradeCount(today, count + 1);
         }
+    }
+
+    /// @dev Exposure-adding orders only, as with the stress test: when the mark cannot
+    ///      be trusted the agent should still be able to get smaller. An adapter without
+    ///      a reference price makes this revert, so the term fails closed.
+    function _checkReference(address vault, address adapter, TradePreview calldata trade) private view {
+        ReferenceTerms memory r = referenceTerms[vault];
+        if (r.maxMarkDeviationBps == 0) return;
+        (uint256 ref, uint256 updatedAt) = IReferencePriceSource(adapter).referencePrice(trade.marketId);
+        if (block.timestamp > updatedAt + r.maxReferenceAgeSeconds) {
+            revert ReferenceTooOld(updatedAt, r.maxReferenceAgeSeconds);
+        }
+        uint256 deviationBps = _deviationBps(trade.markPriceE18, ref);
+        if (deviationBps > r.maxMarkDeviationBps) revert MarkDeviationExceeded(deviationBps);
+    }
+
+    /// @dev Distance of `price` from `ref` in bps of `ref`; no reference reads as infinitely far.
+    function _deviationBps(uint256 price, uint256 ref) private pure returns (uint256) {
+        if (ref == 0) return type(uint256).max;
+        uint256 diff = price > ref ? price - ref : ref - price;
+        return Math.mulDiv(diff, 10_000, ref);
     }
 
     /// @notice Re-mark a vault and freeze it if the drawdown limit is breached.

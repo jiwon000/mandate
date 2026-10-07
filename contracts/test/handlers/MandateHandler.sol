@@ -146,7 +146,10 @@ contract MandateHandler is Test {
         int256 resultingSize = currentSize + sizeDeltaE18;
         uint256 totalBefore = (_abs(currentSize) * price) / 1e18;
         uint256 totalAfter = (_abs(resultingSize) * price) / 1e18;
-        bool reduceOnly = totalAfter <= totalBefore;
+        // Crossing through flat opens a new position on the other side, so the guard
+        // treats it as added exposure even when the total does not grow.
+        bool flips = (currentSize > 0 && resultingSize < 0) || (currentSize < 0 && resultingSize > 0);
+        bool reduceOnly = totalAfter <= totalBefore && !flips;
 
         MandateVault.AgentState stateBefore = vault.state();
         vm.prank(agent);

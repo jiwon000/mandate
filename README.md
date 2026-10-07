@@ -487,23 +487,21 @@ How the server keeps itself safe on a public URL:
 
 ### Recorded run on Monad testnet
 
-The book below was deployed to Monad testnet (chain 10143) by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684` on 2026-10-06 04:18 UTC and is the one the hosted demo is currently running. It is the first book with the marketplace contracts: `MandateFactory` for permissionless registration, trade terms and fees enforced by the guard and vault, and several markets per venue, on top of the 2026-10-05 freeze rules (see [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)). Vaults that anyone launches through the factory are listed by `MandateFactory.vaultsFrom()` rather than in this table. It supersedes the earlier books on older contracts, the last of them the 2026-10-05 09:47 UTC book, and the 2026-10-04 book the walkthrough below was recorded against. A restart finds the newest book on chain by walking the owner's own transaction history rather than trusting a committed file, so it does not redeploy on its own.
-
-This book predates the 2026-10-07 contract changes: the reference-price bound (`ReferenceTerms`), exposure caps that bind only orders adding risk, the four fixes from the adversarial review, and the freeze tiers (daily-loss pause, resumable unobservable freeze). Those are in the repository and its test suites; the contracts at the addresses below do not have them. They reach the chain with the next `Reset demo`, which deploys a new book from the current source and replaces this table's addresses.
+The book below was deployed to Monad testnet (chain 10143) by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684` on 2026-10-07 04:30 UTC and is the one the hosted demo is currently running. It is the first book with the 2026-10-07 contract changes: the reference-price bound (`ReferenceTerms`, left at zero on the mock venue), exposure caps that bind only orders adding risk, the fixes from the adversarial reviews, the freeze tiers (daily-loss pause, resumable unobservable freeze) and the redemption queue, on top of the marketplace contracts (`MandateFactory`, trade terms and fees, several markets per venue; see [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)). Vaults that anyone launches through the factory are listed by `MandateFactory.vaultsFrom()` rather than in this table. It supersedes the earlier books on older contracts, the last of them the 2026-10-06 04:18 UTC marketplace book, and the 2026-10-04 book the walkthrough below was recorded against. A restart finds the newest book on chain by walking the owner's own transaction history rather than trusting a committed file, so it does not redeploy on its own.
 
 | Contract | Address |
 | --- | --- |
-| MockUSDC | [`0xf30eBc7C2F74A1eA0270Ab4f05AA7D267Ad16Fc2`](https://testnet.monadscan.com/address/0xf30eBc7C2F74A1eA0270Ab4f05AA7D267Ad16Fc2) |
-| MandateRiskGuard | [`0xB0A208f93532457bF3293C961ed140E07C0aaC80`](https://testnet.monadscan.com/address/0xB0A208f93532457bF3293C961ed140E07C0aaC80) |
-| DeterministicMockVenue | [`0x58fc4454Ac11ABA5AdE06bb0d76A54a6dB5fa7eA`](https://testnet.monadscan.com/address/0x58fc4454Ac11ABA5AdE06bb0d76A54a6dB5fa7eA) |
-| MockVenueAdapter | [`0xB837E7E85134b1e2897725be30c0A95E3f1B6E0e`](https://testnet.monadscan.com/address/0xB837E7E85134b1e2897725be30c0A95E3f1B6E0e) |
-| MandateFactory | [`0xa616314B13C636e728D705bcd2EcE867398B8Fa0`](https://testnet.monadscan.com/address/0xa616314B13C636e728D705bcd2EcE867398B8Fa0) |
-| MandateVault · Steady Basis | [`0x2597755019aa8cA237BEF67cb9d2D3e296a978ff`](https://testnet.monadscan.com/address/0x2597755019aa8cA237BEF67cb9d2D3e296a978ff) |
-| MandateVault · Range Carry | [`0xF9343F59e7922387039F8b3A907e340FD35EB71b`](https://testnet.monadscan.com/address/0xF9343F59e7922387039F8b3A907e340FD35EB71b) |
-| MandateVault · Momentum Vector | [`0xdb1f4bDA5f1885f2e1Fe86e77474C7A9E4358412`](https://testnet.monadscan.com/address/0xdb1f4bDA5f1885f2e1Fe86e77474C7A9E4358412) |
-| MandateVault · Tight Mandate | [`0xac0B02595ccc91d44D44cdD338629815E3413904`](https://testnet.monadscan.com/address/0xac0B02595ccc91d44D44cdD338629815E3413904) |
-| BatchAllocator | [`0x55B082EC7c04daF546bCb9b91C07c02680fd601E`](https://testnet.monadscan.com/address/0x55B082EC7c04daF546bCb9b91C07c02680fd601E) |
-| MandateRegistry | [`0x431fd7097dBfa2808270D9de9f7A0ceF136d1435`](https://testnet.monadscan.com/address/0x431fd7097dBfa2808270D9de9f7A0ceF136d1435) |
+| MockUSDC | [`0x2960c0D0d257E4b5eB94e201362800883680aA5B`](https://testnet.monadscan.com/address/0x2960c0D0d257E4b5eB94e201362800883680aA5B) |
+| MandateRiskGuard | [`0x417FA8c63736aB3b7F9D887377BE04e35499198E`](https://testnet.monadscan.com/address/0x417FA8c63736aB3b7F9D887377BE04e35499198E) |
+| DeterministicMockVenue | [`0x1E4eC2064170d828Bf607f0943d7a664d9868C53`](https://testnet.monadscan.com/address/0x1E4eC2064170d828Bf607f0943d7a664d9868C53) |
+| MockVenueAdapter | [`0x41A98f3a19EDd0807223AE2335519D87Dd6CBc19`](https://testnet.monadscan.com/address/0x41A98f3a19EDd0807223AE2335519D87Dd6CBc19) |
+| MandateFactory | [`0xb16629791b69a4C05fC3C80216CAF918425461Fa`](https://testnet.monadscan.com/address/0xb16629791b69a4C05fC3C80216CAF918425461Fa) |
+| MandateVault · Steady Basis | [`0x8A0B0e47f068a88E96E3E2c3bdfB9F7b079D52e5`](https://testnet.monadscan.com/address/0x8A0B0e47f068a88E96E3E2c3bdfB9F7b079D52e5) |
+| MandateVault · Range Carry | [`0x0763eC0323E73832590Dd92fA7817bc7860c7726`](https://testnet.monadscan.com/address/0x0763eC0323E73832590Dd92fA7817bc7860c7726) |
+| MandateVault · Momentum Vector | [`0x793Beb051457806808CF827CC653A67Dda3Aa141`](https://testnet.monadscan.com/address/0x793Beb051457806808CF827CC653A67Dda3Aa141) |
+| MandateVault · Tight Mandate | [`0x9eFc7658f94c1B8B6b9FadF02B701cF05eDFDaf4`](https://testnet.monadscan.com/address/0x9eFc7658f94c1B8B6b9FadF02B701cF05eDFDaf4) |
+| BatchAllocator | [`0xA47F468dfcd48fFdCb2151Bb2B2E3F7820eABC0a`](https://testnet.monadscan.com/address/0xA47F468dfcd48fFdCb2151Bb2B2E3F7820eABC0a) |
+| MandateRegistry | [`0x38c21EC85EacF2a7737Dfc10c6cdf900911c8c9D`](https://testnet.monadscan.com/address/0x38c21EC85EacF2a7737Dfc10c6cdf900911c8c9D) |
 
 The walkthrough below predates this table: it was recorded against the 2026-10-04 predecessor book, before that book was replaced by the restarts described above. The addresses it names are no longer live, but the mechanisms it exercised (order limits, price-shock freeze, frozen-vault rejection, `unwind()`) are the same contract code running in the book above, so the run is kept as evidence of behavior rather than of these specific addresses.
 

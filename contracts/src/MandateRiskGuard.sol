@@ -84,6 +84,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice After an unobservable freeze, unwind() waits this long. If the feed comes
     ///         back inside it and every limit holds, anyone can resume() the vault.
     uint256 public constant UNOBSERVABLE_RECOVERY = 15 minutes;
+    /// @notice An unobservable freeze this soon after a resume pays no bounty. A feed
+    ///         that keeps dropping out would otherwise pay one out of the vault's cash
+    ///         on every lapse; the freeze itself still happens.
+    uint256 public constant REFREEZE_BOUNTY_COOLDOWN = 1 days;
 
     /// @notice Yearly management fee cap, in bps.
     uint16 public constant MAX_MANAGEMENT_FEE_BPS = 500;
@@ -159,6 +163,8 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice The UTC day (timestamp / 1 days) on which a mark last found the vault
     ///         past its daily loss cap. Adding risk is refused for the rest of that day.
     mapping(address => uint64) public pausedDayOf;
+    /// @notice When resume() last put the vault back to work; 0 if it never has.
+    mapping(address => uint64) public resumedAt;
 
     /// @notice The one MandateFactory allowed to configure and lock vaults it deploys.
     ///         Set once by the owner.
@@ -525,7 +531,9 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         } catch {}
         uint256 after_ = markedAt + uint256(limitsOf[vault].maxMarkAgeSeconds) * UNOBSERVABLE_MARK_AGES;
         if (block.timestamp <= after_) revert StillObservable(markedAt, after_);
-        bounty = _freeze(vault, REASON_UNOBSERVABLE, msg.sender);
+        uint256 resumed = resumedAt[vault];
+        address beneficiary = resumed != 0 && block.timestamp < resumed + REFREEZE_BOUNTY_COOLDOWN ? address(0) : msg.sender;
+        bounty = _freeze(vault, REASON_UNOBSERVABLE, beneficiary);
         emit Unobservable(vault, msg.sender, markedAt, bounty);
     }
 
@@ -545,7 +553,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     /// @notice Put a vault frozen for having no fresh mark back to work once it has one.
     /// @dev The second tier. An unobservable freeze says nothing about the agent: the
     ///      feed stopped. So it leaves UNOBSERVABLE_RECOVERY before unwind() may start,
-    ///      and inside it anyone may call this. It re-marks against the vault's own
+    ///      and until the first unwind step anyone may call this. It re-marks against the vault's own
     ///      adapter and reverts unless every limit holds on that mark, measured from the
     ///      same high-water mark as before: the terms do not reset. Drawdown and holding
     ///      time freezes are the third tier and never come back; the agent's own record
@@ -557,6 +565,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         address adapter = IMandateVaultView(vault).venueAdapter();
         IMandateVaultFreeze(vault).resume();
         if (_markAndCheck(vault, adapter, address(0))) revert StillBreached();
+        resumedAt[vault] = uint64(block.timestamp);
         (uint256 equity,) = IVenueAdapter(adapter).markEquity(vault);
         uint256 supply = IMandateVaultView(vault).totalSupply();
         emit Resumed(vault, msg.sender, supply == 0 ? ONE : Math.mulDiv(equity, ONE, supply));

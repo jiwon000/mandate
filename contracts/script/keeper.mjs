@@ -159,5 +159,12 @@ function onTickError(error) {
 
 await tick();
 if (!KEEPER_ONCE) {
-  setInterval(() => tick().catch(onTickError), intervalMs);
+  // A slow tick on a rate-limited RPC must not overlap the next one: two ticks
+  // would both pass the same staticCalls and send the same transaction twice.
+  let busy = false;
+  setInterval(() => {
+    if (busy) return;
+    busy = true;
+    tick().catch(onTickError).finally(() => { busy = false; });
+  }, intervalMs);
 }

@@ -406,6 +406,9 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     ///      path and its slippage bound. For REDEEM_GRACE after, the agent may only
     ///      reduce exposure, so the freed cash waits for the allocator. Nothing is
     ///      paid to the caller: the allocator who is owed the cash is the one who calls.
+    ///      The request's notice then starts again, so one request forces at most one
+    ///      step per REDEEM_NOTICE: a request nobody withdraws against cannot keep
+    ///      taking the agent's position off.
     function deleverageForRedemption(address allocator) external nonReentrant returns (uint16 fractionBps) {
         if (state != AgentState.Active) revert AgentNotActive();
         RedeemRequest memory request = redeemRequestOf[allocator];
@@ -429,6 +432,7 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         (uint256 closedNotional, int256 realizedPnl) = venueAdapter.reduce(address(this), fractionBps);
         if (closedNotional == 0) revert NothingToDeleverage();
         riskLockedUntil = uint64(block.timestamp + REDEEM_GRACE);
+        redeemRequestOf[allocator].requestedAt = uint64(block.timestamp);
         emit DeleveragedForRedemption(allocator, msg.sender, fractionBps, closedNotional, realizedPnl);
 
         // Re-mark as after any fill: the guard keeps its holding clock and drawdown

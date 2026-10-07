@@ -47,6 +47,9 @@ test("a due request takes enough of the position off for the allocator to leave 
   // Part of the position, not all of it: about half closes, with the buffer.
   assert.ok(lotsAfter > 0n && lotsAfter < lotsBefore, `lots ${lotsBefore} -> ${lotsAfter}`);
   assert.ok(lotsAfter > lotsBefore / 3n, `closed more than needed: ${lotsAfter}`);
+  // The step restarts the request's notice: it cannot be forced again tomorrow-minus-a-block.
+  await s.fresh();
+  await assert.rejects(vault.connect(keeper).deleverageForRedemption(allocator.address), revertsWith(vault, "RedeemNoticePending"));
 
   // For the grace period the agent may reduce but not add.
   await s.fresh();

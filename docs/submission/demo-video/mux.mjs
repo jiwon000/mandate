@@ -13,7 +13,7 @@ const work = `mux-${lang}`;
 fs.rmSync(work, { recursive: true, force: true });
 fs.mkdirSync(work);
 
-const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
+const browser = await chromium.launch({ executablePath: process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 await page.setContent(`<html><body style="margin:0;background:transparent"><div id="c" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);max-width:1100px;padding:9px 16px;border-radius:8px;background:rgba(6,9,16,.86);color:#f4f6fb;font:600 22px/1.4 'Apple SD Gothic Neo',Inter,system-ui,sans-serif;text-align:center"></div></body></html>`);
 for (const [i, list] of chunks.entries())
@@ -41,11 +41,17 @@ for (const seg of segs) {
   const list = chunks[i];
   const inputs = ["-ss", start.toFixed(3), "-to", end.toFixed(3), "-i", from ?? video, "-i", audio];
   let chain = `[0:v]setpts=(PTS-STARTPTS)/${speed},fps=30[v0]`;
+  // Each caption image is looped for its time on screen. The first of a scene
+  // fades in and the last fades out; the ones between swap text in place.
+  const FADE = 0.2;
   list.forEach((c, k) => {
-    inputs.push("-i", `${work}/c${i}-${k}.png`);
     const from = 0.3 + c.at;
     const to = k + 1 < list.length ? 0.3 + list[k + 1].at : aEnd;
-    chain += `;[v${k}][${k + 2}:v]overlay=0:0:enable='between(t,${from.toFixed(2)},${to.toFixed(2)})'[v${k + 1}]`;
+    inputs.push("-loop", "1", "-t", to.toFixed(2), "-i", `${work}/c${i}-${k}.png`);
+    let cap = `[${k + 2}:v]format=rgba,setpts=PTS-STARTPTS`;
+    if (k === 0) cap += `,fade=t=in:st=${from.toFixed(2)}:d=${FADE}:alpha=1`;
+    if (k === list.length - 1) cap += `,fade=t=out:st=${(to - FADE).toFixed(2)}:d=${FADE}:alpha=1`;
+    chain += `;${cap}[c${k}];[v${k}][c${k}]overlay=0:0:eof_action=pass:enable='between(t,${from.toFixed(2)},${to.toFixed(2)})'[v${k + 1}]`;
   });
   const vOut = `[v${list.length}]`;
   const enc = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"];

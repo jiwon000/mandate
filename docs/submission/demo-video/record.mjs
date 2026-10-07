@@ -30,7 +30,11 @@ async function retry(f, n = 4) {
     }
   }
 }
-const wallet = new Wallet(JSON.parse(fs.readFileSync(KEY_FILE, "utf8"))[0].private_key, rpc);
+// Either a list of {private_key} or one {privateKey} object.
+const keyJson = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"));
+const wallet = new Wallet(Array.isArray(keyJson) ? keyJson[0].private_key : keyJson.privateKey, rpc);
+// The factory of the book the page is serving; a reset deploys a new one.
+const FACTORY = (await (await fetch(new URL("api/deployment", BASE))).json()).addresses.factory.toLowerCase();
 const chainHex = "0x" + (await rpc.getNetwork()).chainId.toString(16);
 const sent = [];
 
@@ -38,12 +42,16 @@ const OVERLAY = () => {
   if (document.getElementById("__cur")) return;
   const css = document.createElement("style");
   css.textContent = `
-  #__cur{position:fixed;z-index:2147483647;width:22px;height:22px;pointer-events:none;transition:left .55s cubic-bezier(.3,.7,.2,1),top .55s cubic-bezier(.3,.7,.2,1);left:640px;top:360px}
-  #__cur svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
-  .__ring{position:fixed;z-index:2147483646;pointer-events:none;border:3px solid #ffd23f;border-radius:10px;box-shadow:0 0 0 4px rgba(255,210,63,.25),0 0 24px rgba(255,210,63,.55);transition:opacity .3s}
-  .__ripple{position:fixed;z-index:2147483646;pointer-events:none;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid #ffd23f;animation:__rp .6s ease-out forwards}
-  @keyframes __rp{to{transform:scale(4);opacity:0}}
-  #__act{position:fixed;z-index:2147483647;right:18px;top:74px;padding:7px 12px;border-radius:7px;background:#ffd23f;color:#111;font:600 14px/1.2 ui-monospace,Menlo,monospace;pointer-events:none;opacity:0;transition:opacity .25s}
+  #__cur{position:fixed;z-index:2147483647;width:22px;height:22px;pointer-events:none;transition:left .7s cubic-bezier(.22,1,.36,1),top .7s cubic-bezier(.22,1,.36,1);left:640px;top:360px}
+  #__cur svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));transform-origin:3px 2px;transition:transform .12s ease-out}
+  #__cur.__down svg{transform:scale(.82)}
+  .__ring{position:fixed;z-index:2147483646;pointer-events:none;border:3px solid #ffd23f;border-radius:10px;box-shadow:0 0 0 4px rgba(255,210,63,.25),0 0 24px rgba(255,210,63,.55);opacity:0;transform:scale(1.06);transition:opacity .35s ease-out,transform .45s cubic-bezier(.22,1,.36,1)}
+  .__ring.__on{opacity:1;transform:none}
+  .__ripple{position:fixed;z-index:2147483646;pointer-events:none;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid #ffd23f;animation:__rp .8s cubic-bezier(.22,1,.36,1) forwards}
+  .__ripple.__late{animation-delay:.12s;opacity:0}
+  @keyframes __rp{from{transform:scale(.6);opacity:.95}to{transform:scale(4.2);opacity:0}}
+  #__act{position:fixed;z-index:2147483647;right:18px;top:74px;padding:7px 12px;border-radius:7px;background:#ffd23f;color:#111;font:600 14px/1.2 ui-monospace,Menlo,monospace;pointer-events:none;opacity:0;transform:translateY(-6px);transition:opacity .3s ease-out,transform .4s cubic-bezier(.22,1,.36,1)}
+  #__act.__on{opacity:1;transform:none}
   .toast{bottom:auto!important;top:90px}`;
   document.head.appendChild(css);
   const cur = document.createElement("div");
@@ -51,7 +59,15 @@ const OVERLAY = () => {
   cur.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2l15 8-6.5 1.8L8.6 18z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>';
   const act = Object.assign(document.createElement("div"), { id: "__act" });
   document.body.append(cur, act);
-  window.__action = (t) => { act.textContent = t || ""; act.style.opacity = t ? 1 : 0; };
+  // The badge fades out with its old text, then fades in with the new one.
+  let actTimer;
+  window.__action = (t) => {
+    clearTimeout(actTimer);
+    if (!t) { act.classList.remove("__on"); return; }
+    if (!act.classList.contains("__on")) { act.textContent = t; act.classList.add("__on"); return; }
+    act.classList.remove("__on");
+    actTimer = setTimeout(() => { act.textContent = t; act.classList.add("__on"); }, 220);
+  };
   window.__point = (el) => {
     const r = el.getBoundingClientRect();
     cur.style.left = r.left + r.width / 2 + "px";
@@ -59,14 +75,25 @@ const OVERLAY = () => {
     const ring = Object.assign(document.createElement("div"), { className: "__ring" });
     Object.assign(ring.style, { left: r.left - 6 + "px", top: r.top - 6 + "px", width: r.width + 12 + "px", height: r.height + 12 + "px" });
     document.body.appendChild(ring);
+    requestAnimationFrame(() => requestAnimationFrame(() => ring.classList.add("__on")));
     return ring;
+  };
+  // Fade the ring out rather than dropping it from one frame to the next.
+  window.__unpoint = (ring) => {
+    if (!ring) return;
+    ring.classList.remove("__on");
+    setTimeout(() => ring.remove(), 450);
   };
   window.__ripple = (el) => {
     const r = el.getBoundingClientRect();
-    const d = Object.assign(document.createElement("div"), { className: "__ripple" });
-    Object.assign(d.style, { left: r.left + r.width / 2 + "px", top: r.top + r.height / 2 + "px" });
-    document.body.appendChild(d);
-    setTimeout(() => d.remove(), 700);
+    cur.classList.add("__down");
+    setTimeout(() => cur.classList.remove("__down"), 160);
+    for (const late of [false, true]) {
+      const d = Object.assign(document.createElement("div"), { className: late ? "__ripple __late" : "__ripple" });
+      Object.assign(d.style, { left: r.left + r.width / 2 + "px", top: r.top + r.height / 2 + "px" });
+      document.body.appendChild(d);
+      setTimeout(() => d.remove(), 1000);
+    }
   };
 };
 
@@ -84,7 +111,7 @@ const PROVIDER = () => {
 };
 
 // Headful: the explorer's bot check turns away headless Chrome.
-const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: false, args: ["--window-size=1280,800"] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: false, args: ["--window-size=1280,800"] });
 const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, recordVideo: { dir: "raw", size: { width: 1280, height: 720 } } });
 await context.exposeFunction("__eth", async (method, params) => {
   try {
@@ -121,13 +148,13 @@ async function click(sel, label, { hold = 700, after = 500 } = {}) {
   await page.evaluate((el) => window.__ripple(el), h);
   await loc.click();
   await sleep(after);
-  await page.evaluate(() => { window.__ring?.remove(); window.__action(""); });
+  await page.evaluate(() => { window.__unpoint(window.__ring); window.__action(""); });
 }
 async function point(sel, label, ms = 2500) {
   const h = await page.locator(sel).first().elementHandle();
   await page.evaluate(([el, l]) => { window.__action(l); window.__ring = window.__point(el); }, [h, label]);
   await sleep(ms);
-  await page.evaluate(() => { window.__ring?.remove(); window.__action(""); });
+  await page.evaluate(() => { window.__unpoint(window.__ring); window.__action(""); });
 }
 const bodyHas = (text, timeout = 60000) =>
   page.waitForFunction((t) => document.body.innerText.includes(t), text, { timeout }).then(() => true, () => false);
@@ -269,7 +296,7 @@ await scene(7, async () => {
 });
 async function vaultPage(origin) {
   const receipt = launched && (await retry(() => rpc.getTransactionReceipt(launched)));
-  const vault = receipt?.logs.find((l) => l.address.toLowerCase() === "0xa616314b13c636e728d705bcd2ece867398b8fa0".toLowerCase() && l.topics.length > 1);
+  const vault = receipt?.logs.find((l) => l.address.toLowerCase() === FACTORY && l.topics.length > 1);
   const vaultAddr = vault ? "0x" + vault.topics[1].slice(26) : null;
   log("launched vault", vaultAddr);
   if (vaultAddr) {

@@ -154,3 +154,27 @@ test("on contracts with the lifecycle calls, allocator and keeper may freeze an 
   // Older contracts leave the calls out rather than failing to build a policy.
   assert.match(authorise(policy, tx(A(2), A(11), g.encodeFunctionData("freezeUnobservable", [A(20)]))).reason, /not allowed/);
 });
+
+test("the allocator may take the cash-only exit and work the redemption queue; the keeper may not", () => {
+  const vault = [
+    ...abis.vault,
+    "function withdrawUnpriced(uint256,address,uint256) returns (uint256)",
+    "function requestRedeem(uint256)",
+    "function cancelRedeem()",
+    "function deleverageForRedemption(address) returns (uint16)"
+  ];
+  const p = buildPolicy({ ...deployment, abis: { ...abis, vault } });
+  const v = new Interface(vault);
+  const calls = [
+    v.encodeFunctionData("withdrawUnpriced", [1n, A(2), 0n]),
+    v.encodeFunctionData("requestRedeem", [1n]),
+    v.encodeFunctionData("cancelRedeem", []),
+    v.encodeFunctionData("deleverageForRedemption", [A(2)])
+  ];
+  for (const data of calls) {
+    assert.equal(authorise(p, tx(A(2), A(20), data)).ok, true);
+    assert.equal(authorise(p, tx(A(9), A(20), data)).ok, false);
+    assert.equal(authorise(p, tx(A(3), A(20), data)).ok, false);
+    assert.equal(authorise(policy, tx(A(2), A(20), data)).ok, false, "older vaults have none of them");
+  }
+});

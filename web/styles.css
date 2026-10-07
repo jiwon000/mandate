@@ -35,6 +35,10 @@
 .control-group .eyebrow b{color:var(--text);letter-spacing:0}
 .control-group .button{width:100%;text-align:left;font-size:12px;padding:11px 14px}
 .allocation-card .button-large+.button-large{margin-top:10px}
+.redeem-row{margin-top:14px;padding:14px 16px;border:1px dashed var(--line);border-radius:10px;font-size:12px;color:var(--muted);line-height:1.6}
+.redeem-row p{margin:0 0 10px}
+.redeem-row>div{display:flex;flex-wrap:wrap;gap:8px}
+.redeem-row .button{font-size:12px;padding:9px 12px}
 @media(max-width:900px){.chain-controls{grid-template-columns:1fr}}
 /* The feed grows without bound while the guard panel beside it is a fixed
    height, so past ~12 entries the right column is mostly empty box. Scroll

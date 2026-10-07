@@ -18,6 +18,13 @@ export const ROLE_RULES = {
     ["usdc", "approve"],
     ["vault", "allocate"],
     ["vault", "withdraw"],
+    // The cash-only exit from a frozen vault whose feed has stopped.
+    ["vault", "withdrawUnpriced"],
+    // The redemption queue: ask for cash, change one's mind, and once the notice
+    // has run, free the cash oneself.
+    ["vault", "requestRedeem"],
+    ["vault", "cancelRedeem"],
+    ["vault", "deleverageForRedemption"],
     ["vault", "unwind"],
     ["guard", "poke"],
     ["guard", "observe"],
@@ -53,7 +60,8 @@ export function buildPolicy(deployment) {
   if (batchAddress) ifaces.batch = new Interface(deployment.abis.batch);
   // null when the deployment's contracts predate the function (a book from
   // before open registration has no freezeUnobservable or accrueFees, one
-  // from before the freeze tiers has no resume).
+  // from before the freeze tiers has no resume, one from before the redemption
+  // queue has no requestRedeem).
   const selectorOf = (kind, fn) => ifaces[kind === "ownVault" ? "vault" : kind].getFunction(fn)?.selector.toLowerCase() ?? null;
 
   const allow = new Map(); // from -> Map(to -> Map(selector -> name))

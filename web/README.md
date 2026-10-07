@@ -68,7 +68,10 @@ that fills in as the price moves.
 while a vault is frozen, because freezing closes the agent's door, not the
 allocator's. Both doors do close on a mark past its age limit: shares are priced
 off that mark in both directions, and neither screen will let you sign against a
-price the guard would reject.
+price the guard would reject. When the vault's cash cannot pay your shares in
+full, a row under the withdraw button sends `requestRedeem()`, shows when the
+one-day notice runs out, offers `cancelRedeem()`, and after the notice sends
+`deleverageForRedemption()` so `withdraw()` can pay the rest.
 
 **Batch** — allocations netted per epoch. The allocator deposits escrow into
 `BatchAllocator`, signs an `AllocationIntent` (EIP-712, off-chain, free), and once the

@@ -190,6 +190,10 @@
             </div>
             <button id="allocateButton" class="button button-primary button-large">Review allocation</button>
             <button id="withdrawButton" class="button button-secondary button-large">Withdraw all shares</button>
+            <div class="redeem-row" id="redeemRow" hidden>
+              <p id="redeemStatus"></p>
+              <div><button class="button button-secondary" id="redeemButton">requestRedeem()</button><button class="button button-secondary" id="cancelRedeemButton" hidden>cancelRedeem()</button></div>
+            </div>
             <p class="fineprint">Shares are minted and redeemed at marked NAV, so the open position is priced in both directions. Redeemable is capped by the cash on hand - the rest of a claim stays as shares until the agent frees it up. Withdrawals stay open while a vault is Frozen - freezing stops the agent, never the allocator. If the venue's price feed has stopped too, the cash-only exit pays your share of the vault's cash, capped at the last mark, and leaves your part of the open position to those who stay.</p>
           </article>
           <aside class="allocation-aside">

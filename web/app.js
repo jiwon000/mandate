@@ -338,6 +338,12 @@ async function refresh() {
         const terms = hasTerms() ? await readTermState(meta) : null;
         // A guard from before the freeze tiers has no recovery window: 0, unwind at once.
         const unwindAllowedAt = Number(await contracts.guard.unwindAllowedAt?.(meta.address).catch(() => 0n) ?? 0n);
+        // The allocator's redemption request, on vaults that have the queue.
+        const redeem = state.wallet && vault.redeemRequestOf
+          ? await Promise.all([vault.redeemRequestOf(state.wallet), vault.REDEEM_NOTICE()])
+            .then(([r, notice]) => ({ shares: r.shares, dueAt: r.shares === 0n ? 0 : Number(r.requestedAt + notice) }))
+            .catch(() => null)
+          : null;
         const [navPerShare, highWater, drawdownBps, markedAt] = quote;
         const equity6 = mark[0];
         const equityE18 = equity6 * ASSET_TO_E18;
@@ -373,7 +379,8 @@ async function refresh() {
           stressSigmaBps: Number(stress[0]),
           stressMoveBps: Number(stress[1]),
           stressedDrawdownBps: Number(stress[2]),
-          userShares: shares
+          userShares: shares,
+          redeem
         };
       })
     );
@@ -1166,7 +1173,40 @@ function renderAllocate() {
           : "Withdraw all shares";
   }
 
+  renderRedeem(vault, fair, claim);
   updateAmount($("#allocationAmount").value);
+}
+
+// The redemption queue: when the cash on hand cannot pay a stake in full, the
+// allocator gives notice with requestRedeem(); once it has run, anyone may make the
+// vault free the cash with deleverageForRedemption(), and withdraw() pays it.
+function renderRedeem(vault, fair, claim) {
+  const row = $("#redeemRow");
+  const redeem = vault.redeem;
+  const pending = redeem && redeem.shares > 0n;
+  // Shown when there is a request to report, or cash that falls short of the stake.
+  row.hidden = !redeem || vault.agentState !== 0 || (!pending && (vault.userShares === 0n || claim >= fair));
+  if (row.hidden) return;
+  const button = $("#redeemButton");
+  $("#cancelRedeemButton").hidden = !pending;
+  if (!pending) {
+    $("#redeemStatus").textContent =
+      `The vault holds ${usdc(claim)} mUSDC of your ${usdc(fair)}; the rest is in the open position. requestRedeem() gives the agent notice to free it; after the notice anyone can make the vault reduce the position for you.`;
+    if (!button.dataset.busy) {
+      button.disabled = false;
+      button.textContent = `requestRedeem(${usdc(vault.userShares)} shares)`;
+    }
+    return;
+  }
+  const due = redeem.dueAt <= state.chainTime;
+  $("#redeemStatus").textContent = due
+    ? `${usdc(redeem.shares)} shares requested and the notice has run. deleverageForRedemption() reduces every position by the shortfall plus 5%, and withdraw() then pays from the freed cash.`
+    : `${usdc(redeem.shares)} shares requested. The agent has until ${new Date(redeem.dueAt * 1000).toLocaleString()} to free the cash on its own terms.`;
+  if (!button.dataset.busy) {
+    // The vault, not this page's last mark, decides whether there is cash to free.
+    button.disabled = !due;
+    button.textContent = due ? "deleverageForRedemption() — free the cash" : "Notice running";
+  }
 }
 
 // "3.0σ/120s": the size of move the mandate makes the agent survive.
@@ -2018,6 +2058,32 @@ $("#withdrawButton").addEventListener("click", (event) =>
             : "Withdrawn from a frozen vault — the freeze stops the agent, not you"
     );
     $("#walletBalance").textContent = `Balance ${usdc(await state.contracts.usdc.balanceOf(state.wallet))} mUSDC`;
+  })
+);
+
+$("#redeemButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "redemption…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const vault = state.snapshot[state.selected];
+    const signer = await signerFor(state.wallet);
+    const vaultContract = state.contracts.vaults[state.selected].connect(signer);
+    if (vault.redeem?.shares > 0n) {
+      await vaultContract.deleverageForRedemption.staticCall(state.wallet);
+      await (await vaultContract.deleverageForRedemption(state.wallet)).wait();
+      showToast("Position reduced for your redemption; withdraw() pays from the freed cash");
+      return;
+    }
+    await (await vaultContract.requestRedeem(vault.userShares)).wait();
+    showToast(`Redemption requested for ${usdc(vault.userShares)} shares`);
+  })
+);
+
+$("#cancelRedeemButton").addEventListener("click", (event) =>
+  withButton(event.currentTarget, "cancelRedeem()…", async () => {
+    if (!state.wallet) throw new Error("connect the allocator account first");
+    const signer = await signerFor(state.wallet);
+    await (await state.contracts.vaults[state.selected].connect(signer).cancelRedeem()).wait();
+    showToast("Redemption request cancelled");
   })
 );
 

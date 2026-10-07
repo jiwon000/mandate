@@ -16,7 +16,9 @@
     "deploy:demo": "node --env-file-if-exists=.env contracts/script/deploy-demo.mjs",
     "deploy:perpl": "node contracts/script/deploy-perpl.mjs",
     "agent:perpl": "node contracts/script/perpl-agent.mjs",
+    "claims:recover": "node --env-file-if-exists=.env contracts/script/recover-claims.mjs",
     "keeper:monad": "node --env-file-if-exists=.env contracts/script/keeper.mjs",
+    "track-record": "node contracts/script/track-record.mjs",
     "clean": "hardhat clean"
   },
   "engines": {

@@ -20,7 +20,7 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 | `PerplAdapter` (Monad의 perp 거래소 Perpl) | Monad 테스트넷에 배포. Perpl 테스트넷 거래소에서 입금, 거래, 출금 왕복 1회, 이어서 규칙 기반 에이전트 스크립트로 3회 실행해 주문 10건 체결, 한도 초과 주문 5건 온체인 거부 |
 | 거래소와 USDC | mock. 테스트넷 가격은 팀의 키퍼가 넣음 |
 | 보안 검토 | 내부 리뷰 4라운드. 외부 감사 없음 |
-| 테스트 | 계약 105개, 서버 68개, Foundry 23개(invariant 20개, reentrancy 3개). CI에서 실행 |
+| 테스트 | 계약 121개, 서버 68개, Foundry 23개(invariant 20개, reentrancy 3개). CI에서 실행 |
 
 ## 조건
 
@@ -91,7 +91,8 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 - 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 스크립트 실행 약 1시간).
 - 차등 프라이버시는 공개 데이터에만 적용됩니다. 리포터는 이미 체인에 있는 수익률을 집계하므로 메커니즘과 온체인 ε 장부를 보여줄 뿐, 비공개 데이터를 보호하지 않습니다. 명시한 ε은 평균에 대해서만 정확하고, 보호 단위는 수익률 한 틱이라 k개 틱을 낸 Vault 전체는 k·ε로 보호됩니다. 체인은 서명과 ε 장부만 확인하고 노이즈 자체는 확인하지 못합니다. 배치 intent와 서명은 정산 calldata에 공개됩니다.
-- 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다.
+- 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다. 서버가 재시작돼도 정산 calldata에서 `npm run claims:recover`로 proof를 다시 만들 수 있습니다.
+- 출금은 Vault가 가진 현금까지만 즉시 나갑니다. 포지션에 묶인 몫은 `requestRedeem()`으로 요청하고 1일 공지 기간을 기다려야 하며, 그 뒤에는 누구나 `deleverageForRedemption()`으로 필요한 만큼 포지션을 줄일 수 있습니다.
 - guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다. 실현 손실은 슬리피지와 가격 갭만큼 drawdown 조건을 넘을 수 있습니다.
 - 외부 감사를 받지 않았습니다. 지금까지의 검토는 [`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)의 내부 리뷰입니다.
 
@@ -155,6 +156,7 @@ What the contracts and the demo do today:
 - mark-age limit: a vault whose venue price is older than `maxMarkAgeSeconds` cannot trade, allocate or withdraw until the price is refreshed
 - mark-to-market drawdown against a high-water mark, checked after every trade and by anyone through `poke()`; a breach freezes the vault and pays the caller a bounty
 - reduce-only unwind of a frozen position: anyone can call `unwind()`, which closes 1/5, 1/4, 1/3 and 1/2 of what is left and then all of it, so five filled steps take a fifth of the size at freeze each, inside a 1% slippage bound and pays 0.01% of cash; the last step moves the vault `Frozen -> Closed`
+- redemption queue: an allocator whose claim is larger than the vault's cash calls `requestRedeem(shares)`; after `REDEEM_NOTICE` (1 day) anyone can call `deleverageForRedemption(allocator)`, which closes just enough of the position, reduce-only, to cover the claim with a 5% buffer, and blocks the agent from adding risk for `REDEEM_GRACE` (1 hour) so the freed cash waits for the allocator. Shares under a request cannot be transferred
 - one-way terms lock: `lockTerms()` makes the limits and the adapter allowlist final, a vault refuses deposits until its terms are locked, and `termsHash` is the value an allocator can quote
 - volatility clause: the guard keeps a realised-volatility estimate built from the marks it sees (every trade, `poke()` and the side-effect-free `observe()` feed it), and an order that adds exposure is refused with `StressBreach` when a k-sigma move over the mandate's horizon would leave the vault past `maxDrawdownBps`; orders that reduce exposure are never stress-tested
 - first-deposit share lock (Uniswap-V2-style `MIN_SHARES`) against share-price inflation
@@ -168,7 +170,7 @@ What the contracts and the demo do today:
 - `MandateRegistry`: self-verifying `registerAgent()` reads `guard` from `vault.riskGuard()` itself rather than taking it as a parameter (claimed `RiskLimits` must hash to that guard's own locked `termsHash`; the adapter must be on its allowlist), and is restricted to the guard's owner since `fees`/`modelHash` have no on-chain ground truth to check (see "Security review" below — an earlier version trusted a caller-supplied `guard` address and was exploitable); `postLeaderboard()` gated by a single reporter's EIP-712 signature, enforcing strictly increasing epoch/pinnedBlock and an exact additive epsilon ledger against a configurable cap
 - `reporter/`: clips trade returns to `[-c, c]` and DP-releases mean return, Sharpe and marked max drawdown via the Laplace mechanism, with deterministic HMAC-seeded noise and an epsilon ledger that mirrors `MandateRegistry`'s own accounting so a built release is never one the contract would refuse
 
-The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (105 cases, one of them a single end-to-end run from agent registration to withdrawal; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (68 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
+The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (121 cases, one of them a single end-to-end run from agent registration to withdrawal; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (68 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (9 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
 
@@ -369,7 +371,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 - The estimate is only as good as its sampling. It only sees the marks that reach the guard, so a mark series nobody observes for an hour is one squared return spread over that hour, and a jump that reverts between two samples is invisible. The demo keeper feeds every mark through `observe()`; a live deployment needs someone to do the same, and Chainlink's realised-volatility feeds solve the same problem with a fixed 10-minute sampling grid.
 - "k sigma" assumes returns that are roughly normal at the horizon. Crypto returns are fat-tailed, so a 3-sigma clause is a calibrated cushion, not a probability. The stressed drawdown also treats the move as a straight loss at the order's leverage, ignoring funding, fees and any hedge.
 - The clause is a per-order refusal, not a volatility-scaled leverage cap. The agent can keep the exposure it already has, whatever the tape does; only the drawdown term can take it away.
-- A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash or, after a freeze, until `unwind()` has closed the position.
+- A withdrawal is capped by the cash the vault holds. Shares are priced at the marked value of the open position, but the vault can only pay out what is not tied up in it; the unpaid part of a claim stays as shares until the agent frees up cash or, after a freeze, until `unwind()` has closed the position. An Active vault's allocator does not have to wait on the agent: `requestRedeem(shares)` starts a one-day notice, and once it has passed anyone can call `deleverageForRedemption(allocator)`. That closes `(claim - cash) / (equity - cash)` of the position plus a 5% buffer, reduce-only and inside the same 1% slippage bound as `unwind()`, at most once per block, and for one hour after it the agent's orders that add exposure revert with `RedemptionDeleveraging` so the freed cash is still there when the allocator withdraws. It pays no bounty, so a third party has no reason to call it except on the allocator's behalf. The notice is a day so a vault is not forced out of a position by a request the agent could have met by trading; the costs are that an allocator waits up to a day plus a block, and a forced close sells at the mark of that moment.
 
 ## Repository layout
 
@@ -540,9 +542,23 @@ cp .env.example .env        # MONAD_RPC_URL, DEPLOYER_PRIVATE_KEY, AGENT_ADDRESS
 npm run compile
 npm run deploy:monad        # one vault + BatchAllocator, writes contracts/deployments.latest.json
 npm run keeper:monad        # keeps the venue price fresh and calls poke() on every vault it finds
+KEEPER_PRICE=0 npm run keeper:monad   # watch-only: no setPrice, any funded key, any venue
 ```
 
 The single-vault deploy configures the vault with `maxMarkAgeSeconds = 30` and locks its terms in the same run, so without a keeper every `execute`, `allocate` and `withdraw` starts reverting with `MarkTooOld` thirty seconds after deployment. The keeper walks the mock price inside a band and serves every vault in the deployment file it finds (`contracts/deployments.latest.json` first, then `web/deployments/<chainId>.json`, or `DEPLOYMENT_FILE`): `poke()` while a vault is `Active`, `observe()` once it is not, so a drawdown breach is caught and the volatility estimate stays fed. It accepts `DEPLOYER_PRIVATE_KEY` or `DEMO_MNEMONIC` (account 0), whichever owns the venue. Do not run it next to `web:live` on the same deployment: two oracles from one key fight over nonces. Never commit a private key or the mnemonic; `.env` is ignored.
+
+`KEEPER_PRICE=0` makes it watch-only: it never calls `setPrice`, so the key does not have to own anything and the venue can be any (a Perpl-backed vault, say). Each tick it reads the guard's views and sends a transaction only when it earns a bounty: `poke()` when drawdown, daily loss or holding time is past its limit, `freezeUnobservable()` once the mark is three ages old, and one `unwind()` step on a `Frozen` vault. Besides the deployment file's vaults it reads every vault of the deployment's `MandateFactory` (`addresses.factory`, or `MandateFactory` in a flat file such as `contracts/deployments/perpl-10143.json` via `DEPLOYMENT_FILE`). The per-tick logic is `contracts/script/keeper-core.mjs`; `contracts/test-js/keeper.test.mjs` covers it. A watch-only keeper does not poke a healthy vault, so the high-water mark only moves on trades and on the pokes of others.
+
+### Track record
+
+Allocators choose a vault by its locked terms; the chain also holds what the vault did under them. `npm run track-record` rebuilds that from events alone, with no indexer and no trusted server: every `Marked` the guard emitted (NAV per share and drawdown), the guard's breach events, and the vault's `Allocated`, `Withdrawn`, `Executed`, `FeesAccrued` and `Unwound`.
+
+```bash
+npm run track-record                                  # every vault in web/deployments/<chainId>.json
+npm run track-record -- 0x<vault> --from-block 68601000 --to-block 68601600 --table
+```
+
+It is read-only and needs no key. The RPC is `MONAD_RPC_URL` or `RPC_URL` (default `https://testnet-rpc.monad.xyz`); the guard, start block and vault list come from the deployment file for that chain. The output (JSON, or `--table`) has first and last mark time, NAV per share and return, the largest drawdown observed against the vault's locked `maxDrawdownBps`, the trade count, deposits, withdrawals and fees, each breach with its transaction hash, the current state, and a NAV series of at most 200 points. Monad testnet caps the block range of one `eth_getLogs` call and rate-limits, so logs are read in windows of 100 blocks (`--chunk`; a refused window is retried once as two halves). At about 0.4 s per block a day is over 200,000 blocks, so scan a range around what you care about with `--from-block` and `--to-block` rather than from the deployment's start block; totals only cover the scanned range. On the 2026-10-06 testnet book it shows Tight Mandate's `DrawdownBreach` of 424 bps against its 300 bps limit, in transaction `0x05995a48…78c1`. The summary math is a pure function (`summarize` in `contracts/tools/track-record.mjs`) tested separately from the fetching.
 
 See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
 

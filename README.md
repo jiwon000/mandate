@@ -487,6 +487,8 @@ How the server keeps itself safe on a public URL:
 
 The book below was deployed to Monad testnet (chain 10143) by `0xFCb12322Cd13e5aC40155a46CA6D353625B97684` on 2026-10-06 04:18 UTC and is the one the hosted demo is currently running. It is the first book with the marketplace contracts: `MandateFactory` for permissionless registration, trade terms and fees enforced by the guard and vault, and several markets per venue, on top of the 2026-10-05 freeze rules (see [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)). Vaults that anyone launches through the factory are listed by `MandateFactory.vaultsFrom()` rather than in this table. It supersedes the earlier books on older contracts, the last of them the 2026-10-05 09:47 UTC book, and the 2026-10-04 book the walkthrough below was recorded against. A restart finds the newest book on chain by walking the owner's own transaction history rather than trusting a committed file, so it does not redeploy on its own.
 
+This book predates the 2026-10-07 contract changes: the reference-price bound (`ReferenceTerms`), exposure caps that bind only orders adding risk, and the four fixes from the adversarial review. Those are in the repository and its test suites; the contracts at the addresses below do not have them. They reach the chain with the next `Reset demo`, which deploys a new book from the current source and replaces this table's addresses.
+
 | Contract | Address |
 | --- | --- |
 | MockUSDC | [`0xf30eBc7C2F74A1eA0270Ab4f05AA7D267Ad16Fc2`](https://testnet.monadscan.com/address/0xf30eBc7C2F74A1eA0270Ab4f05AA7D267Ad16Fc2) |

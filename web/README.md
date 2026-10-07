@@ -15,7 +15,8 @@ From the repository root:
 npm run web
 ```
 
-First boot takes 20-25 seconds — it compiles and deploys before the server answers.
+Boot compiles and deploys before the server answers: about 5 seconds on a 2025 laptop
+(measured 2026-10-07).
 Then open `http://localhost:3000`.
 
 The page talks to the node over `/rpc`, which the server proxies to the in-process
@@ -106,7 +107,9 @@ the `settleEpoch()` calldata, which the demo does not do.
   `poke()` and `execute()` start reverting with `MarkTooOld`. (Local mode only; a
   live chain's cadence is its own, so the toggle is hidden there.)
 - `Reset demo` redeploys everything. In live mode it is the operator's button: it
-  only appears when the page is opened with `?admin=<DEMO_ADMIN_TOKEN>`, and the
+  only appears when the page is opened with `#admin=<DEMO_ADMIN_TOKEN>` (the fragment
+  never reaches the server or its logs; `?admin=` still works). The page drops the
+  token from the address bar at once and keeps it for that tab only. The
   server also resets by itself once a visitor has left two or more vaults frozen.
 
 In live mode the note under the control room replaces the cadence note: it names the

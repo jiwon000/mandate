@@ -19,7 +19,7 @@ const freePort = () =>
 // so this never talks to a network.
 before(async () => {
   const port = await freePort();
-  const env = { ...process.env, PORT: String(port), CONTROL_IP_PER_MINUTE: "2" };
+  const env = { ...process.env, PORT: String(port), CONTROL_IP_PER_MINUTE: "2", WRITE_IP_PER_MINUTE: "3" };
   for (const name of ["DEMO_MNEMONIC", "MONAD_RPC_URL", "DEMO_ADMIN_TOKEN", "MANDATE_LIVE"]) delete env[name];
   child = spawn(process.execPath, ["web/server.mjs"], { env, stdio: ["ignore", "pipe", "pipe"] });
   base = `http://127.0.0.1:${port}`;
@@ -85,6 +85,24 @@ test("POST /api/control is limited per client with a retry-after", async () => {
   const refused = await send();
   assert.equal(refused.status, 429);
   assert.ok(Number(refused.headers.get("retry-after")) >= 1);
+});
+
+test("a POST another site's page sent is refused before it touches the chain", async () => {
+  const response = await fetch(base + "/api/batch/settle", { method: "POST", headers: { "sec-fetch-site": "cross-site" } });
+  assert.equal(response.status, 403);
+  const own = await fetch(base + "/api/control", { method: "POST", body: "{}", headers: { "sec-fetch-site": "same-origin" } });
+  assert.notEqual(own.status, 403);
+});
+
+test("/api/deployment answers GET only", async () => {
+  assert.equal((await post("/api/deployment", "{}")).status, 405);
+});
+
+test("batch intents, settlement and releases share a per-client limit", async () => {
+  const statuses = [];
+  for (let i = 0; i < 4; i++) statuses.push((await post("/api/batch/intent", "{}")).status);
+  assert.ok(statuses.includes(429), String(statuses));
+  assert.equal((await post("/api/reporter/publish", "{}")).status, 429);
 });
 
 test("IpLimiter refills, keeps clients apart and stays bounded", () => {

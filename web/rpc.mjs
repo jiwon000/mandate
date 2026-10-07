@@ -11,6 +11,15 @@ export function toRpcError(error) {
   };
 }
 
+/// Drop every URL from `text`, and `secretUrl` wherever it appears even without a
+/// scheme in front. An upstream error can quote the RPC URL, and a provider's URL
+/// often carries its API key.
+export function redactUrls(text, secretUrl) {
+  if (typeof text !== "string") return text;
+  const clean = secretUrl ? text.split(secretUrl).join("[rpc]") : text;
+  return clean.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, "[url]");
+}
+
 export const rpcResult = (id, result) => ({ jsonrpc: "2.0", id, result: result === undefined ? null : result });
 export const rpcFailure = (id, code, message, data) => ({
   jsonrpc: "2.0",

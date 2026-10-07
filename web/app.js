@@ -39,8 +39,25 @@ const state = {
   network: null,
   oracle: null,
   gas: null,
-  adminToken: new URLSearchParams(location.search).get("admin") ?? ""
+  adminToken: takeAdminToken()
 };
+
+// The admin token arrives as #admin=<token>, which never reaches a server or its logs,
+// or the older ?admin=<token>. Either way it leaves the address bar at once and is kept
+// for this tab only, so a reload stays signed in and a shared link carries nothing.
+function takeAdminToken() {
+  const search = new URLSearchParams(location.search);
+  const fromHash = location.hash.startsWith("#admin=") ? decodeURIComponent(location.hash.slice(7)) : "";
+  const token = fromHash || search.get("admin") || "";
+  if (token) {
+    search.delete("admin");
+    const query = search.toString();
+    history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${fromHash ? "" : location.hash}`);
+    try { sessionStorage.setItem("mandateAdmin", token); } catch { /* private mode: memory only */ }
+    return token;
+  }
+  try { return sessionStorage.getItem("mandateAdmin") ?? ""; } catch { return ""; }
+}
 
 const INTENT_TYPES = {
   AllocationIntent: [

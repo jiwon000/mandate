@@ -12,7 +12,7 @@ import { startChain } from "./chain.mjs";
 import { JsonRpcProvider } from "ethers";
 import { deploymentFileFor, startLive } from "./live.mjs";
 import { adoptLatestBook } from "./live-recover.mjs";
-import { toRpcError } from "./rpc.mjs";
+import { redactUrls, toRpcError } from "./rpc.mjs";
 import { HttpError, IpLimiter, clientIp } from "./faucet.mjs";
 import { createPerplReader } from "./perpl.mjs";
 
@@ -62,6 +62,8 @@ const logRequests = process.env.LOG_REQUESTS === "1";
 // spend everyone's market moves or hammer the upstream node through /rpc.
 const controlLimit = new IpLimiter(number("CONTROL_IP_PER_MINUTE", 30));
 const rpcLimit = new IpLimiter(number("RPC_IP_PER_MINUTE", 1200));
+// Batch intents, settlement and leaderboard releases each cost the server's keys gas.
+const writeLimit = new IpLimiter(number("WRITE_IP_PER_MINUTE", 30));
 
 function limited(limiter, req) {
   const wait = limiter.take(clientIp(req));
@@ -126,6 +128,20 @@ async function readJson(req) {
   return value;
 }
 
+// Every POST changes chain state with the server's keys. A browser marks a request
+// another site's page sent as cross-site; the demo's own page never sends one.
+function sameSiteOnly(req) {
+  if (req.headers["sec-fetch-site"] === "cross-site") throw new HttpError("cross-site requests are refused", 403);
+}
+
+// /api/control's status goes to every visitor, so its last oracle error leaves
+// without any URL in it.
+async function publicStatus() {
+  const status = await chain.control.status();
+  if (!status.oracle) return status;
+  return { ...status, oracle: { ...status.oracle, lastError: redactUrls(status.oracle.lastError, process.env.MONAD_RPC_URL) } };
+}
+
 function sendJson(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload, (_key, value) =>
     typeof value === "bigint" ? value.toString() : value
@@ -173,6 +189,7 @@ const server = createServer(async (req, res) => {
     } catch {
       throw new HttpError("bad path", 400);
     }
+    if (req.method === "POST") sameSiteOnly(req);
 
     if (pathname === "/rpc") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
@@ -190,6 +207,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (pathname === "/api/deployment") {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "GET only" });
       chain.touch();
       return sendJson(res, 200, await chain.deployment());
     }
@@ -210,6 +228,7 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/api/batch/intent") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      limited(writeLimit, req);
       const body = await readJson(req);
       chain.touch();
       return sendJson(res, 200, await feature("batch", "batch allocator").submitIntent(body));
@@ -217,6 +236,7 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/api/batch/settle") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      limited(writeLimit, req);
       chain.touch();
       return sendJson(res, 200, await feature("batch", "batch allocator").settle());
     }
@@ -231,6 +251,7 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/api/reporter/publish") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "POST only" });
+      limited(writeLimit, req);
       chain.touch();
       return sendJson(res, 200, await feature("reporter", "registry").publish());
     }
@@ -245,7 +266,7 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/api/control") {
       chain.touch();
-      if (req.method === "GET") return sendJson(res, 200, await chain.control.status());
+      if (req.method === "GET") return sendJson(res, 200, await publicStatus());
       if (req.method !== "POST") return sendJson(res, 405, { error: "GET or POST" });
       limited(controlLimit, req);
       const { op, value, token } = await readJson(req);
@@ -255,7 +276,7 @@ const server = createServer(async (req, res) => {
       else if (op === "restorePrice") result = chain.control.restorePrice();
       else if (op === "redeploy") result = await chain.control.redeploy(token);
       else return sendJson(res, 400, { error: "unknown op" });
-      return sendJson(res, 200, { ...result, ...(await chain.control.status()) });
+      return sendJson(res, 200, { ...result, ...(await publicStatus()) });
     }
 
     if (pathname === "/vendor/ethers.js" && req.method === "GET") {

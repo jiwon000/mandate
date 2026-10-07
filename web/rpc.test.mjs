@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Interface } from "ethers";
 import {
-  MULTICALL3, ReadCache, isRateLimited, packCalls, packable, sendPatiently, toRpcError, unpackAnswers
+  MULTICALL3, ReadCache, isRateLimited, packCalls, packable, redactUrls, sendPatiently, toRpcError, unpackAnswers
 } from "./rpc.mjs";
 
 const call = (id, method, params = []) => ({ jsonrpc: "2.0", id, method, params });
@@ -135,4 +135,14 @@ test("a bundle goes out as one Multicall3 call and comes back as one answer per 
   ]);
   assert.equal(unpackAnswers(calls, limited("pack")), null);
   assert.equal(unpackAnswers(calls, answer("pack", "0x")), null);
+});
+
+test("redactUrls keeps an RPC URL and its key out of a public error", () => {
+  const secret = "https://rpc.example/v2/KEY123";
+  const error = `could not coalesce error (url="${secret}", code=TIMEOUT); also wss://other.example/ws?key=9`;
+  const clean = redactUrls(error, secret);
+  assert.ok(!clean.includes("KEY123") && !clean.includes("key=9"), clean);
+  assert.equal(clean, 'could not coalesce error (url="[rpc]", code=TIMEOUT); also [url]');
+  assert.equal(redactUrls("rpc.example/v2/KEY123 timed out", "rpc.example/v2/KEY123"), "[rpc] timed out");
+  assert.equal(redactUrls(null, secret), null);
 });

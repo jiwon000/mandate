@@ -23,7 +23,7 @@ end      = genesis + (e + 1) * epochDuration
 deadline = end + settlementWindow
 ```
 
-Settlement is accepted at timestamps in the inclusive interval `[end, deadline]`. Each signed intent must also be unexpired. An epoch can settle at most once; missing an earlier epoch does not block later epochs. Omitted intents remain unspent and their escrow is refundable. This implementation nets deposits only, not signed withdrawal or rebalance intents. A vault whose `allocate` reverts (stale mark, `Frozen`) reverts the whole epoch, so the batcher must leave it out of the batch.
+Settlement is accepted at timestamps in the inclusive interval `[end, deadline]`. Each signed intent must also be unexpired. An epoch can settle at most once; missing an earlier epoch does not block later epochs. Omitted intents remain unspent and their escrow is refundable. This implementation nets deposits only, not signed withdrawal or rebalance intents. A vault whose `allocate` reverts (stale mark, `Frozen`) is skipped: `VaultSkipped` records the revert reason, its intents' amounts return to escrow and their nonces stay spent, and the other vaults still settle. (Changed 2026-10-10; the testnet deployment predates it and reverts the whole epoch.)
 
 `settleEpoch(epoch, intentRoot, nets)` accepts vault groups strictly sorted by ascending numeric address, each containing signed intents. A transaction supports at most 128 intents. The limit is a validation bound, not a benchmarked Monad gas guarantee; use small batches until measured. The contract verifies all signatures, amounts, nonces, escrow balances, epochs and deadlines, and performs exactly one `allocate` call per vault. A failure in any group rolls back every debit, nonce, vault deposit and approval.
 

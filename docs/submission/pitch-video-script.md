@@ -1,8 +1,8 @@
 # 피치 영상 대본 (제출 폼: Pitch video)
 
 - 조건: 2분 이하. 팀 소개, 푸는 문제, 왜 만드는지.
-- 상태: 초안 (2026-10-04 작성, 10-05 마지막 문단을 현재 구현에 맞춤, 10-06 조건 목록과 Perpl 다음 단계 반영). AI 도구(Claude Code)로 쓴 초안이고 녹화 전이다. 팀이 읽어 보고 고쳐 쓴다.
-- 내레이션은 팀 소개 줄을 채우면 영어 약 270단어. 분당 140단어로 읽으면 약 1분 55초라 2분 한도에 여유가 거의 없다. 녹화해 보고 넘으면 0:12 문단에서 한 문장을 뺀다.
+- 상태: 10-10 전면 재작성 (Claude Code 초안, 녹화 전). 10-06 Perpl 테스트넷 체결을 반영했고, 아직 아무것도 보호하지 않는 비공개 리포팅 언급은 뺐다.
+- 내레이션은 영어 약 255단어. 분당 140단어로 읽으면 약 1분 50초.
 - 팀 소개 줄의 대괄호(이름, 소속)는 팀이 채운다.
 - 사용자 수, 파트너, 인터뷰 같은 실적은 없으므로 말하지 않는다.
 
@@ -10,16 +10,17 @@
 
 | 시간 | 화면 | 내레이션 (영어) | 뜻 |
 | --- | --- | --- | --- |
-| 0:00 | 말하는 사람 얼굴 또는 로고 | Hi. We are [이름] and [이름], from [소속]. We are building Mandate. | 팀 소개. 이름과 소속은 팀이 채운다. |
-| 0:12 | 얼굴, 또는 Market 화면 | When you back a trading agent, you trust its operator twice. Not to take the money. And not to take more risk than they said. Today the only way to check either one is to ask: can I trust this trader? For software you did not write, that is a hard question to answer. | 트레이딩 에이전트에 돈을 맡기면 운용자를 두 번 믿어야 한다. 돈을 가져가지 않을 것, 말한 것보다 큰 위험을 지지 않을 것. 지금은 "이 트레이더를 믿을 수 있나"를 물을 수밖에 없고, 내가 쓰지 않은 소프트웨어에 대해 답하기 어렵다. |
-| 0:35 | Agent 화면의 Risk limits 패널 | Mandate changes the question to: can I accept these terms? Capital sits in a vault the agent can trade and cannot withdraw. Size, leverage, drawdown, daily loss and how fresh the price must be are locked on chain before the first deposit, and every order has to pass a guard that enforces them. | Mandate는 질문을 "이 조건을 받아들일 수 있나"로 바꾼다. 돈은 에이전트가 거래만 하고 인출은 못 하는 볼트에 있다. 규모, 레버리지, 손실 한도, 하루 손실, 가격 신선도는 첫 예치 전에 온체인에 잠기고 모든 주문은 가드를 통과해야 한다. |
-| 0:58 | Live Risk 화면의 FROZEN 상태 | If a vault falls past its drawdown limit, anyone can prove it on chain. The agent is frozen, the position is closed in public steps, and allocators keep their exit: withdrawals stay open, priced at a fresh mark. | 볼트가 손실 한도를 넘으면 누구나 온체인에서 증명할 수 있다. 에이전트는 동결되고 포지션은 공개 단계로 정리되며 투자자의 출구는 열려 있다. 출금은 새 가격 기준으로 계속 가능하다. |
-| 1:12 | 블록 주기 스위치 화면 | We build on Monad for one reason. A mandate can demand a fresh price, and a price on chain is only as fresh as the block interval. On twelve-second blocks a four-second term fails for most of every interval, because the price goes stale long before the next update. | Monad 위에 만드는 이유는 하나다. 조건은 신선한 가격을 요구할 수 있는데 온체인 가격은 블록 간격만큼만 신선하다. 12초 블록에서는 4초 조건이 매 간격의 대부분 동안 지켜지지 않는다. 다음 갱신이 오기 한참 전에 가격이 낡기 때문이다. |
-| 1:28 | 얼굴 | We are building this because we think people will hand capital to agents before anyone can vouch for them, and the limits should be code an allocator can read, not a promise. Today it runs on Monad testnet against a mock venue. Next, our adapter for Perpl, a real perpetuals venue on Monad, moves from a testnet fork to testnet, then private reporting on the release layer we built, and an external audit before any real capital. Thank you. | 만드는 이유: 누가 보증해 주기 전에 사람들이 에이전트에 돈을 맡기게 될 것이라고 보고, 한도는 약속이 아니라 투자자가 읽을 수 있는 코드여야 한다. 지금은 모나드 테스트넷에서 mock 거래소로 돈다. 다음은 포크에서 테스트한 Perpl 어댑터의 테스트넷 배포, 지금 만든 공개 통계 릴리스 계층 위에 올릴 비공개 리포팅, 실자본 전 외부 감사. |
+| 0:00 | 얼굴 또는 로고 | Hi, we're [name] and [name] from [affiliation], and this is Mandate. | 팀 소개. 이름과 소속은 팀이 채운다. |
+| 0:08 | 얼굴, 또는 Market 화면 | If you fund a trading agent you didn't write, you trust its operator twice: not to take the money, and not to take more risk than they promised. Today a risk limit is just a promise, and you find out it was broken after the loss. | 내가 쓰지 않은 에이전트에 돈을 넣으면 운용자를 두 번 믿는다. 돈을 가져가지 않을 것, 약속보다 큰 위험을 지지 않을 것. 지금 위험 한도는 약속일 뿐이고, 어겼다는 건 손실이 난 뒤에 안다. |
+| 0:25 | Agent 화면의 조건 패널 | Mandate turns that promise into code. Capital sits in a vault the agent can trade but cannot withdraw from. Nineteen terms covering size, leverage, losses and price freshness are locked on chain before the first deposit. Every order is checked before it reaches the exchange, and an order over the limit fails. | 약속을 코드로 바꾼다. 돈은 에이전트가 거래만 하고 인출은 못 하는 볼트에 있다. 규모, 레버리지, 손실, 가격 신선도에 관한 19개 조건이 첫 예치 전에 잠긴다. 모든 주문은 거래소에 닿기 전에 검사되고 한도를 넘는 주문은 실패한다. |
+| 0:50 | Live Risk 화면의 FROZEN 상태 | If losses cross the limit, anyone can freeze the vault and close the position in public steps for a small fee. Allocators keep their exit the whole time. | 손실이 한도를 넘으면 누구나 볼트를 동결하고 포지션을 공개 단계로 정리할 수 있고, 작은 수수료를 받는다. 투자자의 출금은 내내 열려 있다. |
+| 1:03 | 블록 주기 화면 | Why Monad? A term can demand a price only a few seconds old, and a price on chain is only as fresh as the block interval. On Monad testnet our strictest vault requires a price under ten seconds old, and in eight checks in a row the price was one to five seconds old. | 왜 Monad인가. 조건은 몇 초 이내의 가격을 요구할 수 있는데 온체인 가격은 블록 간격만큼만 신선하다. Monad 테스트넷에서 가장 엄격한 볼트는 10초 이내 가격을 요구하고, 연속 8번 확인에서 가격 나이는 1~5초였다. |
+| 1:25 | 얼굴 | Mandate doesn't make an agent trade better. It makes an agent nobody can vouch for safe to fund, within limits you can read before you deposit. Today it runs on Monad testnet against a mock exchange. Our Perpl adapter has already placed small trades on Perpl testnet, where over-limit orders were refused on chain. Next is an external audit, before any real money. Thank you. | Mandate는 에이전트를 더 잘 거래하게 만들지 않는다. 아무도 보증할 수 없는 에이전트에도, 예치 전에 읽을 수 있는 한도 안에서 안심하고 돈을 맡길 수 있게 한다. 지금은 모나드 테스트넷에서 mock 거래소로 돈다. Perpl 어댑터는 Perpl 테스트넷에서 소액 거래를 했고 한도를 넘는 주문은 온체인에서 거부됐다. 다음은 실자금 전 외부 감사. |
 
 ## 확인해 둘 것
 
-- "왜 만드는지" 문단은 초안의 논리다. 팀의 실제 동기가 따로 있으면 그 문장으로 바꾼다.
-- Monad 문단은 가격 기준 시각 논리 하나만 쓴다. 속도나 비용 일반론은 넣지 않는다.
-- "the release layer we built"는 10-04에 구현된 MandateRegistry와 DP Reporter를 가리킨다. 지금은 공개된 볼트 가격 데이터에만 노이즈를 넣어 게시한다. 비공개 데이터 보호는 아직 없으므로 "private reporting"은 다음 단계로만 말한다.
+- 소속을 HYBLOCK(한양대 블록체인 학회)으로 쓸지 팀이 정한다.
+- Monad 문단은 가격 기준 시각 논리 하나만 쓴다. 속도나 비용 일반론은 넣지 않고, 12초 블록이 "전혀 통과하지 못한다"고도 말하지 않는다.
+- Perpl은 연결한 거래소일 뿐 제휴가 아니다. 공개 데모는 mock 거래소에서 돈다는 문장을 빼지 않는다.
+- "small fee"는 unwind 바운티(0.01%)다.
 - 화면 삽입이 번거로우면 얼굴만 찍어도 조건을 채운다. 폼은 팀, 문제, 이유만 요구한다.

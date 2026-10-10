@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createPerplReader, readPerpl } from "./perpl.mjs";
+import { readFileSync } from "node:fs";
+import { AGENT_LOG_URL, createPerplReader, readPerpl, summarizeAgentLog } from "./perpl.mjs";
 
 const deployment = {
   chainId: "10143",
@@ -36,7 +37,7 @@ function stubs(calls = { n: 0 }) {
 }
 
 test("readPerpl stringifies chain reads into a JSON-safe summary", async () => {
-  const out = await readPerpl({ deployment, contract: stubs() });
+  const out = await readPerpl({ deployment, contract: stubs(), agentLog: () => "" });
   assert.equal(out.vault.status, "Active");
   assert.equal(out.vault.totalAssets, "149900000");
   assert.equal(out.position.positionNotional, (10n ** 17n).toString());
@@ -46,7 +47,7 @@ test("readPerpl stringifies chain reads into a JSON-safe summary", async () => {
   assert.equal(out.terms.maxMarkAgeSeconds, 60);
   assert.equal(out.terms.maxPositionNotional, (200n * 10n ** 18n).toString());
   assert.equal(out.addresses.adapter, deployment.PerplAdapter);
-  assert.ok(out.txs.length >= 2 && out.txs.every((t) => /^0x[0-9a-f]{64}$/.test(t.hash)));
+  assert.equal(out.activity.ticks, 0);
   JSON.stringify(out); // no bigint left
 });
 
@@ -74,4 +75,26 @@ test("a failed read is not cached", async () => {
   await assert.rejects(read(), /rpc down/);
   fail = false;
   assert.equal((await read()).vault.status, "Active");
+});
+
+test("the agent log is summarized into totals and the latest transactions", () => {
+  const tx = (n) => `0x${String(n).repeat(64)}`;
+  const log = [
+    { run: 1, time: "2026-10-06T12:48:00Z", kind: "allocate", allocateTx: tx(9) },
+    { run: 1, time: "2026-10-06T12:49:00Z", kind: "tick", action: "buy", orderBtc: 0.001, tx: tx(1), status: 1 },
+    { run: 1, time: "2026-10-06T12:50:00Z", kind: "tick", action: "hold", breach: { notionalUsd: 260, error: "PositionNotionalExceeded()", tx: tx(2), status: 0 } },
+    { run: 2, time: "2026-10-07T09:00:00Z", kind: "tick", action: "sell", orderBtc: -0.002, tx: tx(3), status: 0 },
+    { run: 2, time: "2026-10-07T09:05:00Z", kind: "exit", tx: tx(4), status: 1 }
+  ].map((e) => JSON.stringify(e)).join("\n") + "\n{\"torn";
+  const a = summarizeAgentLog(log);
+  assert.deepEqual([a.runs, a.ticks, a.fills, a.refusals], [2, 3, 2, 1]);
+  assert.equal(a.firstAt, "2026-10-06T12:48:00Z");
+  assert.deepEqual(a.recent.map((t) => t.hash), [tx(4), tx(2), tx(1)]);
+  assert.match(a.recent[1].label, /\$260 position, PositionNotionalExceeded/);
+});
+
+test("the committed agent log parses and every transaction hash is well formed", () => {
+  const a = summarizeAgentLog(readFileSync(AGENT_LOG_URL, "utf8"));
+  assert.ok(a.fills > 0 && a.refusals > 0);
+  assert.ok(a.recent.every((t) => /^0x[0-9a-f]{64}$/.test(t.hash)));
 });

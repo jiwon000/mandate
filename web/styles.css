@@ -137,5 +137,16 @@ code,.mono,.terms-preview,.modal-row b,.hash code,.feed-item span{overflow-wrap:
 .perpl-grid a,.perpl-txs a{color:var(--cyan);text-decoration:none}
 .perpl-terms{font-size:12px;margin:16px 0 4px}
 .perpl-txs{margin-top:8px}
+.perpl-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:20px}
+.perpl-stats div{display:flex;flex-direction:column;gap:4px}
+.perpl-stats b{font-family:var(--mono);font-size:22px}
+.perpl-stats span{color:var(--muted);font-size:12px}
+.perpl-tx i{font-style:normal;font-family:var(--mono);font-size:11px;min-width:56px}
+.perpl-tx.fill i{color:var(--green)}
+.perpl-tx.refusal i{color:var(--red)}
+.perpl-txs a.perpl-tx{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:baseline}
+.perpl-tx em{font-style:normal;overflow-wrap:anywhere}
+.perpl-tx span{white-space:nowrap}
+@media (max-width:640px){.perpl-stats{gap:10px}.perpl-txs a.perpl-tx{grid-template-columns:64px minmax(0,1fr)}.perpl-tx span{grid-column:2}}
 .perpl-txs a span{font-family:var(--mono);font-size:11px}
 @media(max-width:600px){.perpl-grid{grid-template-columns:1fr}}

@@ -1788,7 +1788,24 @@ function renderPerpl(p) {
       ${row("BTC mark", `${usdE18(p.mark.priceE18)} · ${ageText(age)} old`)}
     </div>
     <p class="perpl-terms">Locked terms: BTC only, ${usdE18(t.maxPositionNotional)} position cap, ${pct(t.maxDrawdownBps)} drawdown, ${t.maxMarkAgeSeconds} s mark age.</p>
-    <div class="perpl-txs">${p.txs.map((tx) => `<a href="${p.explorer}/tx/${tx.hash}" target="_blank" rel="noopener">${tx.label}<span>${tx.hash.slice(0, 10)}…</span></a>`).join("")}</div>`;
+    ${activity(p)}`;
+}
+
+// Totals and the latest transactions, from the agent script's own log in the repo.
+function activity(p) {
+  const a = p.activity;
+  const escapeHtml = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  if (!a?.ticks) return "";
+  const day = (iso) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  const tx = (t) => `<a class="perpl-tx ${t.kind}" href="${p.explorer}/tx/${t.hash}" target="_blank" rel="noopener"><i>${t.kind === "fill" ? "filled" : "refused"}</i><em>${escapeHtml(t.label)}</em><span>${day(t.time)} · ${t.hash.slice(0, 10)}…</span></a>`;
+  return `
+    <div class="perpl-stats">
+      <div><b>${a.fills}</b><span>orders filled on Perpl</span></div>
+      <div><b>${a.refusals}</b><span>orders past the cap, refused on chain</span></div>
+      <div><b>${a.runs}</b><span>runs, ${day(a.firstAt)} to ${day(a.lastAt)} (UTC)</span></div>
+    </div>
+    <p class="perpl-terms">Latest agent transactions</p>
+    <div class="perpl-txs">${a.recent.map(tx).join("")}</div>`;
 }
 
 async function refreshPerpl() {

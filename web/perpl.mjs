@@ -30,15 +30,44 @@ const GUARD_ABI = [
   "function limitsOf(address vault) view returns (tuple(uint16 maxLeverageX100, uint16 maxDrawdownBps, uint32 minBlocksBetweenTrades, uint32 maxMarkAgeSeconds, uint256 maxOrderNotional, uint256 maxPositionNotional, uint256 maxTotalNotional, uint256 maxBlockNotional, uint32 volWindowSeconds, uint32 stressHorizonSeconds, uint16 stressSigmasX10))"
 ];
 
-// The smoke run (docs/perpl-adapter.md, "Testnet deployment"). The first close,
-// which ran out of gas, is left out.
-export const SMOKE_TXS = [
-  { label: "Open 0.001 BTC long", hash: "0x8bc37083404133d95c0920a5840934c2c014836d5735ca9b1cd9336a340e3ddd" },
-  { label: "Close 0.001 BTC (resent, filled)", hash: "0x7a8fce78cc8349ef85f1a58f782c7b2608b1a5b05dbdaa2a2c248177ce958fd4" },
-  { label: "Withdraw 149.914834 aUSD", hash: "0x97420fb0294c2a66386718d3a5e77c7e7234b3d5f3f237774b718f533f65bab8" },
-  // From the agent runs: an order past the $200 cap, mined and reverted by the guard.
-  { label: "Agent order past the $200 cap, refused (PositionNotionalExceeded)", hash: "0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff" }
-];
+// The agent script's own log (contracts/deployments/perpl-agent-10143.jsonl), one
+// JSON line per tick. The page's totals and recent transactions come from it, so a
+// new run shows up by committing its lines; nothing about the runs is typed here.
+export const AGENT_LOG_URL = new URL("../contracts/deployments/perpl-agent-10143.jsonl", import.meta.url);
+const RECENT = 8;
+
+export function summarizeAgentLog(text) {
+  const events = [];
+  for (const line of String(text).split("\n")) {
+    if (!line.trim()) continue;
+    try { events.push(JSON.parse(line)); } catch { /* a torn last line is skipped */ }
+  }
+  const runs = new Set();
+  const txs = [];
+  let ticks = 0;
+  for (const e of events) {
+    if (e.run !== undefined) runs.add(e.run);
+    if (e.kind === "tick") ticks += 1;
+    if (e.kind === "tick" && e.tx && e.status === 1) {
+      txs.push({ time: e.time, kind: "fill", label: `${e.action} ${Math.abs(e.orderBtc)} BTC`, hash: e.tx });
+    }
+    if (e.kind === "exit" && e.tx && e.status === 1) {
+      txs.push({ time: e.time, kind: "fill", label: "close the position", hash: e.tx });
+    }
+    if (e.breach?.tx) {
+      txs.push({ time: e.time, kind: "refusal", label: `$${e.breach.notionalUsd} position, ${e.breach.error}`, hash: e.breach.tx });
+    }
+  }
+  return {
+    runs: runs.size,
+    ticks,
+    fills: txs.filter((t) => t.kind === "fill").length,
+    refusals: txs.filter((t) => t.kind === "refusal").length,
+    firstAt: events[0]?.time ?? null,
+    lastAt: events.at(-1)?.time ?? null,
+    recent: txs.slice(-RECENT).reverse()
+  };
+}
 
 export function loadPerplDeployment() {
   return JSON.parse(readFileSync(new URL("../contracts/deployments/perpl-10143.json", import.meta.url), "utf8"));
@@ -46,7 +75,12 @@ export function loadPerplDeployment() {
 
 // Everything is stringified here: bigints do not survive JSON, and the page
 // formats them (equity and assets are 6-decimal aUSD, notionals and prices e18).
-export async function readPerpl({ deployment, provider, contract = (address, abi) => new Contract(address, abi, provider) }) {
+export async function readPerpl({
+  deployment,
+  provider,
+  contract = (address, abi) => new Contract(address, abi, provider),
+  agentLog = () => readFileSync(AGENT_LOG_URL, "utf8")
+}) {
   const vaultAddress = deployment.vault;
   const adapter = contract(deployment.PerplAdapter, ADAPTER_ABI);
   const vault = contract(vaultAddress, VAULT_ABI);
@@ -92,7 +126,7 @@ export async function readPerpl({ deployment, provider, contract = (address, abi
       venueLeverageHdths: Number(leverage),
       maxAdverseLimitBps: Number(band)
     },
-    txs: SMOKE_TXS,
+    activity: summarizeAgentLog(agentLog()),
     readAt: Math.floor(Date.now() / 1000)
   };
 }
@@ -103,6 +137,7 @@ export function createPerplReader({
   deployment = loadPerplDeployment(),
   provider = new JsonRpcProvider(PERPL_RPC, Number(deployment.chainId), { staticNetwork: true }),
   contract,
+  agentLog,
   ttlMs = CACHE_MS,
   now = () => Date.now()
 } = {}) {
@@ -110,7 +145,7 @@ export function createPerplReader({
   let pending = null;
   return async function read() {
     if (cached && now() - cached.at < ttlMs) return cached.value;
-    pending ??= readPerpl({ deployment, provider, contract })
+    pending ??= readPerpl({ deployment, provider, contract, ...(agentLog && { agentLog }) })
       .then((value) => {
         cached = { at: now(), value };
         return value;

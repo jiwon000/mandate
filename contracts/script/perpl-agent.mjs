@@ -89,7 +89,12 @@ if (chainId !== 10143n) throw new Error(`Chain ${chainId} is not Monad testnet (
 
 const d = JSON.parse(fs.readFileSync(PERPL_DEPLOYMENTS, "utf8"));
 const vaultAbi = loadAbi("MandateVault.sol", "MandateVault");
-const adapterAbi = loadAbi("perpl/PerplAdapter.sol", "PerplAdapter");
+// The testnet adapter was deployed on 2026-10-06, before TradePreview gained
+// currentSizeE18, so preview() is read with the layout that is on chain.
+const adapterAbi = loadAbi("perpl/PerplAdapter.sol", "PerplAdapter").map((item) => item.name !== "preview" ? item : {
+  ...item,
+  outputs: [{ ...item.outputs[0], components: item.outputs[0].components.filter((c) => c.name !== "currentSizeE18") }]
+});
 const vault = new Contract(d.vault, vaultAbi, signer);
 const adapter = new Contract(d.PerplAdapter, adapterAbi, provider);
 const exchange = new Contract(d.perpl.exchange, loadAbi("perpl/IPerplExchange.sol", "IPerplExchange"), provider);

@@ -98,3 +98,32 @@ test("the committed agent log parses and every transaction hash is well formed",
   assert.ok(a.fills > 0 && a.refusals > 0);
   assert.ok(a.recent.every((t) => /^0x[0-9a-f]{64}$/.test(t.hash)));
 });
+
+test("latestRun: only the highest run, with fill and refusal kinds", () => {
+  const line = (o) => JSON.stringify(o);
+  const log = [
+    line({ run: 1, time: "2026-10-01T00:00:00.000Z", kind: "tick", mark: 100, positionAfter: 1, tx: "0xa", status: 1 }),
+    line({ run: 2, time: "2026-10-02T00:00:00.000Z", kind: "allocate" }),
+    line({ run: 2, time: "2026-10-02T00:01:00.000Z", kind: "tick", mark: 200, positionBefore: 0, positionAfter: 0.5, action: "buy", tx: "0xb", status: 1 }),
+    "{torn",
+    line({ run: 2, time: "2026-10-02T00:02:00.000Z", kind: "tick", mark: 210, positionBefore: 0.5, action: "hold", breach: { tx: "0xc", status: 0 } }),
+    line({ run: 2, time: "2026-10-02T00:03:00.000Z", kind: "tick", mark: 205, positionBefore: 0.5, action: "hold" }),
+    line({ run: 2, time: "2026-10-02T00:04:00.000Z", kind: "tick", mark: 207, positionAfter: 0.4, tx: "0xd", status: 1, breach: { tx: "0xe", status: 0 } }),
+    line({ run: 2, time: "2026-10-02T00:05:00.000Z", kind: "tick", action: "skip stale mark" }),
+    line({ run: 2, time: "2026-10-02T00:06:00.000Z", kind: "exit", tx: "0xf", status: 1, mark: 208 })
+  ].join("\n");
+  const { latestRun } = summarizeAgentLog(log);
+  assert.equal(latestRun.run, 2);
+  assert.deepEqual(latestRun.points.map((p) => [p.mark, p.position, p.kind, p.refused]), [
+    [200, 0.5, "fill", undefined],
+    [210, 0.5, "refusal", undefined],
+    [205, 0.5, null, undefined],
+    [207, 0.4, "fill", true]
+  ]);
+});
+
+test("latestRun: committed log gives a non-empty chart series", () => {
+  const { latestRun } = summarizeAgentLog(readFileSync(AGENT_LOG_URL, "utf8"));
+  assert.ok(latestRun.points.length > 0);
+  assert.ok(latestRun.points.every((p) => Number.isFinite(p.mark) && p.time));
+});

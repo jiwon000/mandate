@@ -1799,6 +1799,42 @@ function renderPerpl(p) {
     ${activity(p)}`;
 }
 
+// BTC mark over the agent's latest run, with its fills and refused orders marked.
+function agentChart(run, escapeHtml) {
+  const pts = (run?.points ?? []).filter((q) => Number.isFinite(q.mark) && Number.isFinite(Date.parse(q.time)));
+  if (pts.length < 2) return "";
+  const W = 480, H = 240, L = 12, R = 12, T = 16, B = 28;
+  const t0 = Date.parse(pts[0].time), t1 = Date.parse(pts.at(-1).time);
+  const marks = pts.map((q) => q.mark);
+  const lo = Math.min(...marks), hi = Math.max(...marks);
+  const pad = (hi - lo || 1) * 0.12;
+  const yMin = lo - pad, yMax = hi + pad;
+  const x = (q) => L + (t1 === t0 ? 0 : ((Date.parse(q.time) - t0) / (t1 - t0)) * (W - L - R));
+  const y = (q) => T + (1 - (q.mark - yMin) / (yMax - yMin)) * (H - T - B);
+  const line = pts.map((q, i) => `${i ? "L" : "M"}${x(q).toFixed(1)} ${y(q).toFixed(1)}`).join("");
+  const grid = [0, 1, 2, 3].map((i) => { const gy = (T + (i / 3) * (H - T - B)).toFixed(1); return `<path d="M${L} ${gy}H${W - R}"/>`; }).join("");
+  const dots = pts.filter((q) => q.kind || q.refused).map((q) => {
+    const cx = x(q).toFixed(1), cy = y(q).toFixed(1);
+    return `<circle class="${q.kind === "refusal" ? "refusal" : "fill"}" cx="${cx}" cy="${cy}" r="5"/>` +
+      (q.refused ? `<circle class="refusal ring" cx="${cx}" cy="${cy}" r="8"/>` : "");
+  }).join("");
+  const usd = (n) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  const multiDay = new Date(t0).toISOString().slice(0, 10) !== new Date(t1).toISOString().slice(0, 10);
+  const stamp = (ms) => { const iso = new Date(ms).toISOString(); return multiDay ? `${iso.slice(5, 10)} ${iso.slice(11, 16)}` : iso.slice(11, 16); };
+  const yLo = y({ mark: lo }).toFixed(1), yHi = y({ mark: hi }).toFixed(1);
+  return `
+    <p class="perpl-terms">${escapeHtml(`Run ${run.run}: BTC mark, fills and refusals`)}</p>
+    <svg class="perpl-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(`BTC mark across run ${run.run}, ${pts.length} readings`)}">
+      <g class="grid">${grid}</g>
+      <path class="line" d="${line}"/>
+      ${dots}
+      <text class="lbl" x="${W - R}" y="${Math.max(+yHi - 6, 10)}" text-anchor="end">${escapeHtml(usd(hi))}</text>
+      <text class="lbl" x="${W - R}" y="${Math.min(+yLo + 14, H - B - 2)}" text-anchor="end">${escapeHtml(usd(lo))}</text>
+      <text class="lbl" x="${L}" y="${H - 6}">${escapeHtml(stamp(t0))} UTC</text>
+      <text class="lbl" x="${W - R}" y="${H - 6}" text-anchor="end">${escapeHtml(stamp(t1))} UTC</text>
+    </svg>`;
+}
+
 // Totals and the latest transactions, from the agent script's own log in the repo.
 function activity(p) {
   const a = p.activity;
@@ -1812,6 +1848,7 @@ function activity(p) {
       <div><b>${a.refusals}</b><span>orders past the cap, refused on chain</span></div>
       <div><b>${a.runs}</b><span>runs, ${day(a.firstAt)} to ${day(a.lastAt)} (UTC)</span></div>
     </div>
+    ${agentChart(a.latestRun, escapeHtml)}
     <p class="perpl-terms">Latest agent transactions</p>
     <div class="perpl-txs">${a.recent.map(tx).join("")}</div>`;
 }

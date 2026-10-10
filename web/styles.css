@@ -150,3 +150,10 @@ code,.mono,.terms-preview,.modal-row b,.hash code,.feed-item span{overflow-wrap:
 @media (max-width:640px){.perpl-stats{gap:10px}.perpl-txs a.perpl-tx{grid-template-columns:64px minmax(0,1fr)}.perpl-tx span{grid-column:2}}
 .perpl-txs a span{font-family:var(--mono);font-size:11px}
 @media(max-width:600px){.perpl-grid{grid-template-columns:1fr}}
+.perpl-chart{display:block;width:100%;max-width:560px;height:auto;margin-top:8px}
+.perpl-chart .grid path{stroke:var(--line);stroke-width:1;stroke-dasharray:2 4}
+.perpl-chart .line{fill:none;stroke:var(--cyan);stroke-width:2;stroke-linejoin:round}
+.perpl-chart circle.fill{fill:var(--green)}
+.perpl-chart circle.refusal{fill:var(--red)}
+.perpl-chart circle.ring{fill:none;stroke:var(--red);stroke-width:2}
+.perpl-chart .lbl{fill:var(--muted);font:13px var(--mono)}

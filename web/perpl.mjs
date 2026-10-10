@@ -36,6 +36,8 @@ const GUARD_ABI = [
 export const AGENT_LOG_URL = new URL("../contracts/deployments/perpl-agent-10143.jsonl", import.meta.url);
 const RECENT = 8;
 
+const MAX_CHART_POINTS = 400;
+
 export function summarizeAgentLog(text) {
   const events = [];
   for (const line of String(text).split("\n")) {
@@ -58,7 +60,22 @@ export function summarizeAgentLog(text) {
       txs.push({ time: e.time, kind: "refusal", label: `$${e.breach.notionalUsd} position, ${e.breach.error}`, hash: e.breach.tx });
     }
   }
+  const latestRunNumber = Math.max(...[...runs].filter(Number.isFinite), -Infinity);
+  const points = [];
+  for (const e of events) {
+    if (e.kind !== "tick" || e.run !== latestRunNumber || !Number.isFinite(e.mark)) continue;
+    const fill = Boolean(e.tx) && e.status === 1;
+    const refused = Boolean(e.breach?.tx);
+    points.push({
+      time: e.time,
+      mark: e.mark,
+      position: e.positionAfter ?? e.positionBefore ?? null,
+      kind: fill ? "fill" : refused ? "refusal" : null,
+      ...(fill && refused && { refused: true })
+    });
+  }
   return {
+    latestRun: Number.isFinite(latestRunNumber) ? { run: latestRunNumber, points: points.slice(-MAX_CHART_POINTS) } : null,
     runs: runs.size,
     ticks,
     fills: txs.filter((t) => t.kind === "fill").length,

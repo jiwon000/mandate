@@ -53,7 +53,17 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
     /// @notice Share of idle assets paid to whoever lands an unwind() step.
     /// @dev 0.01% per step, 0.05% for the full close: the same keeper economics as the
     ///      poke bounty, so nobody has to be trusted to finish what the freeze started.
+    ///      A mandate can raise a step to the guard's `unwindBountyFloorOf` (a flat
+    ///      amount, so a small vault still covers the gas), see unwind().
     uint16 public constant UNWIND_BOUNTY_BPS = 1;
+
+    /// @notice Most an unwind() step pays, as a share of idle assets, whatever the floor.
+    /// @dev 0.2% per step, so a full five-step close costs at most about 1% of cash:
+    ///      the same order as the 1% slippage bound each step already allows, and four
+    ///      times the poke bounty. Set against a floor the mandate chose for a vault
+    ///      that then turns out smaller than expected; the floor pays in full on any
+    ///      vault at least 500 times its size, and a smaller one pays this share.
+    uint16 public constant UNWIND_BOUNTY_CAP_BPS = 20;
 
     /// @notice Shares locked forever out of the first deposit.
     /// @dev Same defence as Uniswap V2's MINIMUM_LIQUIDITY. Without it the first
@@ -525,8 +535,21 @@ contract MandateVault is ReentrancyGuard, IMandateVaultFreeze {
         }
 
         // Paid for closing size only: a call that finds the book already flat just
-        // moves the vault to Closed and earns nothing.
-        uint256 bounty = closedNotional == 0 ? 0 : (totalAssets() * UNWIND_BOUNTY_BPS) / 10_000;
+        // moves the vault to Closed and earns nothing. The larger of the bps share and
+        // the mandate's floor, never past UNWIND_BOUNTY_CAP_BPS of the cash the vault
+        // holds right now: cash is what the step can pay from, and a floor set for a
+        // vault that stayed small must not take it apart. With no floor the share
+        // alone is paid, exactly as before the floor existed.
+        uint256 bounty;
+        if (closedNotional != 0) {
+            uint256 cash = totalAssets();
+            bounty = (cash * UNWIND_BOUNTY_BPS) / 10_000;
+            uint256 floor = riskGuard.unwindBountyFloorOf(address(this));
+            if (floor > bounty) {
+                uint256 cap = (cash * UNWIND_BOUNTY_CAP_BPS) / 10_000;
+                bounty = floor > cap ? cap : floor;
+            }
+        }
         if (bounty > 0) asset.safeTransfer(msg.sender, bounty);
         emit Unwound(msg.sender, step, closedNotional, realizedPnl, bounty);
 

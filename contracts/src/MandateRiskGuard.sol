@@ -156,6 +156,9 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     mapping(address => TradeTerms) private tradeTerms;
     mapping(address => FeeTerms) private fees;
     mapping(address => ReferenceTerms) private referenceTerms;
+    /// @notice Least the vault pays per unwind() step, in asset units; 0 means the
+    ///         bps share alone. Part of the locked terms; see setUnwindBountyFloor.
+    mapping(address => uint256) private unwindBountyFloor;
     mapping(address => DayState) public dayOf;
     mapping(address => TradeCount) public tradesOf;
     /// @notice When the vault last went from flat to holding a position; 0 while flat.
@@ -177,6 +180,7 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
     event HoldingTimeBreach(address indexed vault, address indexed caller, uint256 openedAt, uint256 bounty);
     event FeeRebased(address indexed vault, uint256 supplyBefore, uint256 supplyAfter);
     event ReferenceTermsSet(address indexed vault, uint16 maxMarkDeviationBps, uint32 maxReferenceAgeSeconds);
+    event UnwindBountyFloorSet(address indexed vault, uint256 floor);
     event AdapterAllowed(address indexed vault, address indexed adapter, bool allowed);
     event TermsLocked(address indexed vault, bytes32 termsHash);
     event RiskConsumed(address indexed vault, bytes32 indexed orderHash, uint256 notional);
@@ -293,6 +297,21 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
         emit ReferenceTermsSet(vault, r.maxMarkDeviationBps, r.maxReferenceAgeSeconds);
     }
 
+    /// @notice Least the vault pays whoever lands an unwind() step, in asset units.
+    ///         Optional, and like every other term it can only be set before the lock.
+    /// @dev The bps share of a small vault's cash can sit under the gas a step costs
+    ///      on a venue like Perpl, so nobody finishes what the freeze started. A floor
+    ///      makes the step worth calling at a size the operator chooses; the vault
+    ///      still caps every step at UNWIND_BOUNTY_CAP_BPS of its cash, so a floor can
+    ///      never drain a vault that is smaller than the operator expected. Any value
+    ///      is accepted for that reason. Zero clears the floor.
+    function setUnwindBountyFloor(address vault, uint256 floor) external onlyOwnerOrFactory {
+        if (termsLocked[vault]) revert LimitsLocked();
+        if (!configured[vault]) revert LimitsNotConfigured();
+        unwindBountyFloor[vault] = floor;
+        emit UnwindBountyFloorSet(vault, floor);
+    }
+
     function setAdapter(address vault, address adapter, bool allowed) external onlyOwnerOrFactory {
         if (termsLocked[vault]) revert LimitsLocked();
         adapterAllowed[vault][adapter] = allowed;
@@ -313,9 +332,16 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     /// @notice keccak256(abi.encode(limits, tradeTerms, fees)): every term the vault runs
     ///         under. A vault with reference terms appends them to the encoding, so the
-    ///         hash of a vault without them is unchanged.
+    ///         hash of a vault without them is unchanged. A vault with an unwind bounty
+    ///         floor appends the reference terms (set or not) and then the floor, so
+    ///         the three encodings differ in length and the hash of a vault without a
+    ///         floor is, again, unchanged.
     function termsHash(address vault) public view returns (bytes32) {
         ReferenceTerms memory r = referenceTerms[vault];
+        uint256 floor = unwindBountyFloor[vault];
+        if (floor != 0) {
+            return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault], r, floor));
+        }
         if (r.maxMarkDeviationBps == 0) {
             return keccak256(abi.encode(limitsOf[vault], tradeTerms[vault], fees[vault]));
         }
@@ -324,6 +350,10 @@ contract MandateRiskGuard is IRiskGuard, Ownable {
 
     function referenceTermsOf(address vault) external view returns (ReferenceTerms memory) {
         return referenceTerms[vault];
+    }
+
+    function unwindBountyFloorOf(address vault) external view returns (uint256) {
+        return unwindBountyFloor[vault];
     }
 
     /// @notice The venue mark, the reference price, the reference's timestamp and the

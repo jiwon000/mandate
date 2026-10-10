@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Wallet } from "ethers";
+import { Wallet, ZeroHash } from "ethers";
 import { intentDomain, intentTypes } from "../contracts/tools/batch.mjs";
 import { DPReporter } from "../reporter/reporter.mjs";
 import { RollingBudget } from "./live-gas.mjs";
@@ -257,18 +257,43 @@ test("an epoch nobody settled inside its window is forgotten", async () => {
 });
 
 // --- reporter ---------------------------------------------------------------
-function fakeRegistry(start = {}) {
+const NO_PLEDGE = { commitment: ZeroHash, committedAtBlock: 0n, windowStartBlock: 0n };
+
+// `pledges`: "ok" is a registry with commitNoiseSeed(); "predates" one deployed
+// before the call existed, reached through today's ABI (the calls revert with
+// empty data); "absent" an ABI without the calls at all.
+function fakeRegistry(start = {}, { pledges = "ok", pending = null } = {}) {
   const state = { cumulative: 0n, cap: 50_000_000n, lastEpoch: 0n, hasReleased: false, lastPinnedBlock: 0n, ...start };
   const posted = [];
+  const committed = [];
+  const bound = new Map();
+  let waiting = pending ? { commitment: pending, committedAtBlock: 1n, windowStartBlock: state.lastPinnedBlock } : NO_PLEDGE;
   const postLeaderboard = async (epoch, pinnedBlock, statsDigest, perf, intent, cumulative, signature, overrides) => {
     posted.push({ epoch, pinnedBlock, cumulative, signature, overrides });
     Object.assign(state, { cumulative, lastEpoch: epoch, hasReleased: true, lastPinnedBlock: pinnedBlock });
+    if (waiting.commitment !== ZeroHash) {
+      bound.set(epoch, waiting);
+      waiting = NO_PLEDGE;
+    }
     return { hash: `0xrelease${posted.length}` };
   };
   postLeaderboard.estimateGas = async () => 190_000n;
-  return {
+  const predates = () => Object.assign(new Error("could not decode result data"), { code: "BAD_DATA" });
+  const commitNoiseSeed = async (commitment, overrides) => {
+    if (pledges === "predates") throw predates();
+    if (waiting.commitment !== ZeroHash) throw Object.assign(new Error("revert"), { revert: { name: "CommitAlreadyPending" } });
+    committed.push({ commitment, overrides });
+    waiting = { commitment, committedAtBlock: state.lastPinnedBlock + 1n, windowStartBlock: state.lastPinnedBlock };
+    return { hash: `0xpledge${committed.length}`, blockNumber: Number(waiting.committedAtBlock) };
+  };
+  commitNoiseSeed.estimateGas = async () => {
+    if (pledges === "predates") throw predates();
+    return 50_000n;
+  };
+  const registry = {
     state,
     posted,
+    committed,
     postLeaderboard,
     cumulativeEpsilonE6: async () => state.cumulative,
     epsilonCap: async () => state.cap,
@@ -276,15 +301,27 @@ function fakeRegistry(start = {}) {
     hasReleased: async () => state.hasReleased,
     lastPinnedBlock: async () => state.lastPinnedBlock
   };
+  if (pledges !== "absent") {
+    Object.assign(registry, {
+      commitNoiseSeed,
+      pendingNoiseCommit: async () => {
+        if (pledges === "predates") throw predates();
+        return waiting;
+      },
+      noiseCommitOf: async (epoch) => bound.get(epoch) ?? NO_PLEDGE
+    });
+  }
+  return registry;
 }
 
-function reporterDesk(start) {
+function reporterDesk(start, options) {
   const world = { block: 500, wall: 1_000_000, nav: 1, resetting: false };
-  const registry = fakeRegistry(start);
+  const registry = fakeRegistry(start, options);
+  const reporter = new DPReporter({ reporterSecret: "test", signer: allocator, registryAddress: A(60), chainId: 10143, clipBound: 0.1, epsilon: 0.5 });
   const api = createReporterDesk({
     registry,
     address: A(60),
-    reporter: new DPReporter({ reporterSecret: "test", signer: allocator, registryAddress: A(60), chainId: 10143, clipBound: 0.1, epsilon: 0.5 }),
+    reporter,
     vaults: VAULTS,
     navOf: async (vault) => (vault === VAULTS[0] ? world.nav : 1),
     blockNumber: async () => world.block,
@@ -298,7 +335,7 @@ function reporterDesk(start) {
     world.nav = nav;
     await api.sample();
   };
-  return { api, registry, world, tick };
+  return { api, registry, reporter, world, tick };
 }
 
 test("the reporter pools one return per vault per mark and releases once it has three", async () => {
@@ -362,4 +399,52 @@ test("a reporter that starts on a registry with history continues its ledger", a
   const release = await api.publish();
   assert.deepEqual({ epoch: release.epoch, cumulative: release.cumulativeEpsilonE6 }, { epoch: 5, cumulative: "3000000" });
   assert.equal(registry.posted[0].epoch, 5n);
+});
+
+test("the reporter pledges its seed before a release and the next window's right after, and reuses a pledge already pending", async () => {
+  const { api, registry, reporter, world, tick } = reporterDesk();
+  assert.equal((await api.status()).noisePledges, true);
+  for (const nav of [1, 1.01, 1.02, 1.03]) await tick(nav);
+
+  // Nothing pending yet: the pledge goes in just before the release, the
+  // next window's just after, both through the gas gate.
+  const first = await api.publish();
+  assert.deepEqual(registry.committed.map((c) => c.commitment), [reporter.commitmentFor(0), reporter.commitmentFor(1)]);
+  assert.equal(registry.committed[0].overrides.gasLimit, 75_000n);
+  assert.deepEqual(first.noiseCommit, { commitment: reporter.commitmentFor(0), committedAtBlock: 1, matches: true });
+  assert.equal((await registry.noiseCommitOf(0n)).commitment, reporter.commitmentFor(0));
+  assert.equal(first.published.noiseCommit, reporter.commitmentFor(0));
+
+  // The second release finds its pledge waiting: one new transaction, for epoch 2.
+  for (const nav of [1.04, 1.05, 1.06]) await tick(nav);
+  world.wall += 121_000;
+  world.block = 501;
+  const second = await api.publish();
+  assert.equal(registry.committed.length, 3);
+  assert.equal(registry.committed[2].commitment, reporter.commitmentFor(2));
+  assert.deepEqual(second.noiseCommit, { commitment: reporter.commitmentFor(1), committedAtBlock: 501, matches: true });
+  assert.equal(registry.posted.length, 2);
+});
+
+test("a pending pledge the reporter cannot open is left in place and the release says so", async () => {
+  const foreign = `0x${"ab".repeat(32)}`;
+  const { api, registry, reporter, tick } = reporterDesk({}, { pending: foreign });
+  for (const nav of [1, 1.01, 1.02, 1.03]) await tick(nav);
+  const release = await api.publish();
+  assert.deepEqual(release.noiseCommit, { commitment: foreign, committedAtBlock: 1, matches: false });
+  // Only the next window's pledge was sent; the foreign one was not replaced.
+  assert.deepEqual(registry.committed.map((c) => c.commitment), [reporter.commitmentFor(1)]);
+  assert.equal((await registry.noiseCommitOf(0n)).commitment, foreign);
+});
+
+test("a registry deployed before pledges existed, or an ABI without them, still takes releases", async () => {
+  for (const pledges of ["predates", "absent"]) {
+    const { api, registry, tick } = reporterDesk({}, { pledges });
+    assert.equal((await api.status()).noisePledges, false, pledges);
+    for (const nav of [1, 1.01, 1.02, 1.03]) await tick(nav);
+    const release = await api.publish();
+    assert.equal(release.noiseCommit, null, pledges);
+    assert.equal(registry.committed.length, 0, pledges);
+    assert.equal(registry.posted.length, 1, pledges);
+  }
 });

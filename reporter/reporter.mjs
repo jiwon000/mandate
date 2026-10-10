@@ -5,7 +5,7 @@
 // must call commit() only after that transaction actually confirms.
 import { AbiCoder, keccak256 } from "ethers";
 import { clip, mean, sharpe, maxDrawdown, laplaceScaleForMean } from "./stats.mjs";
-import { deriveSeed, laplaceSamples } from "./noise.mjs";
+import { commitmentOf, deriveSeed, laplaceSamples } from "./noise.mjs";
 import { EpsilonLedger } from "./epsilon.mjs";
 
 const coder = AbiCoder.defaultAbiCoder();
@@ -68,12 +68,7 @@ export class DPReporter {
     const epsilonIntentE6 = 0n;
     const cumulativeEpsilonE6 = this.ledger.propose(epoch, epsilonPerfE6, epsilonIntentE6);
 
-    const seed = deriveSeed(this.reporterSecret, {
-      domainSeparator: this.domain.verifyingContract,
-      epochId: epoch,
-      pinnedBlock,
-      statsVersion: this.statsVersion
-    });
+    const seed = this.#seedFor(epoch);
     // This scale is derived from the mean's own sensitivity (2*clipBound/N) and
     // reused for all three draws below. The stated epsilon is an exact, provable
     // DP guarantee for the mean only -- Sharpe's and max-drawdown's own global
@@ -126,7 +121,10 @@ export class DPReporter {
         scale,
         noisyMean,
         noisySharpe,
-        noisyMaxDrawdown
+        noisyMaxDrawdown,
+        // The pledge this release answers to, for comparison with what
+        // MandateRegistry.noiseCommitOf(epoch) recorded.
+        noiseCommit: commitmentOf(seed)
       }
     };
   }
@@ -135,5 +133,30 @@ export class DPReporter {
   /// release has actually confirmed on-chain.
   commit(epoch, cumulativeEpsilonE6) {
     this.ledger.commit(epoch, cumulativeEpsilonE6);
+  }
+
+  /// keccak256 of the seed epoch `epoch` will be noised with -- what to send to
+  /// MandateRegistry.commitNoiseSeed() before the window's data exists. Only
+  /// the hash: the seed never leaves this class except through
+  /// exportSeedForAudit().
+  commitmentFor(epoch) {
+    return commitmentOf(this.#seedFor(epoch));
+  }
+
+  /// The seed itself, for handing to an auditor out of band (0x hex). With it
+  /// and the published numbers, `contracts/script/verify-noise.mjs --seed`
+  /// recomputes the noise and the exact aggregate of that one epoch -- that is
+  /// the point, and also why it must never be published: the release's
+  /// epsilon guarantee is void for anyone who holds this.
+  exportSeedForAudit(epoch) {
+    return `0x${this.#seedFor(epoch).toString("hex")}`;
+  }
+
+  #seedFor(epoch) {
+    return deriveSeed(this.reporterSecret, {
+      domainSeparator: this.domain.verifyingContract,
+      epochId: epoch,
+      statsVersion: this.statsVersion
+    });
   }
 }

@@ -1,16 +1,29 @@
 // Deterministic noise derivation for DP releases
 // (mandate-technical-spec-v0.2.md 4.3). The seed is a keyed HMAC so nobody
 // without reporterSecret can predict or recompute the actual noise, but the
-// same (secret, domain, epoch, pinnedBlock, statsVersion) tuple always
-// reproduces the exact same release internally -- that reproducibility is
-// what lets a release be regenerated and checked against its statsDigest,
-// without ever exposing reporterSecret or letting an outsider forge one.
+// same (secret, domain, epoch, statsVersion) tuple always reproduces the exact
+// same release internally -- that reproducibility is what lets a release be
+// regenerated and checked against its statsDigest, without ever exposing
+// reporterSecret or letting an outsider forge one.
+//
+// The seed depends on nothing the reporter learns during the window (no
+// pinned block, no sample count), so its hash can be pledged on
+// MandateRegistry.commitNoiseSeed() before the window's data exists; see
+// commitmentOf(). The seed itself stays private: whoever holds it can subtract
+// the noise from the published numbers and read the exact aggregate.
 import { createHash, createHmac } from "node:crypto";
+import { keccak256 } from "ethers";
 
-/// seed = HMAC_SHA256(reporterSecret, domainSeparator || epochId || pinnedBlock || statsVersion)
-export function deriveSeed(reporterSecret, { domainSeparator, epochId, pinnedBlock, statsVersion }) {
-  const material = `${domainSeparator}|${epochId}|${pinnedBlock}|${statsVersion}`;
+/// seed = HMAC_SHA256(reporterSecret, domainSeparator || epochId || statsVersion)
+export function deriveSeed(reporterSecret, { domainSeparator, epochId, statsVersion }) {
+  const material = `${domainSeparator}|${epochId}|${statsVersion}`;
   return createHmac("sha256", reporterSecret).update(material).digest();
+}
+
+/// What MandateRegistry.commitNoiseSeed() records for a seed: keccak256 of its
+/// 32 bytes, as a 0x-prefixed hex string. Safe to publish; the seed is not.
+export function commitmentOf(seed) {
+  return keccak256(seed);
 }
 
 /// A deterministic, non-cryptographic uniform(0,1) stream derived from `seed`.

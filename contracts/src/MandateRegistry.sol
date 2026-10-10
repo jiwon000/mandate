@@ -77,6 +77,21 @@ contract MandateRegistry is Ownable, EIP712 {
         uint256 cumulativeEpsilonE6;
     }
 
+    /// @notice The reporter's pledge of the noise seed for its next release:
+    ///         `commitment = keccak256(seed)`, recorded before the release's
+    ///         data exists. `windowStartBlock` is the previous release's pinned
+    ///         block, so a reader can tell how early in the window the pledge
+    ///         landed. The seed itself is never posted: revealing it would also
+    ///         reveal the exact noise, and with it the un-noised statistic,
+    ///         which is the one thing differential privacy exists to hide. The
+    ///         pledge therefore makes the reporter accountable to an auditor it
+    ///         chooses to show the seed to, not publicly verifiable.
+    struct NoiseCommit {
+        bytes32 commitment;
+        uint64 committedAtBlock;
+        uint64 windowStartBlock;
+    }
+
     bytes32 public constant RELEASE_TYPEHASH = keccak256(
         "LeaderboardRelease(uint256 epoch,uint256 pinnedBlock,bytes32 statsDigest,uint256 epsilonPerfE6,uint256 epsilonIntentE6,uint256 cumulativeEpsilonE6)"
     );
@@ -102,6 +117,8 @@ contract MandateRegistry is Ownable, EIP712 {
     error NotCanonicalGuard();
     error OnlyFactory();
     error AlreadySet();
+    error ZeroCommitment();
+    error CommitAlreadyPending();
 
     address public reporter;
     /// @notice Hard ceiling on cumulative epsilon ever released. 0 means no cap.
@@ -128,6 +145,11 @@ contract MandateRegistry is Ownable, EIP712 {
     /// @dev Distinguishes "no release yet" from "epoch 0 was posted", since both
     ///      leave lastEpoch at its default value.
     bool public hasReleased;
+    /// @notice The pledge waiting for the next release; zero when there is none.
+    NoiseCommit public pendingNoiseCommit;
+    /// @notice The pledge that was pending when each epoch's release was posted.
+    ///         A zero commitment means the release was posted without one.
+    mapping(uint256 => NoiseCommit) public noiseCommitOf;
 
     event AgentRegistered(
         address indexed vault,
@@ -150,6 +172,8 @@ contract MandateRegistry is Ownable, EIP712 {
         uint256 epsilonIntentE6,
         uint256 cumulativeEpsilonE6
     );
+    event NoiseSeedCommitted(bytes32 commitment, uint256 committedAtBlock, uint256 windowStartBlock);
+    event NoiseCommitBound(uint256 indexed epoch, bytes32 commitment, uint256 committedAtBlock, uint256 windowStartBlock);
 
     constructor() Ownable(msg.sender) EIP712("MandateRegistry", "1") {}
 
@@ -324,6 +348,35 @@ contract MandateRegistry is Ownable, EIP712 {
         cumulativeEpsilonE6 = cumulativeEpsilonE6_;
         hasReleased = true;
         emit LeaderboardPosted(epoch, pinnedBlock, statsDigest, epsilonPerfE6, epsilonIntentE6, cumulativeEpsilonE6_);
+
+        // The pledge made during this window, if any, now belongs to this epoch.
+        // The contract cannot check that the release used the pledged seed --
+        // that would need the seed, which must stay private (see NoiseCommit);
+        // it only fixes which pledge, made when, the release has to answer to.
+        NoiseCommit memory pledge = pendingNoiseCommit;
+        if (pledge.commitment != bytes32(0)) {
+            noiseCommitOf[epoch] = pledge;
+            delete pendingNoiseCommit;
+            emit NoiseCommitBound(epoch, pledge.commitment, pledge.committedAtBlock, pledge.windowStartBlock);
+        }
+    }
+
+    /// @notice Pledge the noise seed of the next release: `commitment` is
+    ///         `keccak256(seed)`. One pledge per window, so a seed cannot be
+    ///         swapped after the window's data is in; the next postLeaderboard()
+    ///         binds it to its epoch and clears it. Reporter only: unlike the
+    ///         release there is no signature to relay, and the pledge's whole
+    ///         point is who made it, when.
+    function commitNoiseSeed(bytes32 commitment) external {
+        if (msg.sender != reporter) revert OnlyReporter();
+        if (commitment == bytes32(0)) revert ZeroCommitment();
+        if (pendingNoiseCommit.commitment != bytes32(0)) revert CommitAlreadyPending();
+        pendingNoiseCommit = NoiseCommit({
+            commitment: commitment,
+            committedAtBlock: uint64(block.number),
+            windowStartBlock: uint64(lastPinnedBlock)
+        });
+        emit NoiseSeedCommitted(commitment, block.number, lastPinnedBlock);
     }
 
     /// @notice Record that a registered vault has frozen or closed. Permissionless.

@@ -10,7 +10,7 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 
 - 제출 준비 현황과 제출 글: [`docs/submission/`](docs/submission/README.md)
 
-## 현재 상태 (2026-10-06)
+## 현재 상태 (2026-10-10)
 
 | 구성 요소 | 상태 |
 | --- | --- |
@@ -18,7 +18,7 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 
 | `MandateFactory` 무허가 볼트 개설 | 공개 데모 Launch 화면 (브라우저 지갑 필요) |
 | 조건 19개: 리스크 한도 11, 거래 조건 6, 수수료 2 (선택 사항인 참조가격 조건 2개를 쓰면 21개) | 온체인 강제, 모두 `termsHash` 하나로 잠김 |
 | `BatchAllocator`, `MandateRegistry`, DP 리포터 | 공개 데모 Batch·Privacy 화면 |
-| `PerplAdapter` (Monad의 perp 거래소 Perpl) | Monad 테스트넷에 배포. Perpl 테스트넷 거래소에서 입금, 거래, 출금 왕복 1회, 이어서 규칙 기반 에이전트 스크립트로 4회 실행해 주문 14건 체결, 한도 초과 주문 7건 온체인 거부 |
+| `PerplAdapter` (Monad의 perp 거래소 Perpl) | Monad 테스트넷에 배포. Perpl 테스트넷 거래소에서 입금, 거래, 출금 왕복 1회, 이어서 규칙 기반 에이전트 스크립트로 5회 실행해 주문 20건 체결, 한도 초과 주문 9건 온체인 거부 |
 | 거래소와 USDC | mock. 테스트넷 가격은 팀의 키퍼가 넣음 |
 | 보안 검토 | 내부 리뷰 4라운드. 외부 감사 없음 |
 | 테스트 | 계약 128개, 서버 69개, Foundry 24개(invariant 21개, reentrancy 3개). CI에서 실행 |
@@ -82,7 +82,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 - 수익을 약속하지 않습니다. guard는 행동을 제한할 뿐 전략의 질을 보장하지 않습니다.
 - 위험이 사라진다고 주장하지 않습니다. 언제 주문이 거절되고 언제 Vault가 동결되는지가 정해질 뿐, 조건 안의 손실과 가격 갭으로 조건을 넘는 손실은 여전히 생깁니다.
-- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷에서 소액 거래만 해봤으며(2026-10-06과 10-10, 스크립트 실행 약 1시간, 체결 14건) Perpl 팀과의 제휴는 없습니다.
+- 실제 거래소에서 거래한다고 주장하지 않습니다. 공개 데모의 거래소와 USDC는 mock이고, Perpl은 테스트넷에서 소액 거래만 해봤으며(2026-10-06과 10-10, 스크립트 실행 약 5시간, 체결 20건) Perpl 팀과의 제휴는 없습니다.
 - 사용자, 배분자, 예치 규모, 파트너가 있다고 주장하지 않습니다. 데모에 미리 올라간 배분자와 에이전트는 팀 서버의 테스트넷 키입니다.
 - 차등 프라이버시가 비공개 데이터를 보호한다고 주장하지 않습니다. 이미 체인에 공개된 수익률에만 적용합니다.
 - 감사를 받았다고 주장하지 않습니다. 검토는 모두 내부 리뷰입니다.
@@ -90,7 +90,7 @@ Monad 테스트넷 위의 라이브 모드(`npm run deploy:demo`, `npm run web:l
 
 ## 한계
 
-- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 스크립트 실행 약 1시간).
+- 공개 데모의 거래소와 USDC는 mock이고 가격은 팀의 키퍼가 넣습니다. MockVenue는 청산과 펀딩을 구현하지 않으므로 실제 파생상품 회계의 증거가 아닙니다. `PerplAdapter`는 테스트넷 배포본으로 소액 거래만 해봤습니다(0.001 BTC, 스크립트 실행 약 5시간).
 - 차등 프라이버시는 공개 데이터에만 적용됩니다. 리포터는 이미 체인에 있는 수익률을 집계하므로 메커니즘과 온체인 ε 장부를 보여줄 뿐, 비공개 데이터를 보호하지 않습니다. 명시한 ε은 평균에 대해서만 정확하고, 보호 단위는 수익률 한 틱이라 k개 틱을 낸 Vault 전체는 k·ε로 보호됩니다. 체인은 서명과 ε 장부만 확인하고 노이즈 자체는 확인하지 못합니다. 배치 intent와 서명은 정산 calldata에 공개됩니다.
 - 데모의 batcher와 리포터는 팀 서버이고, claim proof를 메모리에 둡니다. 서버가 재시작돼도 정산 calldata에서 `npm run claims:recover`로 proof를 다시 만들 수 있습니다.
 - 출금은 Vault가 가진 현금까지만 즉시 나갑니다. 포지션에 묶인 몫은 `requestRedeem()`으로 요청하고 1일 공지 기간을 기다려야 하며, 그 뒤에는 누구나 `deleverageForRedemption()`으로 필요한 만큼 포지션을 줄일 수 있습니다.
@@ -343,7 +343,7 @@ The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, L
 
 - No promise of returns. The guard limits behavior; it does not make a strategy good.
 - No claim that risk goes away. The terms decide when an order is refused and when a vault freezes. Losses inside the mandate, and losses past it on a gap, still happen.
-- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl has seen only small trades on testnet (0.001 BTC, the agent script running for about an hour in all), and there is no partnership with the Perpl team.
+- No claim of trading on a real venue. The hosted demo's venue and USDC are mocks. Perpl has seen only small trades on testnet (0.001 BTC, the agent script running for about five hours in all), and there is no partnership with the Perpl team.
 - No users, allocators, deposits or partners. The demo's preset allocator and agents are testnet keys on the team's server.
 - No claim that differential privacy protects private data. It is applied only to returns that are already public on-chain.
 - No audit. Every review so far is internal.
@@ -420,7 +420,7 @@ Beyond the demo (listed 2026-10-05, when the live demo signed for its visitors w
 
 14. Done and live 2026-10-06. Wallet connection. A visitor signs with their own wallet, gets test mock USDC from a rate-limited faucet, and allocates, signs batch intents, claims and withdraws as themselves. The server keeps signing only for the oracle, the batcher and the reporter.
 15. Done and live 2026-10-06. Agent onboarding. An outside operator deploys a vault, sets and locks its terms and registers it from a page. Decided: permissionless, through `MandateFactory` on one canonical guard; the owner only lists adapters. The registry accepts only vaults on the canonical guard, which closes the self-deployed fake-guard gap.
-16. Built and verified on a fork 2026-10-06, deployed to testnet the same day, run once through Perpl's exchange and then traded by a rule-based agent script in four short runs (about an hour of ticking): 14 orders filled, 7 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
+16. Built and verified on a fork 2026-10-06, deployed to testnet the same day, run once through Perpl's exchange and then traded by a rule-based agent script in five runs (about five hours of ticking): 20 orders filled, 9 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)). A real venue adapter. An `IVenueAdapter` for Perpl, the perp exchange on Monad, in place of MockVenue: orders go to Perpl's testnet contracts and equity is marked at Perpl's mark price, so a mandate bounds real fills, real slippage and a price the operator does not control. Perpl's testnet collateral is not the demo's mock USDC, so the vault's asset becomes Perpl's collateral token.
 17. Mainnet with real USDC. Not deployed; it would need item 12's external audit first.
 
 The freeze rules, what happens after a freeze and the structure for more kinds of terms are in [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md) (decided 2026-10-05; the range checks, the unobservable freeze and outcome records are implemented, the rest is design only).

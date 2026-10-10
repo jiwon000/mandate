@@ -30,7 +30,7 @@ Perpl 영상에 더하면 좋은 것이 두 가지 있다.
 3. **역할 전환이 내레이션에만 있다.** "Now I switch to the demo allocator", "Now I act as the agent"라고 말만 한다. 지금 누구로 조작하는지 화면에서 알기 어렵다.
 4. **Perpl 문장이 낡았다.**
    - 영상에서는 "fork에서 테스트됨"이라고 말한다.
-   - 지금은 Perpl 테스트넷 실거래 기록이 있다. 체결 14건, 한도 초과 거부 7건이다([`../perpl-adapter.md#agent-runs`](../perpl-adapter.md#agent-runs)).
+   - 지금은 Perpl 테스트넷 실거래 기록이 있다. 체결 20건, 한도 초과 거부 9건이다([`../perpl-adapter.md#agent-runs`](../perpl-adapter.md#agent-runs)).
    - 가장 강한 증거를 가장 약하게 말하고 있다.
 5. **Monad 이유를 tx 페이지 위에서 말한다.** 논리(마크 유효시간)는 맞지만 화면과 연결되지 않는다.
 

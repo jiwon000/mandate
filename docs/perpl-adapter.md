@@ -1,6 +1,6 @@
 # Perpl venue adapter
 
-Status 2026-10-07: `contracts/src/perpl/PerplAdapter.sol` is written and tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). It was deployed to Monad testnet on 2026-10-06 (addresses below), run once end to end, and then traded by a rule-based agent script in four short runs (three on 2026-10-06, one on 2026-10-10). The reference-price bound added on 2026-10-07 is not in that deployment. The hosted demo still runs on the deterministic MockVenue with mock USDC.
+Status 2026-10-10: `contracts/src/perpl/PerplAdapter.sol` is written and tested against Perpl's real exchange on a local fork of Monad testnet (`npm run test:perpl`). It was deployed to Monad testnet on 2026-10-06 (addresses below), run once end to end, and then traded by a rule-based agent script in five runs (three on 2026-10-06, two on 2026-10-10). The reference-price bound added on 2026-10-07 is not in that deployment. The hosted demo still runs on the deterministic MockVenue with mock USDC.
 
 ## Why Perpl
 
@@ -102,7 +102,7 @@ Deployed on Monad testnet (chain 10143) on 2026-10-06:
 
 ### Agent runs
 
-`contracts/script/perpl-agent.mjs` (`npm run agent:perpl`) then traded the same vault on 2026-10-06, and once more on 2026-10-10. It is a rule-based script, not an AI model: it holds 0.001 BTC long when Perpl's mark is above a short moving average and short when below, and every few ticks it sends an order that would take the position to about $316, past the vault's $200 cap. The full log is [`contracts/deployments/perpl-agent-10143.jsonl`](../contracts/deployments/perpl-agent-10143.jsonl).
+`contracts/script/perpl-agent.mjs` (`npm run agent:perpl`) then traded the same vault on 2026-10-06, and twice more on 2026-10-10. It is a rule-based script, not an AI model: it holds 0.001 BTC long when Perpl's mark is above a short moving average and short when below, and every few ticks it sends an order that would take the position to about $316, past the vault's $200 cap. The full log is [`contracts/deployments/perpl-agent-10143.jsonl`](../contracts/deployments/perpl-agent-10143.jsonl).
 
 | Run | Ticks | Filled | Refused at the cap | Note |
 |---|---|---|---|---|
@@ -110,10 +110,11 @@ Deployed on Monad testnet (chain 10143) on 2026-10-06:
 | 2 | 2 of 12 at 300 s | 3 (open, flip, close) | 0 | Stopped by a DNS failure on the Mac; the short was closed by rerunning the script with `MAX_TICKS=0`. The script now skips a tick on a failed read and retries the close |
 | 3 | 12 at 300 s | 3 (open, flip, close) | 3 | Vault equity 150.19 aUSD at the end |
 | 4 | 6 at 30 s, 2026-10-10 | 4 (open, two flips, close) | 2 | Recorded for the Perpl bounty video. Needed a script fix first: `TradePreview` gained a field on 2026-10-07, after this adapter was deployed, so the script now reads `preview()` with the deployed layout. Vault equity 149.96 aUSD at the end |
+| 5 | 17 at 900 s, 2026-10-10 | 6 (open, four flips, close) | 2 | About four hours, 06:58 to 11:00 UTC, stopped at a set time. No missed ticks. Vault equity 149.24 aUSD at the end |
 
-- In all, 14 orders filled and 7 were refused. Each refusal is a mined transaction with status 0 and the guard's `PositionNotionalExceeded()`, sent with a 500k gas limit, for example `0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff`.
+- In all, 20 orders filled and 9 were refused. Each refusal is a mined transaction with status 0 and the guard's `PositionNotionalExceeded()`, sent with a 500k gas limit, for example `0x7ba7b7b5ca0b9fdf07a00f791b8f9ceb08833b38a76ca03a99a654cb6e0f91ff`.
 - A fill used about 2.1M gas and cost about 0.22 MON at ~102 gwei.
-- Runs 1 to 3 span 12:48 to 15:28 UTC on 2026-10-06, with the script ticking for about an hour of it; run 4 took about three minutes. Small trades, not sustained trading.
+- Runs 1 to 3 span 12:48 to 15:28 UTC on 2026-10-06, with the script ticking for about an hour of it; run 4 took about three minutes; run 5 about four hours at one tick per 15 minutes. Small trades, not sustained trading.
 
 ## Limits
 

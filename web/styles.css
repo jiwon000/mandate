@@ -157,3 +157,5 @@ code,.mono,.terms-preview,.modal-row b,.hash code,.feed-item span{overflow-wrap:
 .perpl-chart circle.refusal{fill:var(--red)}
 .perpl-chart circle.ring{fill:none;stroke:var(--red);stroke-width:2}
 .perpl-chart .lbl{fill:var(--muted);font:13px var(--mono)}
+.hero-hint{display:inline-block;margin-top:18px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:#101827;color:var(--cyan);font-family:var(--mono);font-size:12px;text-align:left;cursor:pointer;transition:.2s}.hero-hint:hover{border-color:var(--blue)}body.connected .hero-hint{display:none}
+@media(max-width:520px){.nav{flex-wrap:wrap;overflow-x:visible}}

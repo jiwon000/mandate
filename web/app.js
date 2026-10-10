@@ -2046,6 +2046,11 @@ async function connectInjected() {
   return state.injected.address;
 }
 
+$("#heroHint").addEventListener("click", (event) => {
+  event.stopPropagation();
+  $("#walletButton").click();
+});
+
 $("#walletButton").addEventListener("click", (event) => {
   event.stopPropagation();
   $("#walletMenu").classList.toggle("open");

@@ -86,17 +86,29 @@ contract MandateFactory is Ownable {
     ///         is recorded as the operator. When the caller is also `p.agent`, the
     ///         vault is listed under the agent's address at once.
     function createMandate(MandateParams calldata p) external returns (address vault) {
-        return _create(p, ReferenceTerms(0, 0));
+        return _create(p, ReferenceTerms(0, 0), 0);
     }
 
     /// @notice As createMandate, with a reference-price bound set before the lock.
     function createMandateWithReference(MandateParams calldata p, ReferenceTerms calldata r)
         external returns (address vault)
     {
-        return _create(p, r);
+        return _create(p, r, 0);
     }
 
-    function _create(MandateParams calldata p, ReferenceTerms memory r) private returns (address vault) {
+    /// @notice As createMandateWithReference, with the least an unwind() step pays
+    ///         (`unwindBountyFloor`, in asset units) set before the lock. Either may be
+    ///         zero. Its own name, not an overload of createMandate, so a client that
+    ///         looks the latter up by name keeps working.
+    function createMandateWithFloor(MandateParams calldata p, ReferenceTerms calldata r, uint256 unwindBountyFloor)
+        external returns (address vault)
+    {
+        return _create(p, r, unwindBountyFloor);
+    }
+
+    function _create(MandateParams calldata p, ReferenceTerms memory r, uint256 unwindBountyFloor)
+        private returns (address vault)
+    {
         if (p.agent == address(0)) revert ZeroAgent();
         if (!adapterListed[p.adapter]) revert AdapterNotListed(p.adapter);
         RiskLimits calldata l = p.limits;
@@ -113,6 +125,7 @@ contract MandateFactory is Ownable {
         guard.setAdapter(vault, p.adapter, true);
         guard.configureTerms(vault, p.limits, p.trade, p.fees);
         if (r.maxMarkDeviationBps != 0 || r.maxReferenceAgeSeconds != 0) guard.setReferenceTerms(vault, r);
+        if (unwindBountyFloor != 0) guard.setUnwindBountyFloor(vault, unwindBountyFloor);
         guard.lockTerms(vault);
         registry.registerFromFactory(vault, p.adapter, p.modelHash, msg.sender);
 

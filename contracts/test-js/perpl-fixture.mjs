@@ -15,7 +15,8 @@ export const ETH = 32;
 export const BTC_PNS = 600_000n; // $60,000.0, priceDecimals 1, lotDecimals 5
 export const ETH_PNS = 300_000n; // $3,000.00, priceDecimals 2, lotDecimals 4
 
-export async function setup(t, { deposit = usd(1_000), trade = {} } = {}) {
+/// `floor` is the unwind bounty floor to set before the lock, in mUSDC units; 0 leaves it off.
+export async function setup(t, { deposit = usd(1_000), trade = {}, floor = 0n } = {}) {
   const chain = await hre.network.create();
   t.after(() => chain.close());
   const provider = new BrowserProvider(chain.provider, undefined, { cacheTimeout: -1 });
@@ -40,6 +41,7 @@ export async function setup(t, { deposit = usd(1_000), trade = {} } = {}) {
   await wait(guard.setAdapter(vault.target, adapter.target, true));
   await wait(guard.configureTerms(vault.target, BASE_LIMITS,
     { ...DEFAULT_TRADE, allowedMarkets: 3, ...trade }, NO_FEES));
+  if (floor) await wait(guard.setUnwindBountyFloor(vault.target, floor));
   await wait(guard.lockTerms(vault.target));
   await wait(usdc.mint(allocator.address, deposit));
   await wait(usdc.connect(allocator).approve(vault.target, deposit));

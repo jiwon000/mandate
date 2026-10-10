@@ -196,13 +196,20 @@ interface IRiskGuard {
     function termsLocked(address vault) external view returns (bool);
 
     /// @notice keccak256(abi.encode(limits, tradeTerms, fees)) of the vault's configured
-    ///         terms, with the ReferenceTerms appended to the encoding when they are set.
+    ///         terms, with the ReferenceTerms appended to the encoding when they are set,
+    ///         and the ReferenceTerms then the unwind bounty floor appended when the
+    ///         floor is set.
     /// @dev What MandateRegistry.registerAgent() checks a caller's claimed terms
     ///      against, so a registry entry cannot disagree with the real terms.
     function termsHash(address vault) external view returns (bytes32);
 
     /// @notice The vault's ReferenceTerms; all zero when the term is off.
     function referenceTermsOf(address vault) external view returns (ReferenceTerms memory);
+
+    /// @notice Least the vault pays per unwind() step, in asset units; 0 when unset.
+    /// @dev MandateVault.unwind() pays max(bps share, floor), capped at
+    ///      UNWIND_BOUNTY_CAP_BPS of the vault's cash. Part of the locked terms.
+    function unwindBountyFloorOf(address vault) external view returns (uint256);
 
     /// @notice The vault's TradeTerms, as configured.
     function tradeTermsOf(address vault) external view returns (TradeTerms memory);

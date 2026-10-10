@@ -33,10 +33,10 @@ export const NO_FEES = { performanceFeeBps: 0, managementFeeBps: 0 };
 const LIMITS_TUPLE = "tuple(uint16,uint16,uint32,uint32,uint256,uint256,uint256,uint256,uint32,uint32,uint16)";
 const TRADE_TUPLE = "tuple(uint32,uint8,uint16,uint16,uint16,uint32)";
 const FEES_TUPLE = "tuple(uint16,uint16)";
+const REFERENCE_TUPLE = "tuple(uint16,uint32)";
 
-/// keccak256(abi.encode(limits, tradeTerms, fees)), what MandateRiskGuard.termsHash returns.
-export function termsHashOf(l, t = DEFAULT_TRADE, fee = NO_FEES) {
-  return keccak256(coder.encode([LIMITS_TUPLE, TRADE_TUPLE, FEES_TUPLE], [
+function termsEncoding(l, t, fee) {
+  return [[LIMITS_TUPLE, TRADE_TUPLE, FEES_TUPLE], [
     [
       l.maxLeverageX100, l.maxDrawdownBps, l.minBlocksBetweenTrades, l.maxMarkAgeSeconds,
       l.maxOrderNotional, l.maxPositionNotional, l.maxTotalNotional, l.maxBlockNotional,
@@ -44,7 +44,21 @@ export function termsHashOf(l, t = DEFAULT_TRADE, fee = NO_FEES) {
     ],
     [t.allowedMarkets, t.direction, t.maxPriceDeviationBps, t.maxTradesPerDay, t.maxDailyLossBps, t.maxHoldingSeconds],
     [fee.performanceFeeBps, fee.managementFeeBps]
-  ]));
+  ]];
+}
+
+/// keccak256(abi.encode(limits, tradeTerms, fees)), what MandateRiskGuard.termsHash returns.
+export function termsHashOf(l, t = DEFAULT_TRADE, fee = NO_FEES) {
+  const [types, values] = termsEncoding(l, t, fee);
+  return keccak256(coder.encode(types, values));
+}
+
+/// The same with an unwind bounty floor set: the reference terms, whether set or
+/// not, and then the floor are appended to the encoding.
+export function termsHashWithFloorOf(l, t, fee, reference, floor) {
+  const [types, values] = termsEncoding(l, t, fee);
+  return keccak256(coder.encode([...types, REFERENCE_TUPLE, "uint256"],
+    [...values, [reference.maxMarkDeviationBps, reference.maxReferenceAgeSeconds], floor]));
 }
 
 /// One vault funded with 1,000 mUSDC, one venue at $2,000, one agent, one keeper,

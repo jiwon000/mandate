@@ -208,12 +208,19 @@ contract MandateRegistry is Ownable, EIP712 {
     ) external {
         IRiskGuard riskGuard = _guardOf(vault);
         if (msg.sender != Ownable(address(riskGuard)).owner()) revert OnlyGuardOwner();
-        // The trade and reference terms are read from the guard, so the caller only
-        // restates the limits and fees; a mismatch in either changes the hash.
+        // The trade terms, reference terms and unwind bounty floor are read from the
+        // guard, so the caller only restates the limits and fees; a mismatch in either
+        // changes the hash. Same three encodings as MandateRiskGuard.termsHash.
         ReferenceTerms memory refTerms = riskGuard.referenceTermsOf(vault);
-        bytes32 hash = refTerms.maxMarkDeviationBps == 0
-            ? keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees))
-            : keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees, refTerms));
+        uint256 floor = riskGuard.unwindBountyFloorOf(vault);
+        bytes32 hash;
+        if (floor != 0) {
+            hash = keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees, refTerms, floor));
+        } else if (refTerms.maxMarkDeviationBps == 0) {
+            hash = keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees));
+        } else {
+            hash = keccak256(abi.encode(limits, riskGuard.tradeTermsOf(vault), fees, refTerms));
+        }
         if (hash != riskGuard.termsHash(vault)) revert TermsMismatch();
         _register(vault, riskGuard, adapter, fees, modelHash, hash, msg.sender);
     }

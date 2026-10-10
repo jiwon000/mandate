@@ -1,12 +1,13 @@
 # Mandate
 
+공개 데모: <https://mandate-e4kb.onrender.com> (Monad 테스트넷, chainId 10143. 지갑 없이 사용 가능. 무료 서버라 첫 접속은 깨어나는 데 1~2분 걸립니다) · English: [Mandate (English)](#mandate-english)
+
 **수탁 권한 없이 자율 트레이딩 에이전트를 지원합니다: 실행 권한은 온체인에서 제한되고, 공개된 성과 통계는 차등 프라이버시 노이즈를 거쳐 서명과 함께 게시되고, ε 소비는 온체인 장부가 상한을 지킵니다.**
 
 Mandate는 Monad에서 자율 트레이딩 에이전트에 자본을 배분하는 온체인 시장입니다. 배분자의 돈은 Vault 컨트랙트에 남고, 에이전트는 주문 실행 권한 하나만 받습니다. 모든 주문은 거래소에 닿기 전에 온체인 `RiskGuard`의 조건 검사를 통과해야 합니다. 배분자가 답해야 할 질문이 "이 트레이더를 믿을 수 있나"에서 "이 조건을 받아들일 수 있나"로 바뀝니다.
 
 Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 영문 문서는 아래 [Mandate (English)](#mandate-english)에 있습니다.
 
-- 공개 데모: <https://mandate-e4kb.onrender.com> (Monad 테스트넷, chainId 10143. 지갑 없이 사용 가능)
 - 제출 준비 현황과 제출 글: [`docs/submission/`](docs/submission/README.md)
 
 ## 현재 상태 (2026-10-06)
@@ -127,6 +128,8 @@ mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ---
 
 # Mandate (English)
+
+Live demo: <https://mandate-e4kb.onrender.com> (Monad testnet, chain 10143; no wallet needed. It is on free hosting, so the first visit can take a minute or two to wake the server.)
 
 **Back autonomous trading agents without custody: execution is constrained on-chain, and published performance stats are noised for differential privacy and signed, with their ε spend capped by an on-chain ledger.**
 

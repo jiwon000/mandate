@@ -13,7 +13,7 @@
 //
 // No chain access of its own: web/live.mjs hands in the contracts, the clock
 // and the queue its own transactions go through, and tests hand in fakes.
-import { formatUnits, verifyTypedData } from "ethers";
+import { ZeroHash, formatUnits, verifyTypedData } from "ethers";
 import { hashIntent, intentTypes } from "../contracts/tools/batch.mjs";
 import { gasLimitFor } from "./live-gas.mjs";
 import { epochAt, epochEnd, normaliseIntent, planSettlement, settlementDeadline, settleableEpochs } from "./intents.mjs";
@@ -297,6 +297,54 @@ export function createReporterDesk({
   let publishing = null;
   let shared = { at: 0, value: null };
 
+  // Seed pledges (MandateRegistry.commitNoiseSeed): keccak256 of the seed the
+  // next release will be noised with, recorded before the window's data. A
+  // registry deployed before the call existed answers the probe with empty
+  // data, so the desk asks once and, when the answer is no, releases as before.
+  let pledges = null; // true, false, or null until the registry has answered
+  async function pledging() {
+    if (pledges === null) {
+      if (typeof registry.commitNoiseSeed !== "function" || typeof registry.pendingNoiseCommit !== "function") {
+        pledges = false;
+      } else {
+        try {
+          await registry.pendingNoiseCommit();
+          pledges = true;
+        } catch (error) {
+          if (error?.code !== "BAD_DATA" && error?.code !== "CALL_EXCEPTION") throw error;
+          pledges = false;
+        }
+      }
+    }
+    return pledges;
+  }
+  async function sendPledge(epoch, commitment = reporter.commitmentFor(epoch)) {
+    let gas;
+    try {
+      gas = await registry.commitNoiseSeed.estimateGas(commitment);
+    } catch (error) {
+      throw refuse(`the registry would refuse the noise pledge: ${revertReason(error, describe)}`, 409);
+    }
+    const limit = admit(gas);
+    const receipt = await send(() => registry.commitNoiseSeed(commitment, { gasLimit: limit }));
+    if (receipt?.status === 0) throw refuse("the noise pledge reverted on chain", 409);
+    log(`[reporter] epoch ${epoch}: noise seed pledged ${commitment} -> ${receipt.hash}`);
+    return { commitment, committedAtBlock: receipt.blockNumber ?? null, matches: true };
+  }
+  // The pledge an epoch's release answers to: the one pending on the registry,
+  // or one sent now. The registry takes one pledge per window, so a pending
+  // one this reporter cannot open (a restart drew a new secret, or another
+  // reporter made it) stays, the release is bound to it all the same, and
+  // `matches` says that an audit with this reporter's seed would fail.
+  async function pledgeFor(epoch) {
+    const ours = reporter.commitmentFor(epoch);
+    const pending = await registry.pendingNoiseCommit();
+    if (pending.commitment === ZeroHash) return sendPledge(epoch, ours);
+    const matches = pending.commitment === ours;
+    if (!matches) log(`[reporter] epoch ${epoch}: the pending noise pledge ${pending.commitment} is not this reporter's`);
+    return { commitment: pending.commitment, committedAtBlock: Number(pending.committedAtBlock), matches };
+  }
+
   // The registry is the ledger of record. A server that restarts, or adopts a
   // registry somebody already posted to, starts from what the chain says rather
   // than from zero, or its first release would carry the wrong running total.
@@ -346,6 +394,7 @@ export function createReporterDesk({
       epsilon: settings.epsilon,
       minIntervalSeconds: rules.minIntervalSeconds,
       waitSeconds: waitSeconds(),
+      noisePledges: await pledging().catch(() => false),
       lastRelease
     };
   }
@@ -357,6 +406,10 @@ export function createReporterDesk({
     if (waitSeconds() > 0) throw refuse(`a release was posted moments ago; the next one is due in ${waitSeconds()}s`, 429);
     const { lastEpoch, hasReleased, lastPinnedBlock } = await ledger();
     const epoch = hasReleased ? Number(lastEpoch) + 1 : 0;
+    // The pledge goes in before the block the data is pinned at. Normally it
+    // has been pending since the previous release; the first release of a
+    // fresh reporter pledges here, and the verifier shows how late that was.
+    const pledge = (await pledging()) ? await pledgeFor(epoch) : null;
     const pinnedBlock = await blockNumber();
     if (hasReleased && BigInt(pinnedBlock) <= BigInt(lastPinnedBlock)) throw refuse("the last release pinned this block; try again in a moment", 409);
 
@@ -402,6 +455,7 @@ export function createReporterDesk({
       epsilonPerfE6: release.epsilonPerfE6.toString(),
       cumulativeEpsilonE6: release.cumulativeEpsilonE6.toString(),
       txHash: receipt.hash,
+      noiseCommit: pledge,
       published
     };
     // The samples this release spent are gone; ones that arrived while it was
@@ -410,6 +464,15 @@ export function createReporterDesk({
     pooledReturns = pooledReturns.slice(samples.length);
     marketNavSeries = marketNavSeries.slice(-1);
     log(`[reporter] epoch ${lastRelease.epoch}: ${published.sampleSize} samples, cumulative epsilon ${lastRelease.cumulativeEpsilonE6} -> ${receipt.hash}`);
+    // The next window opens now, so its pledge goes in now. The release has
+    // landed; a pledge that does not is retried by the next publish.
+    if (pledge) {
+      try {
+        await sendPledge(lastRelease.epoch + 1);
+      } catch (error) {
+        log(`[reporter] epoch ${lastRelease.epoch + 1}: the noise pledge did not land: ${describe(error)}`);
+      }
+    }
     return lastRelease;
   }
 

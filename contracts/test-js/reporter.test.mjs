@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture } from "./fixture.mjs";
-import { deriveSeed, laplaceSamples } from "../../reporter/noise.mjs";
+import { keccak256 } from "ethers";
+import { commitmentOf, deriveSeed, laplaceSamples } from "../../reporter/noise.mjs";
 import {
   clip,
   mean,
@@ -15,7 +16,7 @@ import { EpsilonLedger } from "../../reporter/epsilon.mjs";
 import { DPReporter } from "../../reporter/reporter.mjs";
 import { simulateConfidenceInterval } from "../../reporter/simulator.mjs";
 
-const BASE_SEED_ARGS = { domainSeparator: "0xregistry", epochId: 0, pinnedBlock: 100, statsVersion: 1 };
+const BASE_SEED_ARGS = { domainSeparator: "0xregistry", epochId: 0, statsVersion: 1 };
 
 test("noise: identical inputs reproduce the exact same samples", () => {
   const seedA = deriveSeed("secret", BASE_SEED_ARGS);
@@ -33,6 +34,15 @@ test("noise: domain separation -- changing epoch, statsVersion or the secret cha
   assert.notDeepEqual(base, byEpoch);
   assert.notDeepEqual(base, byVersion);
   assert.notDeepEqual(base, bySecret);
+});
+
+test("noise: the pledge is keccak256 of the seed and nothing the window teaches the reporter changes it", () => {
+  const seed = deriveSeed("secret", BASE_SEED_ARGS);
+  assert.equal(commitmentOf(seed), keccak256(seed));
+  // Only the secret, the registry, the epoch and the stats version go in, so
+  // the pledge can be made before the window's data (and its pinned block) exist.
+  assert.deepEqual(deriveSeed("secret", { ...BASE_SEED_ARGS, pinnedBlock: 100 }), seed);
+  assert.notEqual(commitmentOf(deriveSeed("secret", { ...BASE_SEED_ARGS, epochId: 1 })), commitmentOf(seed));
 });
 
 test("noise: successive draws from the same seed are not identical to each other", () => {
@@ -144,6 +154,8 @@ test("DPReporter: a built release is actually accepted by MandateRegistry.postLe
 
   assert.equal(published.sampleSize, 5);
   assert.ok(Math.abs(published.noisyMean) < 10); // sane order of magnitude, noise included
+  assert.equal(published.noiseCommit, dpReporter.commitmentFor(0));
+  assert.equal(keccak256(dpReporter.exportSeedForAudit(0)), published.noiseCommit);
 
   await (
     await registry.postLeaderboard(

@@ -86,7 +86,14 @@ toast says which and why) instead of sinking the epoch.
 per-mark return, clips it, adds Laplace noise and posts the digest of the result to
 `MandateRegistry` with `postLeaderboard()`; the registry adds the release's ε to a
 running total and refuses a release past its cap. The inputs are public NAV marks, so
-this demonstrates the release and its on-chain budget, not secrecy of the data.
+this demonstrates the release and its on-chain budget, not secrecy of the data. Before
+each window's data arrives the reporter also pledges the hash of the seed its noise
+will come from (`commitNoiseSeed()`), and the release is bound to that pledge. The
+seed itself stays private, since it would de-noise the release; the pledge lets an
+auditor the operator trusts with the seed check the noise after the fact
+(`contracts/script/verify-noise.mjs`), and lets anyone see that a pledge was made and
+when. A registry deployed before the call existed, like the one on testnet today,
+takes releases without pledges.
 
 On a live chain both are transactions the deployer pays for, so they are bounded:
 8 intents an epoch, 3 settlements a minute, one release every 2 minutes, and an

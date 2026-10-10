@@ -6,7 +6,7 @@
 // from contract state. The mandates themselves, and the routine that deploys and
 // seeds them, live in ./mandates.mjs and are shared with the live-RPC deploy.
 import hre from "hardhat";
-import { BrowserProvider, Contract, ContractFactory, formatUnits, getAddress, verifyTypedData } from "ethers";
+import { BrowserProvider, Contract, ContractFactory, ZeroHash, formatUnits, getAddress, verifyTypedData } from "ethers";
 import { artifact, compileContracts } from "../contracts/tools/compiler.mjs";
 import {
   BATCH_EPOCH_SECONDS,
@@ -115,6 +115,8 @@ export async function startChain() {
     pooledReturns = [];
     marketNavSeries = [];
     lastNavByVault = new Map();
+    // The first window's seed is pledged before the first sample is taken.
+    await (await registry.commitNoiseSeed(dpReporter.commitmentFor(0))).wait();
 
     return deployment;
   }
@@ -419,6 +421,7 @@ export async function startChain() {
         sampleSize: pooledReturns.length,
         clipBound: REPORT_CLIP_BOUND,
         epsilon: REPORT_EPSILON,
+        noisePledges: true,
         lastRelease
       };
     },
@@ -432,6 +435,12 @@ export async function startChain() {
         throw new HttpError(
           `need at least 3 sampled returns to release, have ${pooledReturns.length} -- wait for a few more price ticks`
         );
+      }
+      // The window's seed was pledged when the window opened (setup(), or the
+      // previous publish); a pledge that failed to land then is sent now.
+      const commitment = dpReporter.commitmentFor(nextReportEpoch);
+      if ((await registry.pendingNoiseCommit()).commitment === ZeroHash) {
+        await (await registry.connect(owner).commitNoiseSeed(commitment)).wait();
       }
       const pinnedBlock = await provider.getBlockNumber();
       const { release, signature, published } = await dpReporter.buildRelease({
@@ -455,6 +464,7 @@ export async function startChain() {
           )
       ).wait();
       dpReporter.commit(release.epoch, release.cumulativeEpsilonE6);
+      const bound = await registry.noiseCommitOf(release.epoch);
 
       lastRelease = {
         epoch: Number(release.epoch),
@@ -463,6 +473,11 @@ export async function startChain() {
         epsilonPerfE6: release.epsilonPerfE6.toString(),
         cumulativeEpsilonE6: release.cumulativeEpsilonE6.toString(),
         txHash: receipt.hash,
+        noiseCommit: {
+          commitment: bound.commitment,
+          committedAtBlock: Number(bound.committedAtBlock),
+          matches: bound.commitment === commitment
+        },
         published
       };
       nextReportEpoch += 1;
@@ -470,6 +485,8 @@ export async function startChain() {
       // Keep the last point so the next window still has a drawdown baseline
       // instead of starting from an empty series.
       marketNavSeries = marketNavSeries.slice(-1);
+      // The next window opens now; its seed is pledged before its data arrives.
+      await (await registry.connect(owner).commitNoiseSeed(dpReporter.commitmentFor(nextReportEpoch))).wait();
 
       return lastRelease;
     }

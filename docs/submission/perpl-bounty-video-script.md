@@ -4,7 +4,7 @@
   1. 2분 이하 데모 영상. Perpl 위의 트레이딩 봇이나 자동화 시스템이 실제 온체인 활동을 하는 모습을 보여야 한다.
   2. 그 시스템 링크.
 - 심사 기준은 안정적 실행, 리스크 관리, 수익성, 실제 온체인 활동이다. 이 영상은 리스크 관리와 온체인 활동에 집중한다. 수익성은 주장하지 않는다(테스트넷 소액, 규칙 기반 스크립트).
-- 상태: 10-10 초안 (Claude Code), 녹화 전. 내레이션은 영어 약 230단어로 약 1분 40초.
+- 상태: 10-10 B안으로 녹화 완료 (Claude Code, 1분 24초). 10-10 새 실행(run 4)을 찍었고 내레이션은 아래 대본을 그 화면에 맞게 줄인 판이다. 영상 파일은 저장소에 넣지 않는다.
 - 근거 자료는 [`docs/perpl-adapter.md`](../perpl-adapter.md)의 Testnet deployment·Agent runs 절과 [`contracts/deployments/perpl-agent-10143.jsonl`](../../contracts/deployments/perpl-agent-10143.jsonl)이다.
 
 ## 링크 칸에 넣을 것

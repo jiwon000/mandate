@@ -349,10 +349,21 @@ export async function startChain() {
       });
       pendingIntents = pendingIntents.filter((p) => Number(p.intent.epoch) !== epoch);
 
+      // A vault that refused its deposit (frozen, say) is skipped on chain and its
+      // intents go back to escrow; claimsFor() drops their empty claims.
+      const skippedVaults = receipt.logs.filter((log) => {
+        try {
+          return batchAllocator.interface.parseLog(log)?.name === "VaultSkipped";
+        } catch {
+          return false;
+        }
+      }).length;
+
       return {
         epoch,
         intentCount: flatIntents.length,
         vaultCount: nets.length,
+        skippedVaults,
         txHash: receipt.hash
       };
     },

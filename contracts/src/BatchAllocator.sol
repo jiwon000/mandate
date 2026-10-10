@@ -74,6 +74,7 @@ contract BatchAllocator is Ownable, ReentrancyGuard, EIP712 {
     event VaultAllowed(address indexed vault, bool allowed);
     event EpochSettled(uint256 indexed epoch, bytes32 intentRoot, uint256 intentCount);
     event VaultAllocated(uint256 indexed epoch, address indexed vault, uint256 assets, uint256 shares);
+    event VaultSkipped(uint256 indexed epoch, address indexed vault, uint256 assets, bytes reason);
     event SharesClaimed(bytes32 indexed intentHash, address indexed allocator, address indexed vault, uint256 shares);
 
     constructor(IERC20 asset_, address batcher_, uint256 duration_, uint256 window_)
@@ -139,6 +140,8 @@ contract BatchAllocator is Ownable, ReentrancyGuard, EIP712 {
 
     /// @notice The root is recomputed from all verified intents, never trusted as authorization.
     /// @dev Vault groups must be strictly address-sorted. Each vault receives one deposit.
+    /// A vault that refuses its deposit (frozen, stale mark) is skipped rather than reverting the
+    /// epoch: its intents' amounts go back to escrow and their nonces stay spent.
     function settleEpoch(uint256 epoch, bytes32 intentRoot, BatchNetAllocation[] calldata nets)
         external nonReentrant
     {
@@ -193,7 +196,19 @@ contract BatchAllocator is Ownable, ReentrancyGuard, EIP712 {
         uint256 beforeShares = vault.balanceOf(address(this));
         uint256 beforeAssets = asset.balanceOf(address(this));
         asset.forceApprove(net.vault, assets);
-        uint256 shares = vault.allocate(assets, address(this));
+        uint256 shares;
+        try vault.allocate(assets, address(this)) returns (uint256 minted) {
+            shares = minted;
+        } catch (bytes memory reason) {
+            asset.forceApprove(net.vault, 0);
+            for (uint256 j; j < net.intents.length; ++j) {
+                AllocationIntent calldata intent = net.intents[j].intent;
+                escrowOf[intent.allocator] += intent.amount;
+            }
+            totalEscrow += assets;
+            emit VaultSkipped(epoch, net.vault, assets, reason);
+            return;
+        }
         asset.forceApprove(net.vault, 0);
         if (shares == 0 || vault.balanceOf(address(this)) != beforeShares + shares
             || asset.balanceOf(address(this)) != beforeAssets - assets) revert VaultResultMismatch();

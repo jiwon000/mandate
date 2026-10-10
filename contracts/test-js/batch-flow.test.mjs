@@ -187,6 +187,44 @@ test("forgery, wrong domain, wrong root, duplicates and minimum shares revert al
   await f.settle(data); // Reverted nonce remains usable.
 });
 
+test("a vault that refuses its deposit is skipped, its intents refunded to escrow", async (t) => {
+  const f = await fixture(t);
+  const { alice, bob, vaults, batch, usdc, guard } = f;
+  await f.at(f.end);
+  // Nobody marked the venue for longer than three mark ages: anyone may freeze the
+  // second vault, and a frozen vault takes no deposit.
+  await (await guard.freezeUnobservable(vaults[1].target)).wait();
+  const data = f.build([
+    await f.signed(alice, { amount: 101n }),
+    await f.signed(bob, { vault: vaults[1].target, amount: 203n }),
+    await f.signed(alice, { vault: vaults[1].target, amount: 97n, nonce: 1n }),
+  ]);
+  const receipt = await f.settle(data);
+  const events = receipt.logs.flatMap((log) => {
+    try { return [batch.interface.parseLog(log)]; } catch { return []; }
+  });
+  const skipped = events.filter((e) => e?.name === "VaultSkipped");
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].args.vault, vaults[1].target);
+  assert.equal(skipped[0].args.assets, 300n);
+  assert.equal(vaults[1].interface.parseError(skipped[0].args.reason).name, "AgentNotActive");
+  assert.equal(events.filter((e) => e?.name === "VaultAllocated").length, 1);
+  assert.equal(await batch.settled(0), true);
+  assert.equal(await batch.escrowOf(alice.address), 899n);
+  assert.equal(await batch.escrowOf(bob.address), 1000n);
+  assert.equal(await batch.totalEscrow(), 1899n);
+  assert.equal(await usdc.balanceOf(batch.target), 1899n);
+  assert.equal(await usdc.allowance(batch.target, vaults[1].target), 0n);
+  assert.equal(await vaults[1].totalSupply(), SEED);
+  assert.equal(await vaults[0].totalSupply(), SEED + 101n);
+  // The skipped intents are spent and have nothing to claim; the refund is withdrawable.
+  assert.equal(await batch.nonceUsed(bob.address, 0), true);
+  await assert.rejects(batch.claimShares.staticCall(data.intents[1], data.proofs[1]));
+  await (await batch.claimShares(data.intents[0], data.proofs[0])).wait();
+  await (await batch.connect(bob).withdrawEscrow(1000n)).wait();
+  assert.equal(await usdc.balanceOf(bob.address), 1000n);
+});
+
 test("cancellation, escrow withdrawal and hard epoch deadline need no batcher cooperation", async (t) => {
   const f = await fixture(t);
   const data = f.build([await f.signed()]);

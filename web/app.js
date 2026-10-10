@@ -709,6 +709,13 @@ function describeLog(log) {
           tag: "MINT",
           kind: "pass"
         };
+      case "VaultSkipped":
+        return {
+          at,
+          text: `batch · epoch ${parsed.args.epoch} skipped ${vaultLabel(parsed.args.vault)}, which refused the deposit; ${usdc(parsed.args.assets)} mUSDC went back to escrow`,
+          tag: "SKIP",
+          kind: "mark"
+        };
       case "SharesClaimed":
         return {
           at,
@@ -1614,7 +1621,8 @@ $("#settleBatchButton").addEventListener("click", (event) =>
     // A live batcher leaves out an intent the chain would refuse rather than lose the whole epoch to it.
     const dropped = result.dropped ?? [];
     const leftOut = dropped.length ? `; ${dropped.length} left out (${dropped[0].reason})` : "";
-    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)${leftOut}`);
+    const skipped = result.skippedVaults ? `; ${result.skippedVaults} vault(s) refused the deposit, refunded to escrow` : "";
+    showToast(`Epoch ${result.epoch} settled — ${result.intentCount} intent(s) across ${result.vaultCount} vault(s)${leftOut}${skipped}`);
   })
 );
 

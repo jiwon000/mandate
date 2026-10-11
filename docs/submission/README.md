@@ -82,7 +82,7 @@ Monad Metropolis 해커톤 Track 1 (Onchain Finance & Trading) 제출까지의 �
 | Perpl 바운티 (영어) | 1분 37초 | Perpl 바운티의 영상 칸 | 10-10 에이전트 실행 화면과 `docs/perpl-adapter.md`의 Agent runs 표 + 내레이션 |
 | 데모, 피치 (한국어) | 2분 39초, 1분 55초 | 없음 | 같은 구성의 한국어판. 학회 공유용 |
 
-내레이션은 모두 합성 음성(`edge-tts`)입니다. `perpl-bounty-video-script.md`에 적힌 1분 24초는 10-10판 길이이고, 10-11에 끝 화면과 내레이션을 고쳐 1분 37초가 됐습니다.
+내레이션은 모두 합성 음성(`edge-tts`)입니다. Perpl 영상의 내레이션은 [`perpl-bounty-video-script.md`](perpl-bounty-video-script.md)에 있습니다.
 
 ## 남은 일
 

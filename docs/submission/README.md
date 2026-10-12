@@ -33,7 +33,7 @@ All three are in English, 1280×720, with burned-in captions and a synthetic voi
 | [`judge-access.txt`](judge-access.txt) | Form field "Judge access instructions": a walkthrough of the hosted demo |
 | [`mandate-logo.png`](mandate-logo.png), [`mandate-logo.source.html`](mandate-logo.source.html) | Logo uploaded to the form (1024×1024) and its source |
 
-The three `.txt` files are the source of the form texts. A change is made in the file first and then pasted into the form, and the form is read back to check that the two match. They were last pasted and checked on 2026-10-11.
+The three `.txt` files are the source of the form texts. A change is made in the file first and then pasted into the form, and the form is read back to check that the two match. They were last pasted on 2026-10-11, and the saved entry was read back and found identical to the three files on 2026-10-12.
 
 The form texts were drafted with an AI coding tool (Claude Code). See "AI tool disclosure" in the root README.
 
@@ -67,6 +67,8 @@ From sections 4.1 and 9 of the hackathon's Rules & Guidelines (version of 2026-0
 | Pitch video | yes | `https://youtu.be/DP9q64eadq0` |
 | Judge access instructions | no | `judge-access.txt` |
 | Sponsor bounty | no | Perpl, "Best use of Perpl's API". System link: `docs/perpl-adapter.md#agent-runs`. Video: `https://youtu.be/xW7opngMXiU` |
+| Sponsor bounty | no | Monad Foundation, "Best Community Team Project". Community: HYBLOCK |
+| Show demo video publicly, Show pitch video publicly | no | No (both) |
 | Product advertisement, X profile | no | Empty |
 
 ## Left before the deadline

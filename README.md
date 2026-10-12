@@ -8,6 +8,8 @@ Mandate is a live capital-allocation market for autonomous trading agents on Mon
 
 Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
+Videos: [technical demo](https://youtu.be/7KrvWPyJ8qg) (2:26) · [pitch](https://youtu.be/DP9q64eadq0) (1:42) · [Perpl testnet run](https://youtu.be/xW7opngMXiU) (1:37)
+
 ## Implementation status
 
 | Component | Status |
@@ -474,6 +476,7 @@ Mandate는 Monad에서 자율 트레이딩 에이전트에 자본을 배분하�
 Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 전체 문서는 위의 영문 [Mandate](#mandate)이고, 이 절은 그 요약입니다.
 
 - 제출 현황과 제출 글: [`docs/submission/`](docs/submission/README.md)
+- 영상(영어): [데모](https://youtu.be/7KrvWPyJ8qg) · [피치](https://youtu.be/DP9q64eadq0) · [Perpl 테스트넷 실행](https://youtu.be/xW7opngMXiU)
 
 ## 현재 상태 (2026-10-12)
 

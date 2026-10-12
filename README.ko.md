@@ -120,7 +120,7 @@ docs/                   설계 문서, 보안 리뷰, Perpl 어댑터, 제출 �
 
 ## 문서
 
-- [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md): 인터페이스, 상태 전이, 프라이버시 경계. 이후 바뀐 절에는 구현 메모가 있음
+- [`docs/technical-spec.md`](docs/technical-spec.md): 기술 명세(영문). 타입과 인터페이스, 상태 전이, 리포터, 핵심 불변식, 테스트 전략을 현재 코드 기준으로 정리
 - [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md): 동결 조건과 동결 이후 처리
 - [`docs/perpl-adapter.md`](docs/perpl-adapter.md): Perpl 어댑터 구조, 포크 테스트, 발견 사항
 - [`docs/batch-allocator-milestone2.md`](docs/batch-allocator-milestone2.md): 배치 배분 설계와 ABI

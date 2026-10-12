@@ -8,8 +8,6 @@ Mandate is a live capital-allocation market for autonomous trading agents on Mon
 
 Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
-Videos: [technical demo](https://youtu.be/7KrvWPyJ8qg) (2:26) · [pitch](https://youtu.be/DP9q64eadq0) (1:42) · [Perpl testnet run](https://youtu.be/xW7opngMXiU) (1:37)
-
 ## Implementation status
 
 | Component | Status |
@@ -18,7 +16,7 @@ Videos: [technical demo](https://youtu.be/7KrvWPyJ8qg) (2:26) · [pitch](https:/
 | `MandateFactory`, permissionless vault creation | Launch screen of the hosted demo (needs a browser wallet) |
 | 19 terms: 11 risk limits, 6 trade terms, 2 fees (21 with the optional reference-price terms, 22 with an unwind bounty floor) | Enforced on-chain and locked under one `termsHash` |
 | `BatchAllocator`, `MandateRegistry`, DP reporter | Batch and Privacy screens of the hosted demo |
-| `PerplAdapter` (Perpl, the perp exchange on Monad) | Deployed to Monad testnet. One round trip through Perpl's testnet exchange, then five runs of a rule-based agent script: 20 orders filled, 9 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment)) |
+| `PerplAdapter` (Perpl, the perp exchange on Monad) | Deployed to Monad testnet. One round trip through Perpl's testnet exchange, then five runs of a rule-based agent script: 20 orders filled, 9 over-cap orders refused on chain ([`docs/perpl-adapter.md`](docs/perpl-adapter.md#testnet-deployment), [video of one run](https://youtu.be/xW7opngMXiU)) |
 | Venue and USDC in the hosted demo | Mocks. The testnet price comes from the team's keeper |
 | Security review | Four internal rounds ([`docs/security-review-2026-10-04.md`](docs/security-review-2026-10-04.md)). No external audit |
 
@@ -57,6 +55,8 @@ What the contracts and the demo do today:
 The local test suite (`npm run test:contracts`) deploys the full contract path to an in-memory EVM and verifies all of the above (144 cases, one of them a single end-to-end run from agent registration to withdrawal; the Perpl fork test needs the network and runs separately with `npm run test:perpl`). `npm run test:web` covers the demo server (76 cases): the signing allowlist, the gas bounds, the live batcher and reporter, and finding the newest book on boot. `npm run test:invariant` runs a separate Foundry suite — stateful invariant fuzzing of the Vault/RiskGuard/Adapter path (10 properties), of fee minting (7 properties) and of `MandateRegistry`'s epsilon ledger (4 properties), plus three malicious-ERC20 reentrancy tests and three unwind bounty floor tests, two of them fuzzed over the floor and the vault's size — covering arbitrary call sequences the hand-written Hardhat tests don't attempt.
 
 ## Why Mandate
+
+The [pitch video](https://youtu.be/DP9q64eadq0) (1:42) gives the short version.
 
 Autonomous agents can generate trades, but an allocator still needs answers to three questions:
 
@@ -210,6 +210,8 @@ Suggested ranges for the volatility clause, with the reasoning. `volWindowSecond
 ## Demo flow
 
 The demo in `web/` has seven screens: Market, Agent, Allocate, Batch, Privacy, Launch and Live Risk. Launch appears only on a book with a factory and needs a browser wallet.
+
+A [2:26 video](https://youtu.be/7KrvWPyJ8qg) recorded on the hosted demo follows one vault through this flow: launch, allocate, an accepted and a refused order, freeze, unwind and withdrawal. It leaves out the Batch and Privacy screens.
 
 1. Compare the four mandates on Market: drawdown, leverage and mark age are each shown against the limit the allocator accepted.
 2. Open one on Agent: NAV per share against its high-water mark, every limit as a bar against what is used, and a term sheet with a button per term that sends the order crossing it.
@@ -476,7 +478,6 @@ Mandate는 Monad에서 자율 트레이딩 에이전트에 자본을 배분하�
 Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 전체 문서는 위의 영문 [Mandate](#mandate)이고, 이 절은 그 요약입니다.
 
 - 제출 현황과 제출 글: [`docs/submission/`](docs/submission/README.md)
-- 영상(영어): [데모](https://youtu.be/7KrvWPyJ8qg) · [피치](https://youtu.be/DP9q64eadq0) · [Perpl 테스트넷 실행](https://youtu.be/xW7opngMXiU)
 
 ## 현재 상태 (2026-10-12)
 
@@ -509,6 +510,8 @@ Monad Metropolis Track 1 (Onchain Finance & Trading) 출품작입니다. 전체 
 각 조건의 정확한 의미와 권장 범위는 영문 [What each term bounds](#what-each-term-bounds), 동결 규칙의 설계는 [`docs/mandate-lifecycle-design.md`](docs/mandate-lifecycle-design.md)에 있습니다.
 
 ## 동작 흐름
+
+공개 데모에서 볼트 하나를 처음부터 끝까지 따라가는 [2분 26초 영상](https://youtu.be/7KrvWPyJ8qg)(영어)이 있습니다.
 
 1. 누구나 `MandateFactory.createMandate()` 한 번으로 Vault를 배포하고 조건을 설정·잠근 뒤 `MandateRegistry`에 등록합니다. 승인하는 사람은 없고, 범위를 벗어난 값은 guard와 팩토리가 거절합니다.
 2. 배분자는 Vault에 직접 예치하거나, `BatchAllocator`에 escrow를 넣고 EIP-712 intent에 서명합니다. 배치는 에폭마다 Vault별 순액을 한 번에 예치하고, 배분자는 Merkle proof로 지분을 받습니다.

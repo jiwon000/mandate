@@ -24,7 +24,7 @@ Built for Monad Metropolis, Track 1: Onchain Finance & Trading.
 
 The seven-screen frontend in `web/` runs against an in-process chain that the server deploys on boot, or, started with `--live`, against the same book deployed to Monad testnet through a server-signed proxy (see [Live testnet demo](#live-testnet-demo)). The hosted demo trades against the mock venue, not Perpl's exchange. The mock venue marks each vault's equity (cash plus unrealised PnL) to its on-chain price and shares are minted and redeemed at that mark; it does not liquidate positions or charge funding, so a passing open-position withdrawal test is not evidence of production derivatives accounting.
 
-**Current privacy boundary:** included allocation intents and signatures become public in settlement calldata, and net deposits do not hide those allocator-to-vault links. There is no private Intent API. `reporter/` is scoped to public data only: it DP-releases settlement amounts and trade returns, which are already on-chain. The private watchlist and pre-settlement-intent signals that the v0.2 spec sketches have no corresponding feature in this demo, so there is nothing there to protect yet. The batch design and ABI are in [`docs/batch-allocator-milestone2.md`](docs/batch-allocator-milestone2.md).
+**Current privacy boundary:** included allocation intents and signatures become public in settlement calldata, and net deposits do not hide those allocator-to-vault links. There is no private Intent API. `reporter/` is scoped to public data only: it DP-releases settlement amounts and trade returns, which are already on-chain. The private watchlist and pre-settlement-intent signals that the first design sketched have no corresponding feature in this demo, so there is nothing there to protect yet. The batch design and ABI are in [`docs/batch-allocator-milestone2.md`](docs/batch-allocator-milestone2.md).
 
 ## Build status
 
@@ -66,7 +66,7 @@ Autonomous agents can generate trades, but an allocator still needs answers to t
 2. Can the agent exceed the agreed risk mandate?
 3. Can market demand and performance be compared without publishing every private expression of interest?
 
-Mandate separates those concerns. Vault custody and execution constraints are enforced on-chain. Public chain activity (settlement amounts, trade returns) is DP-released as a performance leaderboard, never presented as hidden. The spec also calls for private watchlists and pre-settlement allocation intents to be released only as DP aggregates; this demo has no watchlist feature and nothing private to aggregate there yet, so that half is explicitly out of v1 scope rather than implemented against invented data.
+Mandate separates those concerns. Vault custody and execution constraints are enforced on-chain. Public chain activity (settlement amounts, trade returns) is DP-released as a performance leaderboard, never presented as hidden. The original design also called for private watchlists and pre-settlement allocation intents to be released only as DP aggregates; this demo has no watchlist feature and nothing private to aggregate there yet, so that half is explicitly out of v1 scope rather than implemented against invented data.
 
 ## Who gets what
 
@@ -242,7 +242,7 @@ A [2:26 video](https://youtu.be/7KrvWPyJ8qg) recorded on the hosted demo follows
 - DP does not hide public blockchain transactions.
 - Batch netting reduces direct linkage but does not provide full allocator anonymity.
 - The v1 Reporter and batcher are centralized, although neither can withdraw vault funds; escrow is never locked: `withdrawEscrow()` returns unspent escrow at any time, and an intent the batcher leaves out is simply not settled. The batcher can still refuse to include an intent; the allocator then withdraws and deposits directly.
-- `reporter/`'s DP releases cover only data that was already public (settlement amounts, trade returns). The spec's "private watchlist" and "pre-settlement intent" DP aggregates are not implemented, because the demo has no watchlist feature and no private-intent signal to aggregate in the first place — building one just to anonymize it would not protect anything real.
+- `reporter/`'s DP releases cover only data that was already public (settlement amounts, trade returns). The "private watchlist" and "pre-settlement intent" DP aggregates of the original design are not implemented, because the demo has no watchlist feature and no private-intent signal to aggregate in the first place — building one just to anonymize it would not protect anything real.
 - The noise-seed pledge (`commitNoiseSeed()`) makes the reporter answerable for its noise, not the noise publicly checkable. The seed is never revealed, because revealing it would de-noise the release; the public sees that a pledge was bound and when, and only an auditor the operator hands the seed to can confirm the release used it. The hosted server draws a random secret at boot unless `DEMO_REPORTER_SECRET` is set, so after a restart the pledge already pending for the open window is one the new process cannot open; that release is bound to it anyway and the server's status says the pledge does not match.
 - The deterministic MockVenue proves contract behavior, not production price safety or liquidity. It also does not settle: closing a position through `unwind()` books the realised PnL into the venue's cost basis instead of moving tokens, so a `Closed` vault's equity is its cash plus that realised PnL while its token balance is unchanged. A real venue would settle the loss out of margin.
 - RiskGuard limits behavior; it does not guarantee strategy quality or prevent losses inside the mandate.
@@ -277,7 +277,7 @@ reporter/               DP release computation: clipping, Laplace noise, epsilon
 web/                    Market, Agent, Allocate, Batch, Privacy, Launch and Live Risk screens, faucet, demo server, in-process chain (chain.mjs) and live-RPC proxy (live.mjs)
 web/deployments/        <chainId>.json written by deploy-demo.mjs; the live server boots from it
 deploy/systemd/         unit file for running the live demo on a Linux host
-docs/                   Design notes, the Perpl adapter, the threat model, the internal security review, submission status and form texts (docs/submission/)
+docs/                   Technical specification, design notes, the Perpl adapter, the threat model, the internal security review, submission status and form texts (docs/submission/)
 ```
 
 ## Roadmap
@@ -449,7 +449,7 @@ npm run track-record -- 0x<vault> --from-block 68601000 --to-block 68601600 --ta
 
 It is read-only and needs no key. The RPC is `MONAD_RPC_URL` or `RPC_URL` (default `https://testnet-rpc.monad.xyz`); the guard, start block and vault list come from the deployment file for that chain. The output (JSON, or `--table`) has first and last mark time, NAV per share and return, the largest drawdown observed against the vault's locked `maxDrawdownBps`, the trade count, deposits, withdrawals and fees, each breach with its transaction hash, the current state, and a NAV series of at most 200 points. Monad testnet caps the block range of one `eth_getLogs` call and rate-limits, so logs are read in windows of 100 blocks (`--chunk`; a refused window is retried once as two halves). At about 0.4 s per block a day is over 200,000 blocks, so scan a range around what you care about with `--from-block` and `--to-block` rather than from the deployment's start block; totals only cover the scanned range. On the 2026-10-06 testnet book it shows Tight Mandate's `DrawdownBreach` of 424 bps against its 300 bps limit, in transaction `0x05995a48…78c1`. The summary math is a pure function (`summarize` in `contracts/tools/track-record.mjs`) tested separately from the fetching.
 
-See [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md) (written in Korean) for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
+See [`docs/technical-spec.md`](docs/technical-spec.md) for types, interfaces, state transitions, the reporter, core invariants and the test strategy, written against the current code.
 
 ## AI tool disclosure
 

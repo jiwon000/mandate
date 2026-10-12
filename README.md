@@ -278,7 +278,6 @@ web/                    Market, Agent, Allocate, Batch, Privacy, Launch and Live
 web/deployments/        <chainId>.json written by deploy-demo.mjs; the live server boots from it
 deploy/systemd/         unit file for running the live demo on a Linux host
 docs/                   Design notes, the Perpl adapter, the threat model, the internal security review, submission status and form texts (docs/submission/)
-mandate-v0.3-frontend/  Historical snapshot of an earlier frontend design; not built or served
 ```
 
 ## Roadmap
@@ -450,7 +449,7 @@ npm run track-record -- 0x<vault> --from-block 68601000 --to-block 68601600 --ta
 
 It is read-only and needs no key. The RPC is `MONAD_RPC_URL` or `RPC_URL` (default `https://testnet-rpc.monad.xyz`); the guard, start block and vault list come from the deployment file for that chain. The output (JSON, or `--table`) has first and last mark time, NAV per share and return, the largest drawdown observed against the vault's locked `maxDrawdownBps`, the trade count, deposits, withdrawals and fees, each breach with its transaction hash, the current state, and a NAV series of at most 200 points. Monad testnet caps the block range of one `eth_getLogs` call and rate-limits, so logs are read in windows of 100 blocks (`--chunk`; a refused window is retried once as two halves). At about 0.4 s per block a day is over 200,000 blocks, so scan a range around what you care about with `--from-block` and `--to-block` rather than from the deployment's start block; totals only cover the scanned range. On the 2026-10-06 testnet book it shows Tight Mandate's `DrawdownBreach` of 424 bps against its 300 bps limit, in transaction `0x05995a48…78c1`. The summary math is a pure function (`summarize` in `contracts/tools/track-record.mjs`) tested separately from the fetching.
 
-See `mandate-technical-spec-v0.2.md` for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
+See [`mandate-technical-spec-v0.2.md`](mandate-technical-spec-v0.2.md) (written in Korean) for interfaces, state transitions, privacy boundaries and test requirements. The spec predates the mark-to-market guard; sections that changed carry an implementation note.
 
 ## AI tool disclosure
 

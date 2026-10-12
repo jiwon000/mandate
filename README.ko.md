@@ -116,7 +116,6 @@ web/                    화면, 데모 서버, in-process 체인, 라이브 RPC 
 web/deployments/        체인별 배포 기록. 라이브 서버의 시작점
 deploy/systemd/         Linux 호스트용 라이브 데모 유닛
 docs/                   설계 문서, 보안 리뷰, Perpl 어댑터, 제출 자료(docs/submission/)
-mandate-v0.3-frontend/  이전 프론트엔드 설계 스냅샷
 ```
 
 ## 문서

@@ -29,7 +29,7 @@ export class DPReporter {
   /// `signer` authorizes the release on MandateRegistry -- a separate key in
   /// production, though nothing stops them from being the same account in a
   /// demo. `cap`/`clipBound`/`epsilon`/`statsVersion` are the server-fixed
-  /// configuration mandate-technical-spec-v0.2.md 4.3 calls for: cadence and
+  /// configuration docs/technical-spec.md 4.3 calls for: cadence and
   /// epsilon are not something a release can choose for itself.
   constructor({
     reporterSecret,
@@ -56,7 +56,7 @@ export class DPReporter {
   /// decision: `perTradeReturns` and `navSeries` are reconstructed from public
   /// Marked/Executed/EpochSettled events, not from any private watchlist or
   /// pre-settlement intent -- this is "public settlement analytics" and the
-  /// performance leaderboard (mandate-technical-spec-v0.2.md 4.1), not
+  /// performance leaderboard (docs/technical-spec.md 4.1), not
   /// "private demand analytics". epsilonIntentE6 is therefore always 0 here.
   async buildRelease({ epoch, pinnedBlock, perTradeReturns, navSeries }) {
     const clipped = perTradeReturns.map((r) => clip(r, this.clipBound));

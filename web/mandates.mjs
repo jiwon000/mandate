@@ -176,7 +176,7 @@ export const BATCH_SETTLEMENT_WINDOW_SECONDS = 600;
 // DP release tuning for the demo. "epoch" here is just a strictly-increasing
 // release counter, not a wall-clock window like BatchAllocator's -- the spec
 // only requires epoch/pinnedBlock to advance, and giving the Reporter its own
-// clock (mandate-technical-spec-v0.2.md 4.3: cadence is server config) avoids
+// clock (docs/technical-spec.md 4.3: cadence is server config) avoids
 // coupling two independent concepts to the same timer.
 export const REPORT_CLIP_BOUND = 0.1; // 10% per-step return
 export const REPORT_EPSILON = 0.5; // epsilon spent per release's performance stats

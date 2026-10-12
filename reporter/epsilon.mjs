@@ -1,5 +1,5 @@
 // Mirrors MandateRegistry.postLeaderboard()'s own accounting exactly
-// (mandate-technical-spec-v0.2.md core invariant 8), so a release this ledger
+// (docs/technical-spec.md core invariant 8), so a release this ledger
 // accepts is guaranteed postable on-chain and the two can never silently
 // drift apart. `propose()` is read-only; nothing advances until `commit()`
 // runs, which the caller should only do after the transaction actually lands.

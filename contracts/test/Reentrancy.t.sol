@@ -9,9 +9,9 @@ import {DeterministicMockVenue} from "../src/mocks/DeterministicMockVenue.sol";
 import {RiskLimits} from "../src/interfaces/IMandate.sol";
 import {MaliciousReentrantToken} from "./mocks/MaliciousReentrantToken.sol";
 
-/// @notice mandate-technical-spec-v0.2.md 7 ("Reentrancy 및 malicious adapter/token
-///         fuzzing") and invariant #10 ("malicious token/venue callback이 Vault
-///         회계에 reentrancy를 일으킬 수 없다"), exercised against the real
+/// @notice docs/technical-spec.md 7 (reentrancy and malicious token tests) and
+///         invariant #10 ("a malicious token or venue callback cannot re-enter
+///         the vault's accounting"), exercised against the real
 ///         MandateVault with a hostile asset standing in for USDC.
 contract ReentrancyTest is Test {
     MandateVault internal vault;

@@ -397,7 +397,7 @@ export async function startChain() {
 
   // --- DP reporter ----------------------------------------------------------
   //
-  // Plays the Reporter role from mandate-technical-spec-v0.2.md 4: pools
+  // Plays the Reporter role from docs/technical-spec.md 4: pools
   // public per-vault step returns and the market-wide NAV series beat() has
   // been collecting, builds a signed release (reporter/reporter.mjs), and
   // posts it to MandateRegistry. Scoped to public data only (2026-10-04

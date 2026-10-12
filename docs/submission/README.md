@@ -1,6 +1,6 @@
 # Submission status
 
-Mandate's entry for the Monad Metropolis hackathon, Track 1 (Onchain Finance & Trading). This folder holds the texts entered in the submission form, the video scripts and the scripts that produced the demo video. What is built and what is not is described in the root [README](../../README.md) ("Implementation status", "Honest limitations" and "Roadmap"); this page covers the submission only.
+Mandate's entry for the Monad Metropolis hackathon, Track 1 (Onchain Finance & Trading). This folder holds the texts entered in the submission form and the logo. What is built and what is not is described in the root [README](../../README.md) ("Implementation status", "Honest limitations" and "Roadmap"); this page covers the submission only.
 
 - Deadline: 2026-10-13 23:59 ET (2026-10-14 12:59 KST)
 - Last updated: 2026-10-12
@@ -22,7 +22,7 @@ Mandate's entry for the Monad Metropolis hackathon, Track 1 (Onchain Finance & T
 | Pitch | <https://youtu.be/DP9q64eadq0> | 1:42 | Pitch video (limit 2:00) |
 | Perpl bounty | <https://youtu.be/xW7opngMXiU> | 1:37 | Video field of the Perpl bounty (limit 2:00) |
 
-All three are in English, 1280×720, with burned-in captions and a synthetic voice (`edge-tts`). The demo is a recording of the hosted demo with narration ([`demo-video/`](demo-video/README.md)). The pitch is slides with narration. The Perpl video shows the 2026-10-10 agent run and the "Agent runs" table of [`docs/perpl-adapter.md`](../perpl-adapter.md#agent-runs). Korean cuts of the demo (2:39) and the pitch (1:55) exist and are not uploaded. Video files are not kept in the repository.
+All three are in English, 1280×720, with burned-in captions and a synthetic voice (`edge-tts`). The demo is a recording of the hosted demo with narration, made on 2026-10-11. The pitch is slides with narration. The Perpl video shows the 2026-10-10 agent run and the "Agent runs" table of [`docs/perpl-adapter.md`](../perpl-adapter.md#agent-runs). Korean cuts of the demo (2:39) and the pitch (1:55) exist and are not uploaded. Video files are not kept in the repository.
 
 ## Files in this folder
 
@@ -31,15 +31,11 @@ All three are in English, 1280×720, with burned-in captions and a synthetic voi
 | [`description.txt`](description.txt) | Form field "Description" |
 | [`go-to-market.txt`](go-to-market.txt) | Form field "Go-to-market and user acquisition strategy" |
 | [`judge-access.txt`](judge-access.txt) | Form field "Judge access instructions": a walkthrough of the hosted demo |
-| [`demo-video-script.md`](demo-video-script.md) | Narration of the demo video, scene by scene |
-| [`pitch-video-script.md`](pitch-video-script.md) | Script of the pitch video (notes in Korean, narration in English) |
-| [`perpl-bounty-video-script.md`](perpl-bounty-video-script.md) | Narration of the Perpl bounty video (notes in Korean, narration in English) |
-| [`demo-video/`](demo-video/README.md) | Scripts that recorded and edited the demo video (notes in Korean) |
 | [`mandate-logo.png`](mandate-logo.png), [`mandate-logo.source.html`](mandate-logo.source.html) | Logo uploaded to the form (1024×1024) and its source |
 
 The three `.txt` files are the source of the form texts. A change is made in the file first and then pasted into the form, and the form is read back to check that the two match. They were last pasted and checked on 2026-10-11.
 
-The form texts and the scripts were drafted with an AI coding tool (Claude Code). See "AI tool disclosure" in the root README.
+The form texts were drafted with an AI coding tool (Claude Code). See "AI tool disclosure" in the root README.
 
 ## Submission requirements
 

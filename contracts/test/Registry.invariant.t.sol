@@ -5,8 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {MandateRegistry} from "../src/MandateRegistry.sol";
 import {RegistryHandler} from "./handlers/RegistryHandler.sol";
 
-/// @notice Stateful fuzzing of core invariant #8 in mandate-technical-spec-v0.2.md
-///         ("cumulative ε는 단조 증가하고 상한 초과 릴리즈는 거부된다"), now that
+/// @notice Stateful fuzzing of core invariant #8 in docs/technical-spec.md
+///         (cumulative epsilon never decreases and a release past the cap is refused), now that
 ///         MandateRegistry exists to fuzz it against. Invariant #9 (same epoch/
 ///         pinnedBlock digest cannot change) is covered by registry.test.mjs's
 ///         targeted unit tests; the property worth a random-sequence fuzzer is

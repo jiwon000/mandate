@@ -1,4 +1,4 @@
-// The "Privacy Simulator" (mandate-technical-spec-v0.2.md 4.4): an educational
+// The "Privacy Simulator" (docs/technical-spec.md 4.4): an educational
 // tool showing how epsilon trades off against confidence-interval width.
 // Deliberately separated from reporter.mjs/epsilon.mjs at the file level: this
 // module never imports EpsilonLedger, never sees reporterSecret, and never

@@ -10,8 +10,8 @@ import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {RiskLimits} from "../src/interfaces/IMandate.sol";
 import {MandateHandler} from "./handlers/MandateHandler.sol";
 
-/// @notice Stateful fuzzing of core invariant #6 in mandate-technical-spec-v0.2.md
-///         ("핵심 불변식"), restricted to the pieces that exist today: Vault,
+/// @notice Stateful fuzzing of core invariant #6 in docs/technical-spec.md
+///         ("Core invariants"), restricted to the pieces that exist today: Vault,
 ///         RiskGuard and the mock Adapter/venue. Registry invariants are fuzzed
 ///         separately in Registry.invariant.t.sol.
 contract MandateInvariants is Test {

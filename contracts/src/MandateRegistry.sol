@@ -7,7 +7,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms, ReferenceTerms} from "./interfaces/IMandate.sol";
 
 /// @notice Public catalog of registered mandates and the signed anchor point for
-///         DP Reporter releases (mandate-technical-spec-v0.2.md 3.7).
+///         DP Reporter releases (docs/technical-spec.md 3.7).
 /// @dev Two independent trust levels live in one contract:
 ///      - registerAgent() checks a (vault, adapter, limits) tuple against the
 ///        vault's own `riskGuard()` -- never a caller-supplied guard address.
@@ -45,7 +45,7 @@ import {IRiskGuard, IMandateVaultView, RiskLimits, FeeTerms, ReferenceTerms} fro
 ///        epsilon spent computing it are not independently checkable on-chain, so
 ///        they are only accepted with a signature from a single configured
 ///        reporter key. Centralizing this is deliberate, not an oversight:
-///        mandate-technical-spec-v0.2.md 8 lists "Reporter의 탈중앙화" as a stated
+///        docs/technical-spec.md 8 lists reporter decentralisation as a stated
 ///        v1 non-goal. Like claimShares() in BatchAllocator, the call itself is
 ///        relay-friendly -- trust lives in the signature, not in who sends the tx.
 contract MandateRegistry is Ownable, EIP712 {
@@ -307,7 +307,7 @@ contract MandateRegistry is Ownable, EIP712 {
     }
 
     /// @notice Anchor a signed DP release. The statistics themselves are computed
-    ///         and noised off-chain (mandate-technical-spec-v0.2.md 4); this only
+    ///         and noised off-chain (docs/technical-spec.md 4); this only
     ///         checks that the one trusted reporter produced them, that a release
     ///         can never replace an earlier one, and that the epsilon ledger adds
     ///         up (core invariants 8 and 9).

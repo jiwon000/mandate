@@ -1,5 +1,5 @@
 // Deterministic noise derivation for DP releases
-// (mandate-technical-spec-v0.2.md 4.3). The seed is a keyed HMAC so nobody
+// (docs/technical-spec.md 4.3). The seed is a keyed HMAC so nobody
 // without reporterSecret can predict or recompute the actual noise, but the
 // same (secret, domain, epoch, statsVersion) tuple always reproduces the exact
 // same release internally -- that reproducibility is what lets a release be

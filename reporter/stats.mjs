@@ -1,6 +1,6 @@
-// Clipping and statistics for the performance CI (mandate-technical-spec-v0.2.md
-// 4.2): "거래별 return contribution을 [-c, c]로 clipping. epoch별 mean return,
-// Sharpe, realized/max marked drawdown의 DP 통계를 계산한다."
+// Clipping and statistics for the performance CI (docs/technical-spec.md
+// 4.2): per-tick returns are clipped to [-c, c], and the release holds the mean
+// return, Sharpe and marked max drawdown of an epoch.
 
 export function clip(value, bound) {
   if (value > bound) return bound;

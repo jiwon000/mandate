@@ -6,7 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 /// @notice An ERC20 whose transfer hook tries to re-enter the vault holding it.
 /// @dev MockUSDC is honest and cannot exercise this path, so this stand-in exists
 ///      only to prove MandateVault's nonReentrant guards hold even when the asset
-///      itself is malicious (mandate-technical-spec-v0.2.md 7: "malicious
+///      itself is malicious (docs/technical-spec.md 7: "malicious
 ///      adapter/token fuzzing").
 contract MaliciousReentrantToken is ERC20 {
     address public target;
